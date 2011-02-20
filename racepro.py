@@ -153,7 +153,10 @@ def _process_graph(session, graph, proc):
     for info, event, i in proc.events:
         if not isinstance(event, scribe.EventSyscallExtra):
             continue
-        if event.nr in unistd.Syscalls.SYS_fork and event.ret > 0:
+
+        ret = unistd.syscall_ret(event.ret)
+
+        if event.nr in unistd.Syscalls.SYS_fork and ret < 0:
             newpid = event.ret
             parent = node_name(pid, 'fork', newpid)
             child = str(newpid)
@@ -163,7 +166,7 @@ def _process_graph(session, graph, proc):
             graph.add_edge((parent, child), label='fork')
             graph = _process_graph(session, graph, session.process_map[newpid])
             ancestor = parent
-        elif event.nr in unistd.Syscalls.SYS_wait and event.ret < sys.maxint:
+        elif event.nr in unistd.Syscalls.SYS_wait and ret < 0:
             newpid = event.ret
             node = node_name(pid, 'wait', newpid)
             child = node_name(newpid, 'exit', '')

@@ -1,3 +1,12 @@
+import sys
+
+def syscall_ret(ret):
+    """Convert syscall return value from unsigned to signed"""
+    if ret >= sys.maxint:
+        return ret - (sys.maxint + 1) * 2
+    else:
+        return ret
+
 class Syscalls:
 
     NR_restart_syscall  	= 0
@@ -341,4 +350,3 @@ class Syscalls:
     SYS_read = set([NR_read, NR_readv, NR_pread64, NR_preadv])
     SYS_write = set([NR_write, NR_writev, NR_pwrite64, NR_pwritev])
     SYS_creat = set([NR_creat, NR_link, NR_mknod])
-
