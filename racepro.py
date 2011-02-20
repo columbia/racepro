@@ -10,6 +10,8 @@ class Process:
     @name: name of the program
     @events: (ordered) list of events performed by this process
 
+    @sys, @reg: track current syscall/regs events (temporary)
+
     Events are: (info, event, i), where @info and @events are scribe's
     event description, and @i is the index of the event in the global
     events list.
@@ -19,6 +21,8 @@ class Process:
         self.pid = pid
         self.name = '-'
         self.events = list()
+        self.sys = -1
+        self.reg = -1
         
 class Resource:
     """Describe execution log related to a resource isntance.
@@ -66,12 +70,9 @@ class Session:
         m.close()
 
         # @pid and @proc track current process
-        # @sys and @reg track current syscall/regs events
         # @i tracks current index in self.events
         proc = None
         pid = 0
-        sys = -1
-        reg = -1
         i = -1
 
         # parse events
@@ -87,19 +88,19 @@ class Session:
                     proc = Process(pid)
                     self.process_map[pid] = proc
                     self.process_list.append(proc)
-                    continue
+                continue
 
             if pid == 0:
                 self.events_list.append((info, event, None, 0, None, 0, 0, 0))
                 continue;
 
             if isinstance(event, scribe.EventRegs):
-                reg = i
+                proc.reg = i
             elif isinstance(event, scribe.EventSyscallExtra):
-                sys = i
+                proc.sys = i
             elif isinstance(event, scribe.EventSyscallEnd):
-                reg = -1
-                sys = -1
+                proc.reg = -1
+                proc.sys = -1
 
             if isinstance(event, scribe.EventResourceLockExtra):
                 if event.id not in self.resource_map:
@@ -112,7 +113,10 @@ class Session:
             plen = len(proc.events)
             proc.events.append((info, event, i))
 
-            self.events_list.append((info, event, proc, plen, None, 0, sys, reg))
+            self.events_list.append((info, event,
+                                     proc, plen,
+                                     None, 0,
+                                     proc.sys, proc.reg))
 
             if isinstance(event, scribe.EventQueueEof):
                 proc = None
