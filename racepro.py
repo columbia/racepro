@@ -62,6 +62,48 @@ class Session:
     list.
     """
 
+    # order of arguments: ebx, ecx, edx, esi ...
+
+    def parse_syscall(self, i, j):
+        """Parse a syscall event"""
+
+        syscall = self.events_list[i][1]
+        args = self.events_list[j][1].args
+        data = self.events_list[i+1][1]
+        ret = unistd.syscall_ret(syscall.ret)
+
+        if syscall.nr == unistd.Syscalls.NR_open:
+            print('[%d] open("%s", %#x, 0%03u) = %ld' %
+                  (i, data.data, args[1], args[2], ret))
+        if syscall.nr == unistd.Syscalls.NR_close:
+            print('[%d] close(%d) = %ld' %
+                  (i, args[0], ret))
+        if syscall.nr == unistd.Syscalls.NR_access:
+            print('[%d] access("%s", 0%03u) = %ld' %
+                  (i, data.data, args[0], ret))
+        if syscall.nr == unistd.Syscalls.NR_execve:
+            print('[%d] execve("%s", %#x, %#x) = %ld' %
+                  (i, data.data, args[0], args[1], ret))
+        if syscall.nr == unistd.Syscalls.NR_stat:
+            print('[%d] stat("%s", %#x) = %ld' %
+                  (i, data.data, args[0], ret))
+        if syscall.nr == unistd.Syscalls.NR_stat64:
+            print('[%d] stat64("%s", %#x, %#x) = %ld' %
+                  (i, data.data, args[0], args[1], ret))
+
+    def print_process(self, pid):
+        """Print all the events of a process"""
+        try:
+            proc = self.process_map[pid]
+        except KeyError:
+            print('No such process with pid %d' % (pid))
+            return
+
+        for (info, event, i) in proc.events:
+            if isinstance(event, scribe.EventSyscallExtra):
+                ev = self.events_list[i]
+                self.parse_syscall(ev[6], ev[7])
+
     def load_events(self, logfile):
         """Parse the scribe log from @logfile"""
 
