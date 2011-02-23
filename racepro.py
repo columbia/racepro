@@ -73,13 +73,13 @@ class Session:
         ret = unistd.syscall_ret(syscall.ret)
 
         if syscall.nr == unistd.Syscalls.NR_open:
-            print('[%d] open("%s", %#x, 0%03u) = %ld' %
+            print('[%d] open("%s", %#x, %#3o) = %ld' %
                   (i, data.data, args[1], args[2], ret))
         if syscall.nr == unistd.Syscalls.NR_close:
             print('[%d] close(%d) = %ld' %
                   (i, args[0], ret))
         if syscall.nr == unistd.Syscalls.NR_access:
-            print('[%d] access("%s", 0%03u) = %ld' %
+            print('[%d] access("%s", %#3o) = %ld' %
                   (i, data.data, args[0], ret))
         if syscall.nr == unistd.Syscalls.NR_execve:
             print('[%d] execve("%s", %#x, %#x) = %ld' %
@@ -195,10 +195,8 @@ def _process_graph(session, graph, proc):
     for info, event, i in proc.events:
         if not isinstance(event, scribe.EventSyscallExtra):
             continue
-
         ret = unistd.syscall_ret(event.ret)
-
-        if event.nr in unistd.Syscalls.SYS_fork and ret < 0:
+        if event.nr in unistd.Syscalls.SYS_fork and ret >= 0:
             newpid = event.ret
             parent = node_name(pid, 'fork', newpid)
             child = str(newpid)
@@ -208,7 +206,7 @@ def _process_graph(session, graph, proc):
             graph.add_edge((parent, child), label='fork')
             graph = _process_graph(session, graph, session.process_map[newpid])
             ancestor = parent
-        elif event.nr in unistd.Syscalls.SYS_wait and ret < 0:
+        elif event.nr in unistd.Syscalls.SYS_wait and ret >= 0:
             newpid = event.ret
             node = node_name(pid, 'wait', newpid)
             child = node_name(newpid, 'exit', '')
