@@ -180,7 +180,10 @@ class Session:
                 # adjust pointers to event in Resource
                 self.events_list[r[2]] = ev[0:4] + (resource, i) + ev[6:8]
 
-    def save_events(self, logfile, pid_cutoff = None, pid_inject = None):
+    def save_events(self, logfile,
+                    pid_bookmark = None,
+                    pid_cutoff = None,
+                    pid_inject = None):
         """Write the (perhaps modified) scribe log to @logfile
 
         Write out the scribe log while potentially modifying it. Two
@@ -189,17 +192,20 @@ class Session:
         locations (per process) to cut remaining log.
 
         @logfile: output file object (opened for binary write)
-        @pid_cutoff: dictionary (key: pids) to indicate the syscall
-        number at which to cut the log (per process).
-        @pid_inject: dictionary (key: pids) to indicate inject actions
-        to add to the logs (per process). The entries are dictionaries
-        (key: syscall count) with entries as a list of inject actions.
+        @pid_bookmark: indicates the syscall at which to add bookmark
+          { pid:syscall } (negative/positive -> before/after syscall)
+        @pid_inject: indicate actions to inject to the log
+          { pid:[action1,action2,...] }
+        @pid_cutoff: indicate the syscall at which to cut the log
+          { pid:syscall } (negative/positive -> before/after syscall)
         """
 
         pid_active = dict()
         pid_syscall = dict()
         pid_eoq = dict({0:False})
 
+        if pid_bookmark is None:
+            pid_bookmark = dict()
         if pid_inject is None:
             pid_inject = dict()
         if pid_cutoff is None:
@@ -213,6 +219,8 @@ class Session:
                 pid_active[pid] = True
                 pid_syscall[pid] = 0
                 pid_eoq[pid] = False
+                if pid not in pid_bookmark:
+                    pid_bookmark[pid] = 0
                 if pid not in pid_cutoff:
                     pid_cutoff[pid] = 0
                 if pid not in pid_inject:
@@ -225,11 +233,39 @@ class Session:
             if not pid_active[pid]:
                 continue
 
+            # ignore original bookmarks
+            if isinstance(event, scribe.EventBookmark):
+                continue
+
+            if isinstance(event, scribe.EventSyscallEnd):
+                if pid_syscall[pid] == pid_bookmark[pid]:
+                    print('[%d] add bookmark after syscall %d' \
+                              % (pid, pid_syscall[pid]))
+                    e = scribe.EventBookmark()
+                    e.id = 0
+                    e.npr = len(pid_bookmark)
+                    logfile.write(e.encode())
+                    pid_active[pid] = False
+                    continue;
+
             if isinstance(event, scribe.EventSyscallExtra):
                 pid_syscall[pid] += 1
+
+                # pid bookmark ?
+                if pid_syscall[pid] == -pid_bookmark[pid]:
+                    print('[%d] add bookmark before syscall %d' \
+                              % (pid, -pid_syscall[pid]))
+                    e = scribe.EventBookmark()
+                    e.id = 0
+                    e.npr = len(pid_bookmark)
+                    logfile.write(e.encode())
+                    pid_active[pid] = False
+                    continue;
+
                 # pid inject ?
                 if pid_syscall[pid] in pid_inject[pid]:
-                    print('[%d] inject at syscall %d' % (pid, pid_syscall[pid]))
+                    print('[%d] inject at syscall %d' \
+                              % (pid, pid_syscall[pid]))
                     for a in pid_inject[pid].itervalues():
                         e = scribe.EventInjectAction()
                         e.action = a.action
@@ -240,7 +276,8 @@ class Session:
 
                 # pid enough ?
                 if pid_syscall[pid] == pid_cutoff[pid]:
-                    print('[%d] cutoff at syscall %d' % (pid, pid_cutoff[pid]))
+                    print('[%d] cutoff at syscall %d' \
+                              % (pid, pid_cutoff[pid]))
                     pid_active[pid] = False
                     continue
 
@@ -367,6 +404,6 @@ if __name__ == "__main__":
         except:
             print('Failed to open output file')
             exit(1)
-        s.save_events(f, pid_cutoff, pid_inject)
+        s.save_events(f, None, pid_cutoff, pid_inject)
 
     exit(0)
