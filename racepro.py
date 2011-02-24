@@ -42,6 +42,13 @@ class Resource:
         self.id = event.id
         self.events = list()
 
+class Action:
+    """Describe an action to be injected into a log"""
+
+    def __init__(self, action = None, arg1 = None):
+        self.action = action
+        self.arg1 = arg1
+
 class Session:
     """Describe exceution log of an entire session.
 
@@ -172,6 +179,85 @@ class Session:
                 ev = self.events_list[r[2]]
                 # adjust pointers to event in Resource
                 self.events_list[r[2]] = ev[0:4] + (resource, i) + ev[6:8]
+
+    def save_events(self, logfile, pid_cutoff = None, pid_inject = None):
+        """Write the (perhaps modified) scribe log to @logfile
+
+        Write out the scribe log while potentially modifying it. Two
+        types of modifications exist: "inject", to inject new events
+        (per process) into the log , and "cutoff", which specifies
+        locations (per process) to cut remaining log.
+
+        @logfile: output file object (opened for binary write)
+        @pid_cutoff: dictionary (key: pids) to indicate the syscall
+        number at which to cut the log (per process).
+        @pid_inject: dictionary (key: pids) to indicate inject actions
+        to add to the logs (per process). The entries are dictionaries
+        (key: syscall count) with entries as a list of inject actions.
+        """
+
+        pid_active = dict()
+        pid_syscall = dict()
+        pid_eoq = dict({0:False})
+
+        if pid_inject is None:
+            pid_inject = dict()
+        if pid_cutoff is None:
+            pid_cutoff = dict()
+
+        for (info, event) in (e[0:2] for e in self.events_list):
+            pid = info.pid
+
+            # pid first time ?
+            if pid not in pid_active:
+                pid_active[pid] = True
+                pid_syscall[pid] = 0
+                pid_eoq[pid] = False
+                if pid not in pid_cutoff:
+                    pid_cutoff[pid] = 0
+                if pid not in pid_inject:
+                    pid_inject[pid] = dict()
+
+            assert not pid_eoq[pid] or pid == 0, \
+                'Event for pid %d after eoq' % (pid)
+
+            # pid inactive ?
+            if not pid_active[pid]:
+                continue
+
+            if isinstance(event, scribe.EventSyscallExtra):
+                pid_syscall[pid] += 1
+                # pid inject ?
+                if pid_syscall[pid] in pid_inject[pid]:
+                    print('[%d] inject at syscall %d' % (pid, pid_syscall[pid]))
+                    for a in pid_inject[pid].itervalues():
+                        e = scribe.EventInjectAction()
+                        e.action = a.action
+                        e.arg1 = a.arg1
+                        logfile.write(e.encode())
+                    pid_active[pid] = False
+                    continue
+
+                # pid enough ?
+                if pid_syscall[pid] == pid_cutoff[pid]:
+                    print('[%d] cutoff at syscall %d' % (pid, pid_cutoff[pid]))
+                    pid_active[pid] = False
+                    continue
+
+            if isinstance(event, scribe.EventQueueEof):
+                pid_eoq[pid] = True
+                pid_active[pid] = False
+
+            logfile.write(event.encode())
+
+        # indicate go-live where needed
+        for pid in pid_active:
+            if not pid_eoq[pid]:
+                e = scribe.EventPid()
+                e.pid = pid
+                logfile.write(e.encode())
+                e = scribe.EventQueueEof()
+                logfile.write(e.encode())
 
     def __init__(self):
         self.process_map = dict()
