@@ -2,6 +2,7 @@ import sys
 import mmap
 import scribe
 import unistd
+import networkx
 
 class Process:
     """Describe execution log of a single process.
@@ -295,6 +296,58 @@ class Session:
                 logfile.write(e.encode())
                 e = scribe.EventQueueEof()
                 logfile.write(e.encode())
+
+    def __make_node(self, pid, syscall):
+        return str(pid) + ':' + str(syscall)
+
+    def __build_graph(self, graph, proc):
+        """Build the execution DAG from the execution log, as follows:
+        - The first node is '0'
+        - New processes begin with a node 'pid'
+        - Syscalls add a node 'pid:syscall' (and edge from previous)
+        - Syscall fork() creates a new process and an edge to it 
+        - Syscall exit() adds a node 'pid:exit' (and edge from previous)
+        - Syscall wait() adds an edge from the child's exit() syscall
+        - Node attribute 'event=str(I)' for event index in global list
+        - Resource access add edge from the previous user to current
+        (note: attributes must be strings)
+        """
+        syscall = 0
+        pid = proc.pid
+        ancestor = str(pid)
+        for info, event, i in proc.events:
+            if not isinstance(event, scribe.EventSyscallExtra):
+                continue
+            syscall += 1
+            if event.nr in unistd.Syscalls.SYS_fork and event.ret >= 0:
+                newpid = event.ret
+                parent = self.__make_node(pid, syscall)
+                graph.add_node(parent, index=str(i))
+                graph.add_edge(ancestor, parent)
+                child = str(newpid)
+                graph.add_node(child)
+                graph.add_edge(parent, child)
+                graph = self.__build_graph(graph, self.process_map[newpid])
+                ancestor = parent
+            elif event.nr in unistd.Syscalls.SYS_wait and event.ret >= 0:
+                newpid = event.ret
+                node = self.__make_node(pid, syscall)
+                graph.add_node(node, index=str(i))
+                graph.add_edge(ancestor, node)
+                child = self.__make_node(newpid, 'exit')
+                graph.add_edge(child, node)
+                ancestor = node
+            elif event.nr in unistd.Syscalls.SYS_exit:
+                node = self.__make_node(pid, 'exit')
+                graph.add_node(node, index=str(i))
+                graph.add_edge(ancestor, node)
+        return graph
+
+    def make_graph(self):
+        graph = networkx.DiGraph()
+        graph.add_node('1')
+        self.__build_graph(graph, self.process_list[0])  # processes
+        return graph
 
     def __init__(self):
         self.process_map = dict()
