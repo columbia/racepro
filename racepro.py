@@ -425,7 +425,7 @@ if __name__ == "__main__":
     parser.disable_interspersed_args()
     (options, cmd) = parser.parse_args()
 
-    if len(cmd) > 1 or cmd[0] not in ['graph', 'inject']:
+    if len(cmd) > 1 or cmd[0] not in ['graph', 'inject', 'test']:
         parser.error('Unknown command')
 
     if not options.logfile:
@@ -458,5 +458,9 @@ if __name__ == "__main__":
             print('Failed to open output file')
             exit(1)
         s.save_events(f, None, pid_cutoff, pid_inject)
+    elif cmd[0] == 'test':
+        g = s.make_graph()
+        print(networkx.convert.to_edgelist(g))
+        networkx.write_dot(g, options.outfile)
 
     exit(0)
