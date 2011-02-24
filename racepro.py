@@ -321,23 +321,52 @@ def process_graph(session):
 if __name__ == "__main__":
 
     import sys
+    from optparse import OptionParser
 
-    if len(sys.argv) != 3:
-        print('Usage: racepro.py logfile image')
-        print('  @logfile: input log file')
-        print('  @image: output process call graph')
-        exit(1)
+    usage = 'usage: %prog [options] graph|inject'
+    desc = 'Process and modify scribe execution log'
+    parser = OptionParser(usage=usage, description=desc)
+
+    parser.add_option('-i', '--input', dest='logfile', metavar='FILE',
+                      help='Read the recorded execution from FILE')
+    parser.add_option('-o', '--output', dest='outfile', metavar='FILE',
+                      help='Write the output graph or execution to FILE')
+
+    parser.disable_interspersed_args()
+    (options, cmd) = parser.parse_args()
+
+    if len(cmd) > 1 or cmd[0] not in ['graph', 'inject']:
+        parser.error('Unknown command')
+
+    if not options.logfile:
+        parser.error('Input logfile not specificed')
+    if not options.outfile:
+        parser.error('Output file not specified')
 
     try:
-        f = open(sys.argv[1], 'r')
+        f = open(options.logfile, 'r')
     except:
         print('Failed to open log file')
         exit(1)
 
     s = Session()
     s.load_events(f)
-    g = process_graph(s)
-    g.layout(prog='dot')
-    g.draw(sys.argv[2])
+
+    if cmd[0] == 'graph':
+        g = process_graph(s)
+        g.layout(prog='dot')
+        g.draw(options.outfile)
+    elif cmd[0] == 'inject':
+        a1 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 1000)
+        a2 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 2000)
+        actions = { 10:a1, 20:a2 }
+        pid_inject = { 1:actions }
+        pid_cutoff = { 2:25 }
+        try:
+            f = open(options.outfile, 'wb')
+        except:
+            print('Failed to open output file')
+            exit(1)
+        s.save_events(f, pid_cutoff, pid_inject)
 
     exit(0)
