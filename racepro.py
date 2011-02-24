@@ -170,7 +170,8 @@ class Session:
             for r in resource.events:
                 i += 1
                 ev = self.events_list[r[2]]
-                self.events_list[r[2]] = (ev[0:3], resource, i)
+                # adjust pointers to event in Resource
+                self.events_list[r[2]] = ev[0:4] + (resource, i) + ev[6:8]
 
     def __init__(self):
         self.process_map = dict()
