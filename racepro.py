@@ -3,6 +3,7 @@ import mmap
 import scribe
 import unistd
 import networkx
+import vclock
 
 class ProcessEvent:
     """An event from the point of view of a process:
@@ -11,13 +12,14 @@ class ProcessEvent:
     @index: index of event in global log
     @syscnt: syscall count (per process)
     """
-    __slots__ = ('info', 'event', 'index', 'syscnt')
+    __slots__ = ('info', 'event', 'index', 'syscnt', 'clock')
 
     def __init__(self, info, event, index, syscnt):
         self.info = info
         self.event = event
         self.index = index
         self.syscnt = syscnt
+        self.clock = None
 
 class Process:
     """Describe execution log of a single process.
@@ -435,6 +437,43 @@ class Session:
 
         return graph
 
+    def vclock_graph(self, graph):
+        vclocks = dict()
+
+        proc = self.process_list[0]
+        vclocks[(proc, '1')] = vclock.VectorClock(proc.pid)
+
+        nodes = set()
+        nodes.add((proc, '1'))
+
+        while nodes:
+            (proc, index) = nodes.pop()
+            if index < 0:
+                n = self.__make_node(proc.pid, 'exit')
+            else:
+                n = self.__make_node(proc.pid, index)
+
+            tick = False
+            for nn in graph.neighbors(n):
+                (p, nindex) = nn.split(':')
+                next = self.process_map[int(p)]
+                if (next, nindex) not in nodes:
+                    clock = vclock.VectorClock(next.pid, vclocks[(proc, index)])
+                    vclocks[(next, nindex)] = clock
+                if next.pid != proc.pid:
+                    tick = True
+
+            print('--')
+            for nn in graph.neighbors(n):
+                (p, nindex) = nn.split(':')
+                next = self.process_map[int(p)]
+                vclocks[(next, nindex)].merge(vclocks[(proc, index)])
+                nodes.add((next, nindex))
+                if tick:
+                    vclocks[(next, nindex)].tick(proc.pid)
+
+        return vclocks
+
     def __init__(self):
         self.process_map = dict()
         self.process_list = list()
@@ -487,6 +526,10 @@ if __name__ == "__main__":
         g = s.make_graph(True, True)
         print(networkx.convert.to_edgelist(g))
         networkx.write_dot(g, options.outfile + '-full.dot')
+        vclock = s.vclock_graph(g)
+        for k in vclock.keys():
+            print('%s -> %s' % (k, vclock[k].clocks))
+
     elif cmd[0] == 'inject':
         a1 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 1000)
         a2 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 2000)
