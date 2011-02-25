@@ -31,6 +31,17 @@ class Process:
     """
     __slots__ = ('pid', 'name', 'events', 'count', 'sysind', 'regind')
 
+    def next_syscall(self, index):
+        """Find the next syscall in a process events log"""
+        event = self.events[index]
+        if event.nr in unistd.Syscalls.SYS_exit:
+            return -1
+        while True:
+            index += 1
+            event = self.events[index]
+            if isinstance(event, scribe.EventSyscallExtra):
+                return index
+
     def __init__(self, pid):
         self.pid = pid
         self.name = None
@@ -474,6 +485,57 @@ class Session:
                     vclocks[(next, nindex)].tick(proc.pid)
 
         return vclocks
+
+    def crosscut_graph(self, graph, vclock, node1, node2):
+        """Given two nodes in the graph, find a consistent crosscut
+        that includes these nodes, and return a bookmark dictionary
+        that describes it.
+        """
+
+        (p, i) = node1.split(':')
+        proc1 = self.process_map[int(p)]
+        index1 = int(i)
+        vclock1 = vclock[(proc1, i)]
+
+        (p, i) = node2.split(':')
+        proc2 = self.process_map[int(p)]
+        index2 = int(i)
+        vclock2 = vclock[(proc2, i)]
+
+        nodes = dict()
+        nodes[proc1.pid] = index1
+        nodes[proc2.pid] = index2
+
+        for proc in self.process_list:
+            if proc == proc1 or proc == proc2:
+                continue
+
+            pindex = proc.next_syscall(0)
+            vclock = vclocks[(proc, proc.events[pindex].syscnt)]
+
+            tproc = None
+            while True:
+                nindex = proc.next_syscall(pindex)
+                if nindex < 0:
+                    break;
+
+                vclock = vclocks[(proc, proc.events[nindex].syscnt)]
+                if vclock.race(vclock1) and vclock.race(vclock2):
+                    tproc = proc
+                    tindex = index
+                    break;
+
+            if tproc:
+                nodes[tproc.pid] = tindex
+
+        bookmarks = dict()
+
+        for pid in nodes.keys():
+            n = self.__make_node(pid, nodes[pid])
+            att = graph.node[n]
+            bookmarks[pid] = int(att['index'])
+
+        return bookmarks
 
     def __init__(self):
         self.process_map = dict()
