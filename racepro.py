@@ -12,14 +12,13 @@ class ProcessEvent:
     @index: index of event in global log
     @syscnt: syscall count (per process)
     """
-    __slots__ = ('info', 'event', 'index', 'syscnt', 'clock')
+    __slots__ = ('info', 'event', 'index', 'syscnt')
 
     def __init__(self, info, event, index, syscnt):
         self.info = info
         self.event = event
         self.index = index
         self.syscnt = syscnt
-        self.clock = None
 
 class Process:
     """Describe execution log of a single process.
