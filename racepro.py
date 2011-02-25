@@ -115,6 +115,14 @@ class Session:
     @events_list: list of all events (pointers to Process/Resources)
     """
 
+    # helpers
+
+    def r_ev_to_proc(self, r_ev):
+        return self.events_list[r_ev.index].proc
+
+    def r_ev_to_pindex(self, r_ev):
+        return self.events_list[r_ev.index].pindex
+
     # order of arguments: ebx, ecx, edx, esi ...
 
     def parse_syscall(self, i, j):
@@ -365,7 +373,6 @@ class Session:
         - Resource access add edge from the previous user to current
         (note: attributes must be strings)
         """
-        print(full)
         pid = proc.pid
         ancestor = str(pid)
         for p_ev in proc.events:
@@ -377,7 +384,7 @@ class Session:
                 parent = self.__make_node(pid, p_ev.syscnt)
                 graph.add_node(parent, index=str(p_ev.index))
                 graph.add_edge(ancestor, parent)
-                child = str(newpid)
+                child = self.__make_node(newpid, 0)
                 graph.add_node(child)
                 graph.add_edge(parent, child)
                 self.__build_graph(graph, self.process_map[newpid], full)
@@ -396,28 +403,24 @@ class Session:
                 graph.add_edge(ancestor, node)
                 ancestor = node
             elif full:
-                node = self.__make_node(pid, str(p_ev.syscnt))
+                node = self.__make_node(pid, p_ev.syscnt)
                 graph.add_node(node, index=str(p_ev.index))
                 graph.add_edge(ancestor, node)
                 ancestor = node
 
     def __refine_graph(self, graph):
         for resource in self.resource_list:
-            r_ev = resource.events[0]
-            p_proc = self.events_list[r_ev.index].proc
-            p_pind = self.events_list[r_ev.index].pindex
-
+            prev = self.r_ev_to_proc(resource.events[0])
+            pind = self.r_ev_to_pindex(resource.events[0])
             for r_ev in resource.events:
-                n_proc = self.events_list[r_ev.index].proc
-                n_pind = self.events_list[r_ev.index].pindex
-                if n_proc != p_proc:
-                    src = self.__make_node(p_proc.pid,
-                                           str(p_proc.events[p_pind].syscnt))
-                    dst = self.__make_node(n_proc.pid,
-                                           str(n_proc.events[n_pind].syscnt))
+                next = self.r_ev_to_proc(r_ev)
+                nind = self.r_ev_to_pindex(r_ev)
+                if prev != next:
+                    src = self.__make_node(prev.pid, prev.events[pind].syscnt)
+                    dst = self.__make_node(next.pid, next.events[nind].syscnt)
                     graph.add_edge(src, dst)
-                    p_proc = n_proc
-                    p_pind = n_pind
+                prev = next
+                pind = nind
 
     def make_graph(self, full=False, refine=False):
         graph = networkx.DiGraph()
