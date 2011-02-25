@@ -592,6 +592,10 @@ if __name__ == "__main__":
         vclock = s.vclock_graph(g)
         for k in vclock.keys():
             print('%s -> %s' % (k, vclock[k].clocks))
+        node1 = (s.process_map[1], 3)
+        node2 = (s.process_map[2], 4)
+        bookmarks = s.crosscut_graph(g, vclock, '1:3', '2:4')
+        print(bookmarks)
 
     elif cmd[0] == 'inject':
         a1 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 1000)
