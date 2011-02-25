@@ -384,7 +384,7 @@ class Session:
             if event.nr in unistd.Syscalls.SYS_fork and event.ret >= 0:
                 newpid = event.ret
                 parent = self.__make_node(pid, p_ev.syscnt)
-                graph.add_node(parent, index=str(p_ev.index))
+                graph.add_node(parent, index=str(p_ev.index), type='fork')
                 graph.add_edge(ancestor, parent)
                 child = self.__make_node(newpid, 0)
                 graph.add_node(child)
@@ -401,7 +401,7 @@ class Session:
                 ancestor = node
             elif event.nr in unistd.Syscalls.SYS_exit:
                 node = self.__make_node(pid, 'exit')
-                graph.add_node(node, index=str(p_ev.index))
+                graph.add_node(node, index=str(p_ev.index), type='exit')
                 graph.add_edge(ancestor, node)
                 ancestor = node
             elif full:
@@ -437,7 +437,7 @@ class Session:
 
         return graph
 
-    def vclock_graph(self, graph):
+    def vclock_graph(self, graph, full=False):
         vclocks = dict()
 
         proc = self.process_list[0]
@@ -454,6 +454,7 @@ class Session:
                 n = self.__make_node(proc.pid, index)
 
             tick = False
+
             for nn in graph.neighbors(n):
                 (p, nindex) = nn.split(':')
                 next = self.process_map[int(p)]
@@ -461,9 +462,9 @@ class Session:
                     clock = vclock.VectorClock(next.pid, vclocks[(proc, index)])
                     vclocks[(next, nindex)] = clock
                 if next.pid != proc.pid:
-                    tick = True
+                    if full or 'type' in graph.node[nn]:
+                        tick = True
 
-            print('--')
             for nn in graph.neighbors(n):
                 (p, nindex) = nn.split(':')
                 next = self.process_map[int(p)]
