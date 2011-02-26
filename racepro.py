@@ -546,6 +546,67 @@ class Session:
 
         return bookmarks
 
+    def __races_accesses(self, access):
+        """Given vclocks of a resource per process (increasing order),
+        find resources races:
+
+        For each two processes, iterate in parallel over accesses and
+        find those that are neither before nor after each other. Each
+        such race is reported as (vclock1, index1, vclock2, index2).
+
+        This works because, given two process A[1..n] and B[1..m]:
+        - for i < j:  Ai < Aj,  Bi < Bj
+        - for i, j:   Ai < Bj  or  Ai > Bj  or  Ai || Bj
+        - the relations '<' and '||' are transitive
+        """
+        races = list()
+
+        for k1, k2 in combinations(access, 2):
+            q1, q2 = access[k1], access[k2]
+
+            n, m = 0, 0
+            while n < len(q1) and m < len(q2):
+                vc1, i1 = q1[n]
+                vc2, i2 = q2[m]
+                if vc1.before(vc2):
+                    n += 1
+                elif vc2.before(vc1):
+                    m += 1
+                else:
+                    for vc3, i3 in q2[m:]:
+                        if vc1.before(vc3):
+                            break
+                        races.append((vc1, i1, vc3, i3))
+                    n += 1
+
+        return races
+
+    def races_resources(self, vclocks):
+        """Given vclocks of all syscalls, find resources races:
+        For each resource, iterate through its events and accumuldate
+        them in a per-process list - stored in @access dictionary,
+        such theat access[pid] is a list of (vclock, index) tuples of
+        the events and their vector-clocks belonging to that process.
+        This is passsed to __races_accesses() which returns a list of
+        actual races: (vclock1, index1, vclock2, index2)
+        """
+        races = list()
+
+        for resource in self.resource_list:
+            access = dict(map(lambda k: (k, list()), self.process_map.keys()))
+
+            # track accesses per process
+            for r_ev in resource.events:
+                proc, index = self.r_ev_to_proc(r_ev, sysind=True)
+                p_ev = proc.events[index]
+                node = self.__make_node(proc.pid, p_ev.syscnt)
+                vc = vclocks[(proc, str(p_ev.syscnt))]
+                access[proc.pid].append((vc, r_ev.index))
+
+            races.extend(self.__races_accesses(access))
+
+        return races
+
     def __init__(self):
         self.process_map = dict()
         self.process_list = list()
@@ -574,7 +635,8 @@ if __name__ == "__main__":
     parser.disable_interspersed_args()
     (options, cmd) = parser.parse_args()
 
-    if len(cmd) > 1 or cmd[0] not in ['graph', 'inject']:
+    commands = ['graph', 'inject', 'races']
+    if len(cmd) > 1 or cmd[0] not in commands:
         parser.error('Unknown command')
 
     if not options.logfile:
@@ -598,12 +660,12 @@ if __name__ == "__main__":
         g = s.make_graph(True, True)
         print(networkx.convert.to_edgelist(g))
         networkx.write_dot(g, options.outfile + '-full.dot')
-        vclock = s.vclock_graph(g)
-        for k in vclock.keys():
-            print('%s -> %s' % (k, vclock[k].clocks))
+        vclocks = s.vclock_graph(g)
+        for k in vclocks.keys():
+            print('%s -> %s' % (k, vclocks[k].clocks))
         node1 = (s.process_map[1], 3)
         node2 = (s.process_map[2], 4)
-        bookmarks = s.crosscut_graph(g, vclock, '1:3', '2:4')
+        bookmarks = s.crosscut_graph(g, vc_dict, '1:3', '2:4')
         print(bookmarks)
 
     elif cmd[0] == 'inject':
@@ -618,5 +680,28 @@ if __name__ == "__main__":
             print('Failed to open output file')
             exit(1)
         s.save_events(f, None, pid_cutoff, pid_inject)
+
+    if cmd[0] == 'races':
+        g = s.make_graph(full=True, resources=True)
+        print('graph: %s' % networkx.convert.to_edgelist(g))
+        networkx.write_dot(g, options.outfile + '-full.dot')
+        vclocks = s.vclock_graph(g)
+        print('')
+        sys.stdout.write('vclock: ')
+        for k in vclocks.keys():
+            print('%s, %s -> %s  ' % (k[0].pid, str(k[1]), vclocks[k].clocks))
+        races = s.races_resources(vclocks)
+        print('')
+        print('races: %s' % races)
+        for vc1, i1, vc2, i2 in races:
+            p1 = s.events_list[i1].proc
+            e1 = s.events_list[i1].event
+            i1 = s.events_list[i1].pindex
+            p2 = s.events_list[i2].proc
+            e2 = s.events_list[i2].event
+            i2 = s.events_list[i2].pindex
+            print('proc %d syscall %s rid %d <->  proc %d syscall %s rid %d' \
+                  % (p1.pid, str(p1.events[i1].syscnt), e1.id,
+                     p2.pid, str(p2.events[i2].syscnt), e2.id))
 
     exit(0)
