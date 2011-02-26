@@ -618,12 +618,65 @@ class Session:
 # main
 #
 
+def __test_graph(s):
+    g = s.make_graph(False, False)
+    print(networkx.convert.to_edgelist(g))
+    networkx.write_dot(g, options.outfile + '-proc.dot')
+    g = s.make_graph(True, True)
+    print(networkx.convert.to_edgelist(g))
+    networkx.write_dot(g, options.outfile + '-full.dot')
+    vclocks = s.vclock_graph(g)
+    for k in vclocks.keys():
+        print('%s -> %s' % (k, vclocks[k].clocks))
+    node1 = (s.process_map[1], 3)
+    node2 = (s.process_map[2], 4)
+    bookmarks = s.crosscut_graph(g, vc_dict, '1:3', '2:4')
+    print(bookmarks)
+    return(0)
+
+def __test_inject(s):
+    a1 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 1000)
+    a2 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 2000)
+    actions = { 10:a1, 20:a2 }
+    pid_inject = { 1:actions }
+    pid_cutoff = { 2:25 }
+    try:
+        f = open(options.outfile, 'wb')
+    except:
+        print('Failed to open output file')
+        exit(1)
+    s.save_events(f, None, pid_cutoff, pid_inject)
+    return(0)
+
+def __test_races(s):
+    g = s.make_graph(full=True, resources=True)
+    print('graph: %s' % networkx.convert.to_edgelist(g))
+    networkx.write_dot(g, options.outfile + '-full.dot')
+    vclocks = s.vclock_graph(g)
+    print('')
+    sys.stdout.write('vclock: ')
+    for k in vclocks.keys():
+        print('%s, %s -> %s  ' % (k[0].pid, str(k[1]), vclocks[k].clocks))
+    races = s.races_resources(vclocks)
+    print('')
+    print('races: %s' % races)
+    for vc1, i1, vc2, i2 in races:
+        p1 = s.events_list[i1].proc
+        e1 = s.events_list[i1].event
+        i1 = s.events_list[i1].pindex
+        p2 = s.events_list[i2].proc
+        e2 = s.events_list[i2].event
+        i2 = s.events_list[i2].pindex
+        print('proc %d syscall %s rid %d <->  proc %d syscall %s rid %d' \
+                  % (p1.pid, str(p1.events[i1].syscnt), e1.id,
+                     p2.pid, str(p2.events[i2].syscnt), e2.id))
+
 if __name__ == "__main__":
 
     import sys
     from optparse import OptionParser
 
-    usage = 'usage: %prog [options] graph|inject'
+    usage = 'usage: %prog [options] graph|inject|races'
     desc = 'Process and modify scribe execution log'
     parser = OptionParser(usage=usage, description=desc)
 
@@ -635,7 +688,12 @@ if __name__ == "__main__":
     parser.disable_interspersed_args()
     (options, cmd) = parser.parse_args()
 
-    commands = ['graph', 'inject', 'races']
+    commands = {
+        'test-graph':__test_graph,
+        'test-races':__test_races,
+        'test-inject':__test_inject,
+        }
+
     if len(cmd) > 1 or cmd[0] not in commands:
         parser.error('Unknown command')
 
@@ -653,55 +711,5 @@ if __name__ == "__main__":
     s = Session()
     s.load_events(f)
 
-    if cmd[0] == 'graph':
-        g = s.make_graph(False, False)
-        print(networkx.convert.to_edgelist(g))
-        networkx.write_dot(g, options.outfile + '-proc.dot')
-        g = s.make_graph(True, True)
-        print(networkx.convert.to_edgelist(g))
-        networkx.write_dot(g, options.outfile + '-full.dot')
-        vclocks = s.vclock_graph(g)
-        for k in vclocks.keys():
-            print('%s -> %s' % (k, vclocks[k].clocks))
-        node1 = (s.process_map[1], 3)
-        node2 = (s.process_map[2], 4)
-        bookmarks = s.crosscut_graph(g, vc_dict, '1:3', '2:4')
-        print(bookmarks)
-
-    elif cmd[0] == 'inject':
-        a1 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 1000)
-        a2 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 2000)
-        actions = { 10:a1, 20:a2 }
-        pid_inject = { 1:actions }
-        pid_cutoff = { 2:25 }
-        try:
-            f = open(options.outfile, 'wb')
-        except:
-            print('Failed to open output file')
-            exit(1)
-        s.save_events(f, None, pid_cutoff, pid_inject)
-
-    if cmd[0] == 'races':
-        g = s.make_graph(full=True, resources=True)
-        print('graph: %s' % networkx.convert.to_edgelist(g))
-        networkx.write_dot(g, options.outfile + '-full.dot')
-        vclocks = s.vclock_graph(g)
-        print('')
-        sys.stdout.write('vclock: ')
-        for k in vclocks.keys():
-            print('%s, %s -> %s  ' % (k[0].pid, str(k[1]), vclocks[k].clocks))
-        races = s.races_resources(vclocks)
-        print('')
-        print('races: %s' % races)
-        for vc1, i1, vc2, i2 in races:
-            p1 = s.events_list[i1].proc
-            e1 = s.events_list[i1].event
-            i1 = s.events_list[i1].pindex
-            p2 = s.events_list[i2].proc
-            e2 = s.events_list[i2].event
-            i2 = s.events_list[i2].pindex
-            print('proc %d syscall %s rid %d <->  proc %d syscall %s rid %d' \
-                  % (p1.pid, str(p1.events[i1].syscnt), e1.id,
-                     p2.pid, str(p2.events[i2].syscnt), e2.id))
-
-    exit(0)
+    ret = commands[cmd[0]](s)
+    exit(ret)
