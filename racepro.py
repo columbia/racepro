@@ -3,7 +3,8 @@ import mmap
 import scribe
 import unistd
 import networkx
-import vclock
+from itertools import combinations
+from vectorclock import VectorClock
 
 class ProcessEvent:
     """An event from the point of view of a process:
@@ -129,11 +130,12 @@ class Session:
 
     # helpers
 
-    def r_ev_to_proc(self, r_ev):
-        return self.events_list[r_ev.index].proc
-
-    def r_ev_to_pindex(self, r_ev):
-        return self.events_list[r_ev.index].pindex
+    def r_ev_to_proc(self, r_ev, sysind=False):
+        if sysind:
+            s_ev = self.events_list[r_ev.sysind]
+        else:
+            s_ev = self.events_list[r_ev.index]
+        return (s_ev.proc, s_ev.pindex)
 
     # order of arguments: ebx, ecx, edx, esi ...
 
@@ -214,8 +216,11 @@ class Session:
             if isinstance(event, scribe.EventRegs):
                 proc.regind = ind
             elif isinstance(event, scribe.EventSyscallExtra):
-                proc.syscnt += 1
                 proc.sysind = ind
+                if event.nr in unistd.Syscalls.SYS_exit:
+                    proc.syscnt = 'exit'
+                else:
+                    proc.syscnt += 1
             elif isinstance(event, scribe.EventSyscallEnd):
                 proc.regind = -1
                 proc.sysind = -1
@@ -386,7 +391,7 @@ class Session:
         (note: attributes must be strings)
         """
         pid = proc.pid
-        ancestor = str(pid)
+        ancestor = self.__make_node(pid, 0)
         for p_ev in proc.events:
             event = p_ev.event
             if not isinstance(event, scribe.EventSyscallExtra):
@@ -398,7 +403,7 @@ class Session:
                 graph.add_edge(ancestor, parent)
                 child = self.__make_node(newpid, 0)
                 graph.add_node(child)
-                graph.add_edge(parent, child)
+                graph.add_edge(parent, child, type='fork')
                 self.__build_graph(graph, self.process_map[newpid], full)
                 ancestor = parent
             elif event.nr in unistd.Syscalls.SYS_wait and event.ret >= 0:
@@ -407,7 +412,7 @@ class Session:
                 graph.add_node(node, index=str(p_ev.index))
                 graph.add_edge(ancestor, node)
                 child = self.__make_node(newpid, 'exit')
-                graph.add_edge(child, node)
+                graph.add_edge(child, node, type='exit')
                 ancestor = node
             elif event.nr in unistd.Syscalls.SYS_exit:
                 node = self.__make_node(pid, 'exit')
@@ -420,48 +425,54 @@ class Session:
                 graph.add_edge(ancestor, node)
                 ancestor = node
 
-    def __refine_graph(self, graph):
+    def __resources_graph(self, graph):
+        """Add dependencies due to resources to an execution graph"""
         for resource in self.resource_list:
-            prev = self.r_ev_to_proc(resource.events[0])
-            pind = self.r_ev_to_pindex(resource.events[0])
+            prev, pind = self.r_ev_to_proc(resource.events[0])
             for r_ev in resource.events:
-                next = self.r_ev_to_proc(r_ev)
-                nind = self.r_ev_to_pindex(r_ev)
+                next, nind = self.r_ev_to_proc(r_ev)
                 if prev != next:
                     src = self.__make_node(prev.pid, prev.events[pind].syscnt)
                     dst = self.__make_node(next.pid, next.events[nind].syscnt)
-                    graph.add_edge(src, dst)
+                    if dst not in graph[src]:
+                        graph.add_edge(src, dst, resource=str(r_ev.event.id))
                 prev = next
                 pind = nind
 
-    def make_graph(self, full=False, refine=False):
+    def make_graph(self, full=False, resources=False):
+        """Build the execution DAG from the execution log.
+        @full: if True, include all syscalls, else only fork/wait/exit
+        @resources: if True, add dependencies induced by resources
+        Return a graph.
+        """
         graph = networkx.DiGraph()
-        graph.add_node('1')
+        graph.add_node('1:0')
 
         # build initial graph
         self.__build_graph(graph, self.process_list[0], full)
 
-        if refine:
+        if resources:
             # add dependencies of resources
-            self.__refine_graph(graph)  # resources
+            self.__resources_graph(graph)  # resources
 
         return graph
 
-    def vclock_graph(self, graph, full=False):
+    def vclock_graph(self, graph, resources=False):
+        """Compute the vector-clocks of nodes in the exceution graph.
+        @resources: if True, consider dependencies induces by resources
+        Return a dictionary of vector clocks (keys: graph nodes)
+        """
         vclocks = dict()
 
         proc = self.process_list[0]
-        vclocks[(proc, '1')] = vclock.VectorClock(proc.pid)
+        vclocks[(proc, '1')] = VectorClock(proc.pid)
 
         nodes = set()
         nodes.add((proc, '1'))
 
         while nodes:
             (proc, index) = nodes.pop()
-            if index < 0:
-                n = self.__make_node(proc.pid, 'exit')
-            else:
-                n = self.__make_node(proc.pid, index)
+            n = self.__make_node(proc.pid, index)
 
             tick = False
 
@@ -469,37 +480,37 @@ class Session:
                 (p, nindex) = nn.split(':')
                 next = self.process_map[int(p)]
                 if (next, nindex) not in nodes:
-                    clock = vclock.VectorClock(next.pid, vclocks[(proc, index)])
-                    vclocks[(next, nindex)] = clock
+                    vc = VectorClock(next.pid, vclocks[(proc, index)])
+                    vclocks[(next, nindex)] = vc
                 if next.pid != proc.pid:
-                    if full or 'type' in graph.node[nn]:
+                    if resources or 'type' in graph.edge[n][nn]:
                         tick = True
 
             for nn in graph.neighbors(n):
                 (p, nindex) = nn.split(':')
                 next = self.process_map[int(p)]
                 vclocks[(next, nindex)].merge(vclocks[(proc, index)])
-                nodes.add((next, nindex))
+                if resources or 'resource' not in graph.edge[n][nn]:
+                    nodes.add((next, nindex))
                 if tick:
-                    vclocks[(next, nindex)].tick(proc.pid)
+                    vclocks[(next, nindex)].tick(next.pid)
 
         return vclocks
 
-    def crosscut_graph(self, graph, vclock, node1, node2):
+    def crosscut_graph(self, graph, vclocks, node1, node2):
         """Given two nodes in the graph, find a consistent crosscut
         that includes these nodes, and return a bookmark dictionary
         that describes it.
         """
-
         (p, i) = node1.split(':')
         proc1 = self.process_map[int(p)]
         index1 = int(i)
-        vclock1 = vclock[(proc1, i)]
+        vc1 = vclocks[(proc1, i)]
 
         (p, i) = node2.split(':')
         proc2 = self.process_map[int(p)]
         index2 = int(i)
-        vclock2 = vclock[(proc2, i)]
+        vc2 = vclocks[(proc2, i)]
 
         nodes = dict()
         nodes[proc1.pid] = index1
@@ -510,7 +521,6 @@ class Session:
                 continue
 
             pindex = proc.next_syscall(0)
-            vclock = vclocks[(proc, proc.events[pindex].syscnt)]
 
             tproc = None
             while True:
@@ -518,8 +528,8 @@ class Session:
                 if nindex < 0:
                     break;
 
-                vclock = vclocks[(proc, proc.events[nindex].syscnt)]
-                if vclock.race(vclock1) and vclock.race(vclock2):
+                vc = vclocks[(proc, proc.events[nindex].syscnt)]
+                if vc.race(vc1) and vc.race(vc2):
                     tproc = proc
                     tindex = index
                     break;
