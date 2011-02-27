@@ -1,9 +1,11 @@
 import sys
 import mmap
-import scribe
-import unistd
+import random
 import networkx
 from itertools import combinations
+
+import scribe
+import unistd
 from vectorclock import VectorClock
 
 class ProcessEvent:
@@ -29,16 +31,13 @@ class Process:
     @sys: track current (last) syscall event (temporary)
     @reg: track current (last) regs events (temporary)
     """
-    __slots__ = ('pid', 'name', 'events', 'count', 'sysind', 'regind')
+    __slots__ = ('pid', 'name', 'events', 'syscnt', 'sysind', 'regind')
 
     def next_syscall(self, index):
         """Find the next syscall in a process events log"""
-        event = self.events[index]
-        if event.nr in unistd.Syscalls.SYS_exit:
-            return -1
         while True:
             index += 1
-            event = self.events[index]
+            event = self.events[index].event
             if isinstance(event, scribe.EventSyscallExtra):
                 return index
 
@@ -217,10 +216,7 @@ class Session:
                 proc.regind = ind
             elif isinstance(event, scribe.EventSyscallExtra):
                 proc.sysind = ind
-                if event.nr in unistd.Syscalls.SYS_exit:
-                    proc.syscnt = 'exit'
-                else:
-                    proc.syscnt += 1
+                proc.syscnt += 1
             elif isinstance(event, scribe.EventSyscallEnd):
                 proc.regind = -1
                 proc.sysind = -1
@@ -290,13 +286,14 @@ class Session:
             event = s_ev.event
             pid = info.pid
 
+            if pid not in pid_bookmark:
+                continue
+
             # pid first time ?
             if pid not in pid_active:
                 pid_active[pid] = True
                 pid_syscall[pid] = 0
                 pid_eoq[pid] = False
-                if pid not in pid_bookmark:
-                    pid_bookmark[pid] = 0
                 if pid not in pid_cutoff:
                     pid_cutoff[pid] = 0
                 if pid not in pid_inject:
@@ -316,7 +313,7 @@ class Session:
             if isinstance(event, scribe.EventSyscallEnd):
                 if pid_syscall[pid] == pid_bookmark[pid]:
                     print('[%d] add bookmark after syscall %d' \
-                              % (pid, pid_syscall[pid]))
+                              % (pid, pid_bookmark[pid]))
                     e = scribe.EventBookmark()
                     e.id = 0
                     e.npr = len(pid_bookmark)
@@ -328,9 +325,10 @@ class Session:
                 pid_syscall[pid] += 1
 
                 # pid bookmark ?
+                a = pid_bookmark[pid]
                 if pid_syscall[pid] == -pid_bookmark[pid]:
                     print('[%d] add bookmark before syscall %d' \
-                              % (pid, -pid_syscall[pid]))
+                              % (pid, -pid_bookmark[pid]))
                     e = scribe.EventBookmark()
                     e.id = 0
                     e.npr = len(pid_bookmark)
@@ -375,8 +373,13 @@ class Session:
 ##############################################################################
 #   generate thread calls graph (fork,exit,wait,syscalls)
 
-    def __make_node(self, pid, syscall):
+    def make_node(self, pid, syscall):
         return str(pid) + ':' + str(syscall)
+
+    def split_node(self, node):
+        (pid, index) = node.split(':')
+        proc = self.process_map[int(pid)]
+        return (proc, int(index))
 
     def __build_graph(self, graph, proc, full=False):
         """Build the execution DAG from the execution log, as follows:
@@ -386,41 +389,41 @@ class Session:
         - Syscall fork() creates a new process and an edge to it 
         - Syscall exit() adds a node 'pid:exit' (and edge from previous)
         - Syscall wait() adds an edge from the child's exit() syscall
-        - Node attribute 'event=str(I)' for event index in global list
+        - Node attribute 'index=str(I)' for event index in global list
         - Resource access add edge from the previous user to current
         (note: attributes must be strings)
         """
         pid = proc.pid
-        ancestor = self.__make_node(pid, 0)
+        ancestor = self.make_node(pid, 0)
         for p_ev in proc.events:
             event = p_ev.event
             if not isinstance(event, scribe.EventSyscallExtra):
                 continue
             if event.nr in unistd.Syscalls.SYS_fork and event.ret >= 0:
                 newpid = event.ret
-                parent = self.__make_node(pid, p_ev.syscnt)
-                graph.add_node(parent, index=str(p_ev.index), type='fork')
+                parent = self.make_node(pid, p_ev.syscnt)
+                graph.add_node(parent, index=str(p_ev.index), fork='1')
                 graph.add_edge(ancestor, parent)
-                child = self.__make_node(newpid, 0)
+                child = self.make_node(newpid, 0)
                 graph.add_node(child)
-                graph.add_edge(parent, child, type='fork')
+                graph.add_edge(parent, child, fork='1')
                 self.__build_graph(graph, self.process_map[newpid], full)
                 ancestor = parent
             elif event.nr in unistd.Syscalls.SYS_wait and event.ret >= 0:
                 newpid = event.ret
-                node = self.__make_node(pid, p_ev.syscnt)
+                node = self.make_node(pid, p_ev.syscnt)
                 graph.add_node(node, index=str(p_ev.index))
                 graph.add_edge(ancestor, node)
-                child = self.__make_node(newpid, 'exit')
-                graph.add_edge(child, node, type='exit')
+                child = self.make_node(newpid, self.process_map[newpid].syscnt)
+                graph.add_edge(child, node)
                 ancestor = node
             elif event.nr in unistd.Syscalls.SYS_exit:
-                node = self.__make_node(pid, 'exit')
-                graph.add_node(node, index=str(p_ev.index), type='exit')
+                node = self.make_node(pid, p_ev.syscnt)
+                graph.add_node(node, index=str(p_ev.index))
                 graph.add_edge(ancestor, node)
                 ancestor = node
             elif full:
-                node = self.__make_node(pid, p_ev.syscnt)
+                node = self.make_node(pid, p_ev.syscnt)
                 graph.add_node(node, index=str(p_ev.index))
                 graph.add_edge(ancestor, node)
                 ancestor = node
@@ -432,10 +435,11 @@ class Session:
             for r_ev in resource.events:
                 next, nind = self.r_ev_to_proc(r_ev)
                 if prev != next:
-                    src = self.__make_node(prev.pid, prev.events[pind].syscnt)
-                    dst = self.__make_node(next.pid, next.events[nind].syscnt)
+                    src = self.make_node(prev.pid, prev.events[pind].syscnt)
+                    dst = self.make_node(next.pid, next.events[nind].syscnt)
                     if dst not in graph[src]:
-                        graph.add_edge(src, dst, resource=str(r_ev.event.id))
+                        graph.node[src]['resource'] = r_ev.event.id
+                        graph.add_edge(src, dst, resource=r_ev.event.id)
                 prev = next
                 pind = nind
 
@@ -463,54 +467,55 @@ class Session:
         Return a dictionary of vector clocks (keys: graph nodes)
         """
         vclocks = dict()
+        vclocks[self.process_map[1], 0] = VectorClock(1)
 
-        proc = self.process_list[0]
-        vclocks[(proc, '1')] = VectorClock(proc.pid)
-
-        nodes = set()
-        nodes.add((proc, '1'))
-
-        while nodes:
-            (proc, index) = nodes.pop()
-            n = self.__make_node(proc.pid, index)
-
+        for node in networkx.algorithms.dag.topological_sort(graph):
+            proc, index = s.split_node(node)
+            vc = vclocks[(proc, index)]
             tick = False
 
-            for nn in graph.neighbors(n):
-                (p, nindex) = nn.split(':')
-                next = self.process_map[int(p)]
-                if (next, nindex) not in nodes:
-                    vc = VectorClock(next.pid, vclocks[(proc, index)])
-                    vclocks[(next, nindex)] = vc
-                if next.pid != proc.pid:
-                    if resources or 'type' in graph.edge[n][nn]:
-                        tick = True
+            for nn in graph.neighbors(node):
+                next, nindex = s.split_node(nn)
 
-            for nn in graph.neighbors(n):
-                (p, nindex) = nn.split(':')
-                next = self.process_map[int(p)]
-                vclocks[(next, nindex)].merge(vclocks[(proc, index)])
-                if resources or 'resource' not in graph.edge[n][nn]:
-                    nodes.add((next, nindex))
-                if tick:
-                    vclocks[(next, nindex)].tick(next.pid)
+                # disregard resource dependencies if not @resource ?
+                if not resources and 'resource' in graph.edge[node][nn]:
+                    continue
+
+                # need to creat vclock for this node ?
+                if (next, nindex) not in vclocks:
+                    vclocks[(next, nindex)] = VectorClock(next.pid, vc)
+                else:
+                    vclocks[(next, nindex)].merge(vc)
+
+                # is this an edge that should cause a tick ?
+                if next.pid != proc.pid:
+                    if 'fork' in graph.edge[node][nn]:
+                        tick = True
+                    elif resources and 'resource' in graph.edge[node][nn]:
+                        tick = True
+                else:
+                    # remember for below
+                    tproc = next
+                    tindex = nindex
+
+            if tick:
+                # tick before the merge, but w/o effect on @vc
+                vctmp = VectorClock(proc.pid, vc)
+                vctmp.tick(proc.pid)
+                vclocks[(tproc, tindex)].merge(vctmp)
 
         return vclocks
 
     def crosscut_graph(self, graph, vclocks, node1, node2):
         """Given two nodes in the graph, find a consistent crosscut
         that includes these nodes, and return a bookmark dictionary
-        that describes it.
+        that describes it, or None if none found.
         """
-        (p, i) = node1.split(':')
-        proc1 = self.process_map[int(p)]
-        index1 = int(i)
-        vc1 = vclocks[(proc1, i)]
+        proc1, index1 = s.split_node(node1)
+        vc1 = vclocks[(proc1, index1)]
 
-        (p, i) = node2.split(':')
-        proc2 = self.process_map[int(p)]
-        index2 = int(i)
-        vc2 = vclocks[(proc2, i)]
+        proc2, index2 = s.split_node(node2)
+        vc2 = vclocks[(proc2, index2)]
 
         nodes = dict()
         nodes[proc1.pid] = index1
@@ -520,31 +525,29 @@ class Session:
             if proc == proc1 or proc == proc2:
                 continue
 
-            pindex = proc.next_syscall(0)
+            pindex = proc.next_syscall(-1)
+
+            p_ev = proc.events[pindex]
+            vc = vclocks[(proc, p_ev.syscnt)]
+            if vc1.before(vc) and vc2.before(vc):
+                nodes[proc.pid] = 0
+                continue
 
             tproc = None
             while True:
-                nindex = proc.next_syscall(pindex)
-                if nindex < 0:
-                    break;
-
-                vc = vclocks[(proc, proc.events[nindex].syscnt)]
+                p_ev = proc.events[pindex]
+                vc = vclocks[(proc, p_ev.syscnt)]
                 if vc.race(vc1) and vc.race(vc2):
                     tproc = proc
-                    tindex = index
                     break;
+                if p_ev.event.nr in unistd.Syscalls.SYS_exit:
+                    break
+                pindex = proc.next_syscall(pindex)
 
             if tproc:
-                nodes[tproc.pid] = tindex
+                nodes[tproc.pid] = p_ev.index
 
-        bookmarks = dict()
-
-        for pid in nodes.keys():
-            n = self.__make_node(pid, nodes[pid])
-            att = graph.node[n]
-            bookmarks[pid] = int(att['index'])
-
-        return bookmarks
+        return nodes
 
     def __races_accesses(self, access):
         """Given vclocks of a resource per process (increasing order),
@@ -599,8 +602,8 @@ class Session:
             for r_ev in resource.events:
                 proc, index = self.r_ev_to_proc(r_ev, sysind=True)
                 p_ev = proc.events[index]
-                node = self.__make_node(proc.pid, p_ev.syscnt)
-                vc = vclocks[(proc, str(p_ev.syscnt))]
+                node = self.make_node(proc.pid, p_ev.syscnt)
+                vc = vclocks[(proc, p_ev.syscnt)]
                 access[proc.pid].append((vc, r_ev.index))
 
             races.extend(self.__races_accesses(access))
@@ -618,7 +621,57 @@ class Session:
 # main
 #
 
-def __test_graph(s):
+def show_races(session, options):
+    graph = session.make_graph(full=True, resources=True)
+
+    vclocks = session.vclock_graph(graph)
+
+    races = session.races_resources(vclocks)
+
+    print('Found %d potential races' % (len(races)))
+
+    print('Sampling at most 10 random races:')
+    r = random.sample(races, len(races))
+
+    j = 1
+    for vc1, i1, vc2, i2 in r:
+        s_ev1 = s.events_list[i1]
+        r_ev1 = s_ev1.resource.events[s_ev1.rindex]
+        proc1, pindex1 = s.r_ev_to_proc(r_ev1, sysind=True)
+        p_ev1 = proc1.events[pindex1]
+        node1 = s.make_node(proc1.pid, p_ev1.syscnt)
+
+        s_ev2 = s.events_list[i2]
+        r_ev2 = s_ev2.resource.events[s_ev2.rindex]
+        proc2, pindex2 = s.r_ev_to_proc(r_ev2, sysind=True)
+        p_ev2 = proc2.events[pindex2]
+        node2 = s.make_node(proc2.pid, p_ev2.syscnt)
+
+        bookmarks = s.crosscut_graph(graph, vclocks, node1, node2)
+        if not bookmarks:
+            continue
+
+        print('race %2d:  pid %d syscnt %d  <->  pid %d syscnt %d' \
+                  % (j, proc1.pid, p_ev1.syscnt, proc2.pid, p_ev2.syscnt))
+        print('    pid %d: syscall nr %d, ret %d' \
+                  % (proc1.pid, p_ev1.event.nr, p_ev1.event.ret))
+        print('    pid %d: syscall nr %d, ret %d' \
+                  % (proc2.pid, p_ev2.event.nr, p_ev2.event.ret))
+
+        outfile = open(options.outfile + '.' + str(j+1) + '.log', 'w')
+        s.save_events(outfile, pid_bookmark=bookmarks)
+        outfile.close()
+
+        j += 1
+        if j > 10:
+            break
+
+def show_graph(session, options):
+    graph = s.make_graph(False, False)
+    networkx.write_dot(graph, options.outfile + '.dot')
+    return(0)
+
+def __test_graph(s, options):
     g = s.make_graph(False, False)
     print(networkx.convert.to_edgelist(g))
     networkx.write_dot(g, options.outfile + '-proc.dot')
@@ -634,7 +687,7 @@ def __test_graph(s):
     print(bookmarks)
     return(0)
 
-def __test_inject(s):
+def __test_inject(s, options):
     a1 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 1000)
     a2 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 2000)
     actions = { 10:a1, 20:a2 }
@@ -648,7 +701,7 @@ def __test_inject(s):
     s.save_events(f, None, pid_cutoff, pid_inject)
     return(0)
 
-def __test_races(s):
+def __test_races(s, options):
     g = s.make_graph(full=True, resources=True)
     print('graph: %s' % networkx.convert.to_edgelist(g))
     networkx.write_dot(g, options.outfile + '-full.dot')
@@ -656,7 +709,7 @@ def __test_races(s):
     print('')
     sys.stdout.write('vclock: ')
     for k in vclocks.keys():
-        print('%s, %s -> %s  ' % (k[0].pid, str(k[1]), vclocks[k].clocks))
+        print('%d, %d -> %s  ' % (k[0].pid, k[1], vclocks[k].clocks))
     races = s.races_resources(vclocks)
     print('')
     print('races: %s' % races)
@@ -667,9 +720,9 @@ def __test_races(s):
         p2 = s.events_list[i2].proc
         e2 = s.events_list[i2].event
         i2 = s.events_list[i2].pindex
-        print('proc %d syscall %s rid %d <->  proc %d syscall %s rid %d' \
-                  % (p1.pid, str(p1.events[i1].syscnt), e1.id,
-                     p2.pid, str(p2.events[i2].syscnt), e2.id))
+        print('proc %d syscall %d rid %d <->  proc %d syscall %d rid %d' \
+                  % (p1.pid, p1.events[i1].syscnt, e1.id,
+                     p2.pid, p2.events[i2].syscnt, e2.id))
 
 if __name__ == "__main__":
 
@@ -692,6 +745,8 @@ if __name__ == "__main__":
         'test-graph':__test_graph,
         'test-races':__test_races,
         'test-inject':__test_inject,
+        'show-races':show_races,
+        'show-graph':show_graph,
         }
 
     if len(cmd) > 1 or cmd[0] not in commands:
@@ -711,5 +766,5 @@ if __name__ == "__main__":
     s = Session()
     s.load_events(f)
 
-    ret = commands[cmd[0]](s)
+    ret = commands[cmd[0]](s, options)
     exit(ret)
