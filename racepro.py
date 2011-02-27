@@ -1,6 +1,7 @@
 import sys
 import mmap
 import random
+import logging
 import networkx
 from itertools import combinations
 
@@ -147,30 +148,30 @@ class Session:
         ret = unistd.syscall_ret(syscall.ret)
 
         if e_syscall.nr == unistd.Syscalls.NR_open:
-            print('[%d] open("%s", %#x, %#3o) = %ld' %
-                  (i, e_data.data, args[1], args[2], ret))
+            logging.info('[%d] open("%s", %#x, %#3o) = %ld' %
+                         (i, e_data.data, args[1], args[2], ret))
         if e_syscall.nr == unistd.Syscalls.NR_close:
-            print('[%d] close(%d) = %ld' %
-                  (i, args[0], ret))
+            logging.info('[%d] close(%d) = %ld' %
+                         (i, args[0], ret))
         if e_syscall.nr == unistd.Syscalls.NR_access:
-            print('[%d] access("%s", %#3o) = %ld' %
-                  (i, e_data.data, args[0], ret))
+            logging.info('[%d] access("%s", %#3o) = %ld' %
+                         (i, e_data.data, args[0], ret))
         if e_syscall.nr == unistd.Syscalls.NR_execve:
-            print('[%d] execve("%s", %#x, %#x) = %ld' %
-                  (i, e_data.data, args[0], args[1], ret))
+            logging.info('[%d] execve("%s", %#x, %#x) = %ld' %
+                         (i, e_data.data, args[0], args[1], ret))
         if e_syscall.nr == unistd.Syscalls.NR_stat:
-            print('[%d] stat("%s", %#x) = %ld' %
-                  (i, e_data.data, args[0], ret))
+            logging.info('[%d] stat("%s", %#x) = %ld' %
+                         (i, e_data.data, args[0], ret))
         if e_syscall.nr == unistd.Syscalls.NR_stat64:
-            print('[%d] stat64("%s", %#x, %#x) = %ld' %
-                  (i, e_data.data, args[0], args[1], ret))
+            logging.info('[%d] stat64("%s", %#x, %#x) = %ld' %
+                         (i, e_data.data, args[0], args[1], ret))
 
     def print_process(self, pid):
         """Print all the events of a process"""
         try:
             proc = self.process_map[pid]
         except KeyError:
-            print('No such process with pid %d' % (pid))
+            logging.error('No such process with pid %d' % (pid))
             return
 
         for p_ev in proc.events:
@@ -310,25 +311,14 @@ class Session:
             if isinstance(event, scribe.EventBookmark):
                 continue
 
-            if isinstance(event, scribe.EventSyscallEnd):
-                if pid_syscall[pid] == pid_bookmark[pid]:
-                    print('[%d] add bookmark after syscall %d' \
-                              % (pid, pid_bookmark[pid]))
-                    e = scribe.EventBookmark()
-                    e.id = 0
-                    e.npr = len(pid_bookmark)
-                    logfile.write(e.encode())
-                    pid_active[pid] = False
-                    continue;
-
             if isinstance(event, scribe.EventSyscallExtra):
                 pid_syscall[pid] += 1
 
                 # pid bookmark ?
                 a = pid_bookmark[pid]
                 if pid_syscall[pid] == -pid_bookmark[pid]:
-                    print('[%d] add bookmark before syscall %d' \
-                              % (pid, -pid_bookmark[pid]))
+                    logging.info('[%d] add bookmark before syscall %d' %
+                                 (pid, -pid_bookmark[pid]))
                     e = scribe.EventBookmark()
                     e.id = 0
                     e.npr = len(pid_bookmark)
@@ -338,8 +328,8 @@ class Session:
 
                 # pid inject ?
                 if pid_syscall[pid] in pid_inject[pid]:
-                    print('[%d] inject at syscall %d' \
-                              % (pid, pid_syscall[pid]))
+                    logging.info('[%d] inject at syscall %d' %
+                                 (pid, pid_syscall[pid]))
                     for a in pid_inject[pid].itervalues():
                         e = scribe.EventInjectAction()
                         e.action = a.action
@@ -350,8 +340,8 @@ class Session:
 
                 # pid enough ?
                 if pid_syscall[pid] == pid_cutoff[pid]:
-                    print('[%d] cutoff at syscall %d' \
-                              % (pid, pid_cutoff[pid]))
+                    logging.info('[%d] cutoff at syscall %d' %
+                                 (pid, pid_cutoff[pid]))
                     pid_active[pid] = False
                     continue
 
@@ -360,6 +350,17 @@ class Session:
                 pid_active[pid] = False
 
             logfile.write(event.encode())
+
+            if isinstance(event, scribe.EventSyscallEnd):
+                if pid_syscall[pid] == pid_bookmark[pid]:
+                    logging.info('[%d] add bookmark after syscall %d' %
+                                 (pid, pid_bookmark[pid]))
+                    e = scribe.EventBookmark()
+                    e.id = 0
+                    e.npr = len(pid_bookmark)
+                    logfile.write(e.encode())
+                    pid_active[pid] = False
+                    continue;
 
         # indicate go-live where needed
         for pid in pid_active:
@@ -623,15 +624,17 @@ class Session:
 
 def show_races(session, options):
     graph = session.make_graph(full=True, resources=True)
+    logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
 
     vclocks = session.vclock_graph(graph)
+    for k in vclocks.keys():
+        logging.debug('%2d %5d -> %s' % (k[0].pid, k[1], vclocks[k].clocks))
 
     races = session.races_resources(vclocks)
+    logging.debug('Found %d potential races' % (len(races)))
 
-    print('Found %d potential races' % (len(races)))
-
-    print('Sampling at most 10 random races:')
     r = random.sample(races, len(races))
+    logging.debug('Sampling at most 10 random races:')
 
     j = 1
     for vc1, i1, vc2, i2 in r:
@@ -651,14 +654,16 @@ def show_races(session, options):
         if not bookmarks:
             continue
 
-        print('race %2d:  pid %d syscnt %d  <->  pid %d syscnt %d' \
-                  % (j, proc1.pid, p_ev1.syscnt, proc2.pid, p_ev2.syscnt))
-        print('    pid %d: syscall nr %d, ret %d' \
-                  % (proc1.pid, p_ev1.event.nr, p_ev1.event.ret))
-        print('    pid %d: syscall nr %d, ret %d' \
-                  % (proc2.pid, p_ev2.event.nr, p_ev2.event.ret))
+        logging.info('race %2d:  pid %d syscnt %d  <->  pid %d syscnt %d' %
+                     (j, proc1.pid, p_ev1.syscnt, proc2.pid, p_ev2.syscnt))
+        logging.info('    pid %d: syscall nr %d, ret %d' %
+                     (proc1.pid, p_ev1.event.nr, p_ev1.event.ret))
+        logging.info('    pid %d: syscall nr %d, ret %d' %
+                     (proc2.pid, p_ev2.event.nr, p_ev2.event.ret))
 
-        outfile = open(options.outfile + '.' + str(j+1) + '.log', 'w')
+        logging.debug('   boobkmarks: %s' % (bookmarks))
+
+        outfile = open(options.outfile + '.' + str(j) + '.log', 'w')
         s.save_events(outfile, pid_bookmark=bookmarks)
         outfile.close()
 
@@ -729,13 +734,21 @@ if __name__ == "__main__":
     import sys
     from optparse import OptionParser
 
-    usage = 'usage: %prog [options] graph|inject|races'
+    usage = 'usage: %prog [options] show-graph|show-races'
     desc = 'Process and modify scribe execution log'
     parser = OptionParser(usage=usage, description=desc)
 
-    parser.add_option('-i', '--input', dest='logfile', metavar='FILE',
+    parser.add_option('-d', '--debug',
+                      action='store_true', dest='debug', default=False,
+                      help='Increase debug vebosity')
+    parser.add_option('-v', '--verbose',
+                      action='store_true', dest='verbose', default=False,
+                      help='Increase vebosity level')
+    parser.add_option('-i', '--input', dest='logfile',
+                      metavar='FILE',
                       help='Read the recorded execution from FILE')
-    parser.add_option('-o', '--output', dest='outfile', metavar='FILE',
+    parser.add_option('-o', '--output', dest='outfile',
+                      metavar='FILE',
                       help='Write the output graph or execution to FILE')
 
     parser.disable_interspersed_args()
@@ -749,18 +762,27 @@ if __name__ == "__main__":
         'show-graph':show_graph,
         }
 
-    if len(cmd) > 1 or cmd[0] not in commands:
-        parser.error('Unknown command')
+    log = logging.ERROR
+    if options.verbose: log = logging.INFO
+    if options.debug: log = logging.DEBUG
+    logging.basicConfig(level=log, stream=sys.stdout)
+
+    if len(cmd) < 1:
+        parser.error('Missing command')
+    if len(cmd) > 1:
+        parser.error('Command too long')
+    elif cmd[0] not in commands:
+        parser.error('Unknown command: %s' % cmd[0])
 
     if not options.logfile:
-        parser.error('Input logfile not specificed')
+        logging.error('Input logfile not specificed')
     if not options.outfile:
         parser.error('Output file not specified')
 
     try:
         f = open(options.logfile, 'r')
     except:
-        print('Failed to open log file')
+        logging.error('Failed to open log file')
         exit(1)
 
     s = Session()
