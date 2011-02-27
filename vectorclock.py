@@ -10,7 +10,6 @@ class VectorClock:
         try:
             return self.clocks[pid]
         except:
-            self.clocks[pid] = 0
             return 0
 
     def tick(self, pid):
@@ -21,12 +20,10 @@ class VectorClock:
             self.clocks[pid] = max([self.get(pid), v.get(pid)])
 
     def before(self, v):
-        if ifilter(lambda p: self.get(p) > v.get(p), v.clocks.keys()):
-            return False
-        if ifilter(lambda p: p not in self.clocks, v.clocks.keys()):
-            return False
-        else:
-            return True
+        for pid in v.clocks.keys():
+            if self.get(pid) > v.get(pid):
+                return False
+        return self.len() <= v.len()
 
     def race(self, v):
         return not (self.before(v) or v.before(self))
@@ -36,5 +33,6 @@ class VectorClock:
             self.clocks = dict(v.clocks)
         else:
             self.clocks = dict()
-        self.clocks[pid] = 1
+        if pid not in self.clocks:
+            self.clocks[pid] = 1
         
