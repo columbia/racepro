@@ -3,7 +3,7 @@ import mmap
 import random
 import logging
 import networkx
-from itertools import combinations
+from itertools import *
 
 import scribe
 import unistd
@@ -81,9 +81,10 @@ class Resource:
 class Action:
     """Describe an action to be injected into a log"""
 
-    def __init__(self, action = None, arg1 = None):
+    def __init__(self, action = None, arg1 = None, arg2 = None):
         self.action = action
         self.arg1 = arg1
+        self.arg2 = arg2
 
 class SessionEvent:
     """An event from the point of view of a session:
@@ -251,10 +252,40 @@ class Session:
                 s_ev.rindex = ind
                 ind += 1
 
+    def __check_bookmarks(self, pid, syscall, bookmarks, logfile):
+        for n, bmark in enumerate(bookmarks):
+            if syscall == bmark[pid]:
+                e = scribe.EventBookmark()
+                e.id = n
+                e.npr = len(bmark)
+                logfile.write(e.encode())
+                logging.debug('[%d] bookmark at syscall %d' % (pid, syscall))
+
+    def __check_inject(self, pid, syscall, injects, logfile):
+        noregs = False
+        if syscall in injects[pid]:
+            for a in injects[pid].itervalues():
+                e = scribe.EventInjectAction()
+                e.action = a.action
+                e.arg1 = a.arg1
+                e.arg2 = a.arg2
+                logfile.write(e.encode())
+                logging.debug('[%d] inject at syscall %d' % (pid, syscall))
+                if a.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
+                    noregs = True
+        return noregs
+
+    def __check_cutoff(self, pid, syscall, cutoff):
+        if syscall == cutoff[pid]:
+            logging.debug('[%d] cutoff at syscall %d' % (pid, cutoff[pid]))
+            return True
+        else:
+            return False
+
     def save_events(self, logfile,
-                    pid_bookmark = None,
-                    pid_cutoff = None,
-                    pid_inject = None):
+                    bookmarks = None,
+                    injects = None,
+                    cutoff = None):
         """Write the (perhaps modified) scribe log to @logfile
 
         Write out the scribe log while potentially modifying it. Two
@@ -263,108 +294,105 @@ class Session:
         locations (per process) to cut remaining log.
 
         @logfile: output file object (opened for binary write)
-        @pid_bookmark: indicates the syscall at which to add bookmark
-          { pid:syscall } (negative/positive -> before/after syscall)
-        @pid_inject: indicate actions to inject to the log
-          { pid:[action1,action2,...] }
-        @pid_cutoff: indicate the syscall at which to cut the log
-          { pid:syscall } (negative/positive -> before/after syscall)
+        @bookmarks: array of bookmarks [{ pid: sc1 }]
+        @injects: actions to inject { pid : {sc1:act1},{sc2:act2}, ...] }
+        @cutoff: where to cutoff queues { pid : sc }
         """
 
-        pid_active = dict()
-        pid_syscall = dict()
-        pid_eoq = dict({0:False})
+        active = dict()
+        syscall = dict()
+        noregs = dict()
+        endofq = dict({0:False})
 
-        if pid_bookmark is None:
-            pid_bookmark = dict()
-        if pid_inject is None:
-            pid_inject = dict()
-        if pid_cutoff is None:
-            pid_cutoff = dict()
+        # any(ifilter(lambda d: pid in d, a))
+        include = reduce(lambda d1, d2: dict(d1, **d2), bookmarks)
+
+        if bookmarks is None:
+            bookmarks = dict()
+        if injects is None:
+            injects = dict()
+        if cutoff is None:
+            cutoff = dict()
 
         for s_ev in self.events_list:
             info = s_ev.info
             event = s_ev.event
             pid = info.pid
 
-            if pid not in pid_bookmark:
+            if pid == 0:
+                logfile.write(event.encode())
+                continue
+
+            if pid not in include:
                 continue
 
             # pid first time ?
-            if pid not in pid_active:
-                pid_active[pid] = True
-                pid_syscall[pid] = 0
-                pid_eoq[pid] = False
-                if pid not in pid_cutoff:
-                    pid_cutoff[pid] = 0
-                if pid not in pid_inject:
-                    pid_inject[pid] = dict()
+            if pid not in active:
+                active[pid] = True
+                syscall[pid] = 0
+                endofq[pid] = False
+                noregs[pid] = False
+                if pid not in cutoff:
+                    cutoff[pid] = 0
+                if pid not in injects:
+                    injects[pid] = dict()
 
-            assert not pid_eoq[pid] or pid == 0, \
+            assert not endofq[pid] or pid == 0, \
                 'Event for pid %d after eoq' % (pid)
 
             # pid inactive ?
-            if not pid_active[pid]:
+            if not active[pid]:
                 continue
 
             # ignore original bookmarks
             if isinstance(event, scribe.EventBookmark):
                 continue
 
+            #
+            # I would expect to remove the EventRegs already, but nico said
+            # it should stay, and remove from EventSyscallExtra nad on
+            #    if isinstance(event, scribe.EventRegs):
+            #
             if isinstance(event, scribe.EventSyscallExtra):
-                pid_syscall[pid] += 1
+                syscall[pid] += 1
 
                 # pid bookmark ?
-                a = pid_bookmark[pid]
-                if pid_syscall[pid] == -pid_bookmark[pid]:
-                    logging.info('[%d] add bookmark before syscall %d' %
-                                 (pid, -pid_bookmark[pid]))
-                    e = scribe.EventBookmark()
-                    e.id = 0
-                    e.npr = len(pid_bookmark)
-                    logfile.write(e.encode())
-                    pid_active[pid] = False
-                    continue;
-
+                self.__check_bookmarks(pid, -syscall[pid], bookmarks, logfile)
                 # pid inject ?
-                if pid_syscall[pid] in pid_inject[pid]:
-                    logging.info('[%d] inject at syscall %d' %
-                                 (pid, pid_syscall[pid]))
-                    for a in pid_inject[pid].itervalues():
-                        e = scribe.EventInjectAction()
-                        e.action = a.action
-                        e.arg1 = a.arg1
-                        logfile.write(e.encode())
-                    pid_active[pid] = False
+                if self.__check_inject(pid, -syscall[pid], injects, logfile):
+                    noregs[pid] = True
+                # pid cutoff ?
+                if self.__check_cutoff(pid, -syscall[pid], cutoff):
+                    active[pid] = False
                     continue
 
-                # pid enough ?
-                if pid_syscall[pid] == pid_cutoff[pid]:
-                    logging.info('[%d] cutoff at syscall %d' %
-                                 (pid, pid_cutoff[pid]))
-                    pid_active[pid] = False
-                    continue
+            if noregs[pid] and \
+                    (isinstance(event, scribe.EventResourceLockExtra) or \
+                    isinstance(event, scribe.EventResourceLockIntr) or \
+                    isinstance(event, scribe.EventResourceUnlock)):
+                continue
 
             if isinstance(event, scribe.EventQueueEof):
-                pid_eoq[pid] = True
-                pid_active[pid] = False
+                endof[pid] = True
+                active[pid] = False
 
             logfile.write(event.encode())
 
             if isinstance(event, scribe.EventSyscallEnd):
-                if pid_syscall[pid] == pid_bookmark[pid]:
-                    logging.info('[%d] add bookmark after syscall %d' %
-                                 (pid, pid_bookmark[pid]))
-                    e = scribe.EventBookmark()
-                    e.id = 0
-                    e.npr = len(pid_bookmark)
-                    logfile.write(e.encode())
-                    pid_active[pid] = False
-                    continue;
+
+                # pid bookmark ?
+                self.__check_bookmarks(pid, syscall[pid], bookmarks, logfile)
+                # pid inject ?
+                if self.__check_inject(pid, syscall[pid], injects, logfile):
+                    noregs[pid] = True
+                # pid cutoff ?
+                if self.__check_cutoff(pid, syscall[pid], cutoff):
+                    active[pid] = False
+                    continue
 
         # indicate go-live where needed
-        for pid in pid_active:
-            if not pid_eoq[pid]:
+        for pid in active:
+            if not endofq[pid]:
                 e = scribe.EventPid()
                 e.pid = pid
                 logfile.write(e.encode())
@@ -431,18 +459,37 @@ class Session:
 
     def __resources_graph(self, graph):
         """Add dependencies due to resources to an execution graph"""
+
         for resource in self.resource_list:
             prev, pind = self.r_ev_to_proc(resource.events[0])
-            for r_ev in resource.events:
-                next, nind = self.r_ev_to_proc(r_ev)
-                if prev != next:
+            pr_ev = dict()
+            nr_ev = dict()
+            serial = 0
+
+            def add_resource_edges():
+                dst = None
+                tr_ev = product(pr_ev.values(), nr_ev.values())
+                for (prev, pind), (next, nind) in tr_ev:
+                    if prev == next:
+                        continue
                     src = self.make_node(prev.pid, prev.events[pind].syscnt)
                     dst = self.make_node(next.pid, next.events[nind].syscnt)
-                    if dst not in graph[src]:
-                        graph.node[src]['resource'] = r_ev.event.id
-                        graph.add_edge(src, dst, resource=r_ev.event.id)
-                prev = next
-                pind = nind
+                if dst and dst not in graph[src]:
+                    graph.node[src]['resource'] = resource.id
+                    graph.add_edge(src, dst, resource=resource.id)
+
+            for r_ev in resource.events:
+                next, nind = self.r_ev_to_proc(r_ev)
+                if r_ev.event.serial == serial:
+                    if next not in nr_ev.keys():
+                        nr_ev[next] = (next, nind)
+                else:
+                    add_resource_edges()
+                    pr_ev = nr_ev
+                    nr_ev = dict()
+                    serial = r_ev.event.serial
+            else:
+                add_resource_edges()
 
     def make_graph(self, full=False, resources=False):
         """Build the execution DAG from the execution log.
@@ -508,19 +555,22 @@ class Session:
         return vclocks
 
     def crosscut_graph(self, graph, vclocks, node1, node2):
-        """Given two nodes in the graph, find a consistent crosscut
-        that includes these nodes, and return a bookmark dictionary
-        that describes it, or None if none found.
+        """Given two nodes in the graph, find a consistent crosscut,
+        such that both nodes are just about to be executed.
+        Returns bookmarks dict of the cut, or None if none found
         """
         proc1, index1 = s.split_node(node1)
-        vc1 = vclocks[(proc1, index1)]
-
         proc2, index2 = s.split_node(node2)
-        vc2 = vclocks[(proc2, index2)]
 
         nodes = dict()
-        nodes[proc1.pid] = index1
-        nodes[proc2.pid] = index2
+        nodes[proc1.pid] = -index1
+        nodes[proc2.pid] = -index2
+
+        vc1 = vclocks[(proc1, index1)]
+        vc2 = vclocks[(proc2, index2)]
+
+        logging.debug('find cut for clocks %s and %s' %
+                      (vc1.clocks, vc2.clocks))
 
         for proc in self.process_list:
             if proc == proc1 or proc == proc2:
@@ -530,23 +580,39 @@ class Session:
 
             p_ev = proc.events[pindex]
             vc = vclocks[(proc, p_ev.syscnt)]
+            logging.debug('[pid %d] pindex %d vclock %s' %
+                          (proc.pid, pindex, vc.clocks))
             if vc1.before(vc) and vc2.before(vc):
-                nodes[proc.pid] = 0
                 continue
 
             tproc = None
+            tindex = None
             while True:
                 p_ev = proc.events[pindex]
                 vc = vclocks[(proc, p_ev.syscnt)]
+                logging.debug('vc %s' % (vc.clocks))
                 if vc.race(vc1) and vc.race(vc2):
                     tproc = proc
+                    tindex = p_ev.syscnt
                     break;
+                logging.debug('vc.pre %s' %(vc.pre().clocks))
+                if vc.pre().race(vc1) and vc.pre().race(vc2):
+                    tproc = proc
+                    tindex = -p_ev.syscnt
+                    break;
+                logging.debug('exit ?')
                 if p_ev.event.nr in unistd.Syscalls.SYS_exit:
                     break
                 pindex = proc.next_syscall(pindex)
 
+            logging.debug('[pid %d] tproc %s tindex %s', proc.pid, tproc, tindex)
             if tproc:
-                nodes[tproc.pid] = p_ev.index
+                nodes[tproc.pid] = tindex
+            elif vc.before(vc1) and vc.before(vc2):
+                nodes[proc.pid] = 0
+            else:
+                logging.debug('consistent cut failed for pid %d' % (proc.pid))
+                return None
 
         return nodes
 
@@ -630,14 +696,13 @@ def show_races(session, options):
     for k in vclocks.keys():
         logging.debug('%2d %5d -> %s' % (k[0].pid, k[1], vclocks[k].clocks))
 
-    races = session.races_resources(vclocks)
-    logging.debug('Found %d potential races' % (len(races)))
+    all_races = session.races_resources(vclocks)
+    logging.debug('total races %d' % (len(all_races)))
 
-    r = random.sample(races, len(races))
-    logging.debug('Sampling at most 10 random races:')
+    sys_races = set()
+    map_races = dict()
 
-    j = 1
-    for vc1, i1, vc2, i2 in r:
+    for vc1, i1, vc2, i2 in all_races:
         s_ev1 = s.events_list[i1]
         r_ev1 = s_ev1.resource.events[s_ev1.rindex]
         proc1, pindex1 = s.r_ev_to_proc(r_ev1, sysind=True)
@@ -650,26 +715,80 @@ def show_races(session, options):
         p_ev2 = proc2.events[pindex2]
         node2 = s.make_node(proc2.pid, p_ev2.syscnt)
 
-        bookmarks = s.crosscut_graph(graph, vclocks, node1, node2)
-        if not bookmarks:
+        if r_ev1.event.serial < r_ev2.event.serial:
+            node1, node2 = node2, node1
+            i1, i2 = i2, i1
+
+        sys_races.add((node1, node2))
+
+        try:
+            map_races[(node1, node2)].append((i1, i2))
+        except KeyError:
+            map_races[(node1, node2)] = list([(i1, i2)])
+
+    logging.info('Found %d potential races (%d after duplicates removal)' %
+                 (len(all_races), len(sys_races)))
+
+    num = 10
+    r = random.sample(sys_races, len(sys_races))
+    logging.info('Sampling at random to generate at most %d races:' %(num))
+    logging.info('-' * 75)
+
+    n_race = 0
+    n_fail = 0
+
+    for (node1, node2) in r:
+        proc1, pindex1 = session.split_node(node1)
+        event1 = session.events_list[int(graph.node[node1]['index'])].event
+
+        proc2, pindex2 = session.split_node(node2)
+        event2 = session.events_list[int(graph.node[node2]['index'])].event
+
+        bookmark1 = s.crosscut_graph(graph, vclocks, node1, node2)
+        if not bookmark1:
+            logging.info('No consistent cut for: ' +
+                         'pid %d syscnt %d  -->  pid %d syscnt %d'
+                         % (proc1.pid, pindex1, proc2.pid, pindex2))
+            n_fail += 1
             continue
 
-        logging.info('race %2d:  pid %d syscnt %d  <->  pid %d syscnt %d' %
-                     (j, proc1.pid, p_ev1.syscnt, proc2.pid, p_ev2.syscnt))
-        logging.info('    pid %d: syscall nr %d, ret %d' %
-                     (proc1.pid, p_ev1.event.nr, p_ev1.event.ret))
-        logging.info('    pid %d: syscall nr %d, ret %d' %
-                     (proc2.pid, p_ev2.event.nr, p_ev2.event.ret))
+        logging.info('RACE %2d:  ' % (n_race) +
+                     'pid %d syscnt %d [sys(%d)=%d]' %
+                     (proc1.pid, pindex1, event1.nr, event1.ret) +
+                     '  -->   pid %d syscnt %d [sys(%d)=%d]' %
+                     (proc2.pid, pindex2, event2.nr, event2.ret))
+        logging.info('          cut:  %s' % bookmark1.values())
 
-        logging.debug('   boobkmarks: %s' % (bookmarks))
+        bookmark2 = dict(bookmark1)
+        bookmark2[proc1.pid] = -bookmark2[proc1.pid]
+        bookmarks = [bookmark1, bookmark2]
 
-        outfile = open(options.outfile + '.' + str(j) + '.log', 'w')
-        s.save_events(outfile, pid_bookmark=bookmarks)
+        action = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                        0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+        injects = dict()
+        injects[proc1.pid] = dict({-pindex1 : action})
+
+        cutoff = dict(bookmark2)
+
+        logging.debug('   boobkmark1: %s' % (bookmark1))
+        logging.debug('   boobkmark2: %s' % (bookmark2))
+        logging.debug('   injects: %s' % (injects))
+        logging.debug('   cutoff: %s' % (cutoff))
+
+        outfile = open(options.outfile + '.' + str(n_race + 1) + '.log', 'w')
+        s.save_events(outfile,
+                      bookmarks=bookmarks,
+                      injects=injects,
+                      cutoff=cutoff)
         outfile.close()
 
-        j += 1
-        if j > 10:
-            break
+        n_race += 1
+        if (n_race == 10):
+            break;
+
+    logging.info('-' * 75)
+    logging.info('Generated %d logs out of total %d races examined',
+                 n_race, n_race + n_fail)
 
 def show_graph(session, options):
     graph = s.make_graph(False, False)
@@ -696,14 +815,14 @@ def __test_inject(s, options):
     a1 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 1000)
     a2 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 2000)
     actions = { 10:a1, 20:a2 }
-    pid_inject = { 1:actions }
-    pid_cutoff = { 2:25 }
+    injects = { 1:actions }
+    cutoff = { 2:25 }
     try:
         f = open(options.outfile, 'wb')
     except:
         print('Failed to open output file')
         exit(1)
-    s.save_events(f, None, pid_cutoff, pid_inject)
+    s.save_events(f, bookmarks=None, injects=injects, cutoff=cutoff)
     return(0)
 
 def __test_races(s, options):

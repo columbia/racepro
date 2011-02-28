@@ -15,6 +15,12 @@ class VectorClock:
     def tick(self, pid):
         self.clocks[pid] += 1
 
+    def pre(self):
+        v = VectorClock(v=self)
+        for pid in v.clocks.keys():
+            v.clocks[pid] -= 0.5
+        return v
+
     def merge(self, v):
         for pid in v.clocks.keys():
             self.clocks[pid] = max([self.get(pid), v.get(pid)])
@@ -28,11 +34,11 @@ class VectorClock:
     def race(self, v):
         return not (self.before(v) or v.before(self))
 
-    def __init__(self, pid, v=None):
+    def __init__(self, pid=None, v=None):
         if v:
             self.clocks = dict(v.clocks)
         else:
             self.clocks = dict()
-        if pid not in self.clocks:
+        if pid and pid not in self.clocks:
             self.clocks[pid] = 1
         
