@@ -1,8 +1,10 @@
+import os
 import sys
 import mmap
 import random
 import logging
 import networkx
+import argparse
 from itertools import *
 
 import scribe
@@ -518,12 +520,12 @@ class Session:
         vclocks[self.process_map[1], 0] = VectorClock(1)
 
         for node in networkx.algorithms.dag.topological_sort(graph):
-            proc, index = s.split_node(node)
+            proc, index = self.split_node(node)
             vc = vclocks[(proc, index)]
             tick = False
 
             for nn in graph.neighbors(node):
-                next, nindex = s.split_node(nn)
+                next, nindex = self.split_node(nn)
 
                 # disregard resource dependencies if not @resource ?
                 if not resources and 'resource' in graph.edge[node][nn]:
@@ -559,8 +561,8 @@ class Session:
         such that both nodes are just about to be executed.
         Returns bookmarks dict of the cut, or None if none found
         """
-        proc1, index1 = s.split_node(node1)
-        proc2, index2 = s.split_node(node2)
+        proc1, index1 = self.split_node(node1)
+        proc2, index2 = self.split_node(node2)
 
         nodes = dict()
         nodes[proc1.pid] = -index1
@@ -688,7 +690,26 @@ class Session:
 # main
 #
 
-def show_races(session, options):
+def load_session(logfile):
+    try:
+        file = open(logfile, 'r')
+    except:
+        logging.error('Failed to open log file')
+        exit(1)
+
+    session = Session()
+    session.load_events(file)
+    return session
+
+def show_graph():
+    session = load_session(args.logfile)
+    graph = session.make_graph(False, False)
+    networkx.write_dot(graph, args.outfile + '.dot')
+    return(0)
+
+def show_races(nlim=10):
+    session = load_session(args.logfile)
+
     graph = session.make_graph(full=True, resources=True)
     logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
 
@@ -703,17 +724,17 @@ def show_races(session, options):
     map_races = dict()
 
     for vc1, i1, vc2, i2 in all_races:
-        s_ev1 = s.events_list[i1]
+        s_ev1 = session.events_list[i1]
         r_ev1 = s_ev1.resource.events[s_ev1.rindex]
-        proc1, pindex1 = s.r_ev_to_proc(r_ev1, sysind=True)
+        proc1, pindex1 = session.r_ev_to_proc(r_ev1, sysind=True)
         p_ev1 = proc1.events[pindex1]
-        node1 = s.make_node(proc1.pid, p_ev1.syscnt)
+        node1 = session.make_node(proc1.pid, p_ev1.syscnt)
 
-        s_ev2 = s.events_list[i2]
+        s_ev2 = session.events_list[i2]
         r_ev2 = s_ev2.resource.events[s_ev2.rindex]
-        proc2, pindex2 = s.r_ev_to_proc(r_ev2, sysind=True)
+        proc2, pindex2 = session.r_ev_to_proc(r_ev2, sysind=True)
         p_ev2 = proc2.events[pindex2]
-        node2 = s.make_node(proc2.pid, p_ev2.syscnt)
+        node2 = session.make_node(proc2.pid, p_ev2.syscnt)
 
         if r_ev1.event.serial < r_ev2.event.serial:
             node1, node2 = node2, node1
@@ -729,9 +750,11 @@ def show_races(session, options):
     logging.info('Found %d potential races (%d after duplicates removal)' %
                  (len(all_races), len(sys_races)))
 
-    num = 10
+    if len(all_races) == 0:
+        return 0
+
     r = random.sample(sys_races, len(sys_races))
-    logging.info('Sampling at random to generate at most %d races:' %(num))
+    logging.info('Sampling at random to generate at most %d races:' %(nlim))
     logging.info('-' * 75)
 
     n_race = 0
@@ -744,7 +767,7 @@ def show_races(session, options):
         proc2, pindex2 = session.split_node(node2)
         event2 = session.events_list[int(graph.node[node2]['index'])].event
 
-        bookmark1 = s.crosscut_graph(graph, vclocks, node1, node2)
+        bookmark1 = session.crosscut_graph(graph, vclocks, node1, node2)
         if not bookmark1:
             logging.info('No consistent cut for: ' +
                          'pid %d syscnt %d  -->  pid %d syscnt %d'
@@ -775,137 +798,101 @@ def show_races(session, options):
         logging.debug('   injects: %s' % (injects))
         logging.debug('   cutoff: %s' % (cutoff))
 
-        outfile = open(options.outfile + '.' + str(n_race + 1) + '.log', 'w')
-        s.save_events(outfile,
-                      bookmarks=bookmarks,
-                      injects=injects,
-                      cutoff=cutoff)
+        outfile = open(args.outfile + '.' + str(n_race + 1) + '.log', 'w')
+        session.save_events(outfile,
+                            bookmarks=bookmarks,
+                            injects=injects,
+                            cutoff=cutoff)
         outfile.close()
 
         n_race += 1
-        if (n_race == 10):
+        if (n_race == nlim):
             break;
 
     logging.info('-' * 75)
     logging.info('Generated %d logs out of total %d races examined',
                  n_race, n_race + n_fail)
 
-def show_graph(session, options):
-    graph = s.make_graph(False, False)
-    networkx.write_dot(graph, options.outfile + '.dot')
-    return(0)
+    return n_race
 
-def __test_graph(s, options):
-    g = s.make_graph(False, False)
-    print(networkx.convert.to_edgelist(g))
-    networkx.write_dot(g, options.outfile + '-proc.dot')
-    g = s.make_graph(True, True)
-    print(networkx.convert.to_edgelist(g))
-    networkx.write_dot(g, options.outfile + '-full.dot')
-    vclocks = s.vclock_graph(g)
-    for k in vclocks.keys():
-        print('%s -> %s' % (k, vclocks[k].clocks))
-    node1 = (s.process_map[1], 3)
-    node2 = (s.process_map[2], 4)
-    bookmarks = s.crosscut_graph(g, vc_dict, '1:3', '2:4')
-    print(bookmarks)
-    return(0)
+def find_races():
+    logfile = args.logfile
+    args.logfile = os.path.join(args.dir, logfile)
 
-def __test_inject(s, options):
-    a1 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 1000)
-    a2 = Action(scribe.SCRIBE_INJECT_ACTION_SLEEP, 2000)
-    actions = { 10:a1, 20:a2 }
-    injects = { 1:actions }
-    cutoff = { 2:25 }
-    try:
-        f = open(options.outfile, 'wb')
-    except:
-        print('Failed to open output file')
-        exit(1)
-    s.save_events(f, bookmarks=None, injects=injects, cutoff=cutoff)
-    return(0)
+    for n in range(args.number):
+        os.unlink(args.logfile + '.%d.log' % n)
 
-def __test_races(s, options):
-    g = s.make_graph(full=True, resources=True)
-    print('graph: %s' % networkx.convert.to_edgelist(g))
-    networkx.write_dot(g, options.outfile + '-full.dot')
-    vclocks = s.vclock_graph(g)
-    print('')
-    sys.stdout.write('vclock: ')
-    for k in vclocks.keys():
-        print('%d, %d -> %s  ' % (k[0].pid, k[1], vclocks[k].clocks))
-    races = s.races_resources(vclocks)
-    print('')
-    print('races: %s' % races)
-    for vc1, i1, vc2, i2 in races:
-        p1 = s.events_list[i1].proc
-        e1 = s.events_list[i1].event
-        i1 = s.events_list[i1].pindex
-        p2 = s.events_list[i2].proc
-        e2 = s.events_list[i2].event
-        i2 = s.events_list[i2].pindex
-        print('proc %d syscall %d rid %d <->  proc %d syscall %d rid %d' \
-                  % (p1.pid, p1.events[i1].syscnt, e1.id,
-                     p2.pid, p2.events[i2].syscnt, e2.id))
+    nr = show_races(args.number)
+
+    for n in range(nr):
+        if args.script_pre:
+            ret = os.system(args.script_pre)
+            if ret > 0:
+                logging.warn('Bad exit %d: pre-script (race %d)' % (ret, n))
+
+            ret = os.system('replay -i %s.%d.log' % (args.logfile, n))
+            if ret > 0:
+                logging.info('REPLAY %2d failed (exit %d)' % (n, ret))
+            else:
+                logging.info('REPLAY %2d completed' % n)
+
+            ret = os.system(args.script_test)
+            if ret > 0:
+                logging.warn('TEST %s' % 'succeeded' if ret == 0 else 'failed')
+
+            ret = os.system(args.script_post)
+            if ret > 0:
+                logging.warn('Bad exit %d: post-script (race %d)' % (ret, n))
 
 if __name__ == "__main__":
+    parser_common = argparse.ArgumentParser(add_help=False)
+    parser_common.add_argument('-i', '--input', dest='logfile',
+                               metavar='FILE', required=True)
+    parser_common.add_argument('-o', '--output', dest='outfile',
+                               metavar='FILE', required=True)
 
-    import sys
-    from optparse import OptionParser
-
-    usage = 'usage: %prog [options] show-graph|show-races'
     desc = 'Process and modify scribe execution log'
-    parser = OptionParser(usage=usage, description=desc)
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('-d', dest='debug',
+                        action='store_true', default=False,
+                        help='Increase debug vebosity')
+    parser.add_argument('-v', dest='verbose',
+                        action='store_true', default=False,
+                        help='Increase vebosity level')
 
-    parser.add_option('-d', '--debug',
-                      action='store_true', dest='debug', default=False,
-                      help='Increase debug vebosity')
-    parser.add_option('-v', '--verbose',
-                      action='store_true', dest='verbose', default=False,
-                      help='Increase vebosity level')
-    parser.add_option('-i', '--input', dest='logfile',
-                      metavar='FILE',
-                      help='Read the recorded execution from FILE')
-    parser.add_option('-o', '--output', dest='outfile',
-                      metavar='FILE',
-                      help='Write the output graph or execution to FILE')
+    subparsers = parser.add_subparsers(title='subcommands')
 
-    parser.disable_interspersed_args()
-    (options, cmd) = parser.parse_args()
+    find_races_opts = [
+        ( 'number', 'NUM', 10 ),
+        ( 'script-pre', 'SCRIPT', None ),
+        ( 'script-post', 'SCRIPT', None ),
+        ( 'script-test', 'SCRIPT', None ),
+        ( 'command', 'CMD', None ),
+        ( 'dir', 'DIR', './' ),
+        ]
 
-    commands = {
-        'test-graph':__test_graph,
-        'test-races':__test_races,
-        'test-inject':__test_inject,
-        'show-races':show_races,
-        'show-graph':show_graph,
-        }
+    commands = [
+        ('show-graph', show_graph, list()),
+        ('show-races', show_races, list()),
+        ('find-races', find_races, find_races_opts),
+        ]
+
+    for cmd, func, opts in commands:
+        parser_cmd = subparsers.add_parser(cmd, parents=[parser_common])
+        parser_cmd.set_defaults(func=func)
+        for opt, meta, dflt in opts:
+            print(opt)
+            parser_cmd.add_argument('--' + opt,
+                                    metavar=meta.replace('-','_'),
+                                    dest=opt, default=dflt)
+
+    args = parser.parse_args()
 
     log = logging.ERROR
-    if options.verbose: log = logging.INFO
-    if options.debug: log = logging.DEBUG
+    if args.verbose: log = logging.INFO
+    if args.debug: log = logging.DEBUG
     logging.basicConfig(level=log, stream=sys.stdout)
 
-    if len(cmd) < 1:
-        parser.error('Missing command')
-    if len(cmd) > 1:
-        parser.error('Command too long')
-    elif cmd[0] not in commands:
-        parser.error('Unknown command: %s' % cmd[0])
+    ret = args.func()
 
-    if not options.logfile:
-        logging.error('Input logfile not specificed')
-    if not options.outfile:
-        parser.error('Output file not specified')
-
-    try:
-        f = open(options.logfile, 'r')
-    except:
-        logging.error('Failed to open log file')
-        exit(1)
-
-    s = Session()
-    s.load_events(f)
-
-    ret = commands[cmd[0]](s, options)
     exit(ret)
