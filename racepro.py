@@ -816,7 +816,10 @@ def show_races(args):
 
     return n_race
 
-def find_races(args):
+def test_races(args):
+    cmd_replay = 'sudo replay -c 1'
+    cmd_suffix = ' 2>&1 > /dev/null' if not args.silent else ''
+
     logfile = os.path.join(args.dir, args.logfile)
 
     for n in range(args.number):
@@ -827,25 +830,37 @@ def find_races(args):
 
     nr = show_races(args)
 
-    for n in range(nr):
+    for n in range(1, nr + 1):
         if args.script_pre:
-            ret = os.system(args.script_pre)
+            ret = os.system('sudo ' + args.script_pre + cmd_suffix)
             if ret > 0:
-                logging.warn('Bad exit %d: pre-script (race %d)' % (ret, n))
+                logging.info('Bad exit code %d from pre-script'
+                             ' (race %d)... skipping' % (ret, n))
+                continue;
 
-            ret = os.system('replay -i %s.%d.log' % (logfile, n))
-            if ret > 0:
-                logging.info('REPLAY %2d failed (exit %d)' % (n, ret))
-            else:
-                logging.info('REPLAY %2d completed' % n)
+        ret = os.system('%s %s.%d.log %s' %
+                        (cmd_replay, args.outfile, n, cmd_suffix))
+        if ret > 0:
+            logging.info('REPLAY %2d failed (exit %d)' % (n, ret))
+            continue
+        else:
+            logging.info('REPLAY %2d completed' % n)
+            success = True
 
-            ret = os.system(args.script_test)
-            if ret > 0:
-                logging.warn('TEST %s' % 'succeeded' if ret == 0 else 'failed')
+        if args.script_test:
+            ret = os.system('sudo ' + args.script_test + cmd_suffix)
+            if ret == 2:
+                logging.info('Bad exit code %d from test-script'
+                             ' (race %d)... skipping' % (ret, n))
+            success = True if ret == 0 else False
 
-            ret = os.system(args.script_post)
+        logging.info('BUG %s' % 'PRODUCED' if success else 'not triggered')
+
+        if args.script_post:
+            ret = os.system('sudo ' + args.script_post + cmd_suffix)
             if ret > 0:
-                logging.warn('Bad exit %d: post-script (race %d)' % (ret, n))
+                logging.info('Bad exit code %d from post-script'
+                             ' (race %d)' % (ret, n))
 
 if __name__ == "__main__":
     parser_common = argparse.ArgumentParser(add_help=False)
@@ -865,25 +880,26 @@ if __name__ == "__main__":
 
     subparsers = parser.add_subparsers(title='subcommands')
 
-    find_races_opts = [
-        ( 'number', 'NUM', 100 ),
-        ( 'random', None, False ),
-        ( 'dir', 'DIR', './' ),
-        ]
-
-    show_races_opts = [
+    test_races_opts = [
         ( 'number', 'NUM', 100 ),
         ( 'random', None, False ),
         ( 'dir', 'DIR', './' ),
         ( 'script-pre', 'SCRIPT', None ),
         ( 'script-post', 'SCRIPT', None ),
         ( 'script-test', 'SCRIPT', None ),
+        ( 'silent', None, False ),
+        ]
+
+    show_races_opts = [
+        ( 'number', 'NUM', 100 ),
+        ( 'random', None, False ),
+        ( 'dir', 'DIR', './' ),
         ]
 
     commands = [
         ('show-graph', show_graph, list()),
         ('show-races', show_races, show_races_opts),
-        ('find-races', find_races, find_races_opts),
+        ('find-races', test_races, test_races_opts),
         ]
 
     for cmd, func, opts in commands:
