@@ -6,6 +6,6 @@ file = open('/tmp/fork_two_file.out', 'r')
 for l in lines:
     ll = file.readline()
     if (l != ll.rstrip()):
-        exit(0)
+        exit(1)
 
-exit(1)
+exit(0)

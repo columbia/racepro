@@ -852,7 +852,8 @@ def test_races(args):
             if ret == 2:
                 logging.info('Bad exit code %d from test-script'
                              ' (race %d)... skipping' % (ret, n))
-            success = True if ret == 0 else False
+                continue
+            success = True if ret == 1 else False
 
         logging.info('BUG %s' % 'PRODUCED' if success else 'not triggered')
 
