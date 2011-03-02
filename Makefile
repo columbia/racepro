@@ -4,3 +4,4 @@ all:
 
 clean:
 	make -C tests clean
+	rm *.pyc *~
