@@ -375,7 +375,7 @@ class Session:
                 continue
 
             if isinstance(event, scribe.EventQueueEof):
-                endof[pid] = True
+                endofq[pid] = True
                 active[pid] = False
 
             logfile.write(event.encode())
@@ -593,11 +593,11 @@ class Session:
                 p_ev = proc.events[pindex]
                 vc = vclocks[(proc, p_ev.syscnt)]
                 logging.debug('vc %s' % (vc.clocks))
-                if vc.race(vc1) and vc.race(vc2):
-                    tproc = proc
-                    tindex = p_ev.syscnt
-                    break;
-                logging.debug('vc.pre %s' %(vc.pre().clocks))
+#                if vc.race(vc1) and vc.race(vc2):
+#                    tproc = proc
+#                    tindex = p_ev.syscnt
+#                    break;
+#                logging.debug('vc.pre %s' %(vc.pre().clocks))
                 if vc.pre().race(vc1) and vc.pre().race(vc2):
                     tproc = proc
                     tindex = -p_ev.syscnt
