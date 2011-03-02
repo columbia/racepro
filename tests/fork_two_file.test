@@ -1,0 +1,11 @@
+#!/usr/bin/python
+
+lines = ['parent', 'child', 'grandchild']
+file = open('/tmp/fork_two_file.out', 'r')
+
+for l in lines:
+    ll = file.readline()
+    if (l != ll.rstrip()):
+        exit(0)
+
+exit(1)
