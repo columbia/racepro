@@ -701,13 +701,13 @@ def load_session(logfile):
     session.load_events(file)
     return session
 
-def show_graph():
+def show_graph(args):
     session = load_session(args.logfile)
     graph = session.make_graph(False, False)
     networkx.write_dot(graph, args.outfile + '.dot')
     return(0)
 
-def show_races(nlim=10):
+def show_races(args):
     session = load_session(args.logfile)
 
     graph = session.make_graph(full=True, resources=True)
@@ -754,7 +754,8 @@ def show_races(nlim=10):
         return 0
 
     r = random.sample(sys_races, len(sys_races))
-    logging.info('Sampling at random to generate at most %d races:' %(nlim))
+
+    logging.info('Random sample to generate at most %d races:' %(args.number))
     logging.info('-' * 75)
 
     n_race = 0
@@ -775,7 +776,7 @@ def show_races(nlim=10):
             n_fail += 1
             continue
 
-        logging.info('RACE %2d:  ' % (n_race) +
+        logging.info('RACE %2d:  ' % (n_race + 1) +
                      'pid %d syscnt %d [sys(%d)=%d]' %
                      (proc1.pid, pindex1, event1.nr, event1.ret) +
                      '  -->   pid %d syscnt %d [sys(%d)=%d]' %
@@ -806,7 +807,7 @@ def show_races(nlim=10):
         outfile.close()
 
         n_race += 1
-        if (n_race == nlim):
+        if (n_race == args.number):
             break;
 
     logging.info('-' * 75)
@@ -815,14 +816,16 @@ def show_races(nlim=10):
 
     return n_race
 
-def find_races():
-    logfile = args.logfile
-    args.logfile = os.path.join(args.dir, logfile)
+def find_races(args):
+    logfile = os.path.join(args.dir, args.logfile)
 
     for n in range(args.number):
-        os.unlink(args.logfile + '.%d.log' % n)
+        try:
+            os.unlink('%s.%d.log' % (args.outfile, n))
+        except OSError:
+            pass
 
-    nr = show_races(args.number)
+    nr = show_races(args)
 
     for n in range(nr):
         if args.script_pre:
@@ -830,7 +833,7 @@ def find_races():
             if ret > 0:
                 logging.warn('Bad exit %d: pre-script (race %d)' % (ret, n))
 
-            ret = os.system('replay -i %s.%d.log' % (args.logfile, n))
+            ret = os.system('replay -i %s.%d.log' % (logfile, n))
             if ret > 0:
                 logging.info('REPLAY %2d failed (exit %d)' % (n, ret))
             else:
@@ -863,17 +866,23 @@ if __name__ == "__main__":
     subparsers = parser.add_subparsers(title='subcommands')
 
     find_races_opts = [
-        ( 'number', 'NUM', 10 ),
+        ( 'number', 'NUM', 100 ),
+        ( 'random', None, False ),
+        ( 'dir', 'DIR', './' ),
+        ]
+
+    show_races_opts = [
+        ( 'number', 'NUM', 100 ),
+        ( 'random', None, False ),
+        ( 'dir', 'DIR', './' ),
         ( 'script-pre', 'SCRIPT', None ),
         ( 'script-post', 'SCRIPT', None ),
         ( 'script-test', 'SCRIPT', None ),
-        ( 'command', 'CMD', None ),
-        ( 'dir', 'DIR', './' ),
         ]
 
     commands = [
         ('show-graph', show_graph, list()),
-        ('show-races', show_races, list()),
+        ('show-races', show_races, show_races_opts),
         ('find-races', find_races, find_races_opts),
         ]
 
@@ -881,10 +890,10 @@ if __name__ == "__main__":
         parser_cmd = subparsers.add_parser(cmd, parents=[parser_common])
         parser_cmd.set_defaults(func=func)
         for opt, meta, dflt in opts:
-            print(opt)
             parser_cmd.add_argument('--' + opt,
-                                    metavar=meta.replace('-','_'),
-                                    dest=opt, default=dflt)
+                                    metavar=meta,
+                                    dest=opt.replace('-','_'),
+                                    default=dflt)
 
     args = parser.parse_args()
 
@@ -893,6 +902,6 @@ if __name__ == "__main__":
     if args.debug: log = logging.DEBUG
     logging.basicConfig(level=log, stream=sys.stdout)
 
-    ret = args.func()
+    ret = args.func(args)
 
     exit(ret)
