@@ -1,0 +1,20 @@
+#!/usr/bin/python
+
+lines = [
+    'A lines:       3      15      72',
+    'B lines:       3      15      72',
+    ]
+
+file = open('/tmp/bashrace.out', 'r')
+
+for l in lines:
+    ll = file.readline()
+    if (l != ll.rstrip()):
+        print("bad")
+        exit(1)
+
+exit(0)
+
+
+
+
