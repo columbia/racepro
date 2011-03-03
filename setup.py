@@ -7,6 +7,7 @@ setup(
     description = 'RacePro tools',
     author = 'Oren Laadan',
     author_email = 'orenl@cs.columbia.edu',
-    package_dir = {'': 'src'},
+    package_dir={'': 'src'},
+    packages=[''],
     scripts=['src/racepro']
 )
