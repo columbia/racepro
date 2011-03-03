@@ -426,7 +426,7 @@ class Session:
             event = p_ev.event
             if not isinstance(event, scribe.EventSyscallExtra):
                 continue
-            if event.nr in unistd.Syscalls.SYS_fork and event.ret >= 0:
+            if event.nr in unistd.Syscalls.SYS_fork and event.ret > 0:
                 newpid = event.ret
                 parent = self.make_node(pid, p_ev.syscnt)
                 graph.add_node(parent, index=str(p_ev.index), fork='1')
@@ -436,7 +436,7 @@ class Session:
                 graph.add_edge(parent, child, fork='1')
                 self.__build_graph(graph, self.process_map[newpid], full)
                 ancestor = parent
-            elif event.nr in unistd.Syscalls.SYS_wait and event.ret >= 0:
+            elif event.nr in unistd.Syscalls.SYS_wait and event.ret > 0:
                 newpid = event.ret
                 node = self.make_node(pid, p_ev.syscnt)
                 graph.add_node(node, index=str(p_ev.index))

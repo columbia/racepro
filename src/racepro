@@ -87,7 +87,7 @@ def show_races(args):
 
     r = random.sample(sys_races, len(sys_races))
 
-    logging.info('Random sample to generate at most %d races:' %(args.number))
+    logging.info('Random sample to generate at most %d races:' % (args.count))
     logging.info('-' * 75)
 
     n_race = 0
@@ -119,8 +119,8 @@ def show_races(args):
         bookmark2[proc1.pid] = -bookmark2[proc1.pid]
         bookmarks = [bookmark1, bookmark2]
 
-        action = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                        0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+        action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                                0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
         injects = dict()
         injects[proc1.pid] = dict({-pindex1 : action})
 
@@ -139,7 +139,7 @@ def show_races(args):
         outfile.close()
 
         n_race += 1
-        if (n_race == args.number):
+        if (n_race == args.count):
             break;
 
     logging.info('-' * 75)
@@ -154,9 +154,7 @@ def test_races(args):
     cmd_replay = 'sudo replay -c 1'
     cmd_suffix = ' 2>&1 > /dev/null' if not args.silent else ''
 
-    logfile = os.path.join(args.dir, args.logfile)
-
-    for n in range(args.number):
+    for n in range(args.count):
         try:
             os.unlink('%s.%d.log' % (args.outfile, n))
         except OSError:
@@ -199,11 +197,19 @@ def test_races(args):
 
 ##############################################################################
 
-parser_def = argparse.ArgumentParser(add_help=False)
-parser_def.add_argument('-i', '--input', dest='logfile',
-                        metavar='FILE', required=True)
-parser_def.add_argument('-o', '--output', dest='outfile',
-                        metavar='FILE', required=True)
+parser_io = argparse.ArgumentParser(add_help=False)
+parser_io.add_argument('-i', '--input', dest='logfile',
+                       metavar='FILE', required=True)
+parser_io.add_argument('-o', '--output', dest='outfile',
+                       metavar='FILE', required=True)
+
+parser_races = argparse.ArgumentParser(add_help=False)
+parser_races.add_argument('-c', '--count', dest='count',
+                          metavar='COUNT', type=int, default=100,
+                          help='Limit results to COUNT races')
+parser_races.add_argument('-r', '--random', dest='random',
+                          action='store_true', default=False,
+                          help='List races in random order')
 
 desc = 'Process and modify scribe execution log'
 parser = argparse.ArgumentParser(description=desc)
@@ -216,34 +222,29 @@ parser.add_argument('-v', dest='verbose',
 
 subparsers = parser.add_subparsers(title='subcommands')
 
-test_races_opts = [
-    ( 'number', 'NUM', 100 ),
-    ( 'random', None, False ),
-    ( 'dir', 'DIR', './' ),
-    ( 'script-pre', 'SCRIPT', None ),
-    ( 'script-post', 'SCRIPT', None ),
-    ( 'script-test', 'SCRIPT', None ),
-    ( 'silent', None, False ),
-    ]
+parser_show_graph = subparsers.add_parser(
+    'show-graph', parents=[parser_io])
+parser_show_graph.set_defaults(func=show_graph)
 
-show_races_opts = [
-    ( 'number', 'NUM', 100 ),
-    ( 'random', None, False ),
-    ( 'dir', 'DIR', './' ),
-    ]
+parser_show_races = subparsers.add_parser(
+    'show-races', parents=[parser_io, parser_races])
+parser_show_races.set_defaults(func=show_races)
 
-commands = [
-    ('show-graph', show_graph, list()),
-    ('show-races', show_races, show_races_opts),
-    ('find-races', test_races, test_races_opts),
-    ]
-
-for cmd, func, opts in commands:
-    parser_cmd = subparsers.add_parser(cmd, parents=[parser_def])
-    parser_cmd.set_defaults(func=func)
-    for opt, meta, dflt in opts:
-        parser_cmd.add_argument('--' + opt, metavar=meta,
-                                dest=opt.replace('-','_'), default=dflt)
+parser_test_races = subparsers.add_parser(
+    'test-races', parents=[parser_io, parser_races])
+parser_test_races.set_defaults(func=test_races)
+parser_test_races.add_argument('--script-pre', dest='script_pre',
+                               default=None,
+                               help='Script to run before test')
+parser_test_races.add_argument('--script-post', dest='script_post',
+                               default=None,
+                               help='Script to run after test')
+parser_test_races.add_argument('--script-test', dest='script_test',
+                               default=None,
+                               help='Script to check success of test')
+parser_test_races.add_argument('-s', '--silent', dest='silent',
+                               action='store_true', default=False,
+                               help='Hide scribe/scripts/tests output')
 
 args = parser.parse_args()
 
