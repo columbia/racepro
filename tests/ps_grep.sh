@@ -1,3 +1,3 @@
 #!/bin/bash --norc
 
-ps x | grep really_unique_string
+ps x | grep "ps x" >& /tmp/ps_grep.out
