@@ -255,7 +255,7 @@ class Session:
             if syscall == bmark[pid]:
                 e = scribe.EventBookmark()
                 e.id = n
-                e.npr = len(bmark)
+                e.npr = len([b for b in bmark.values() if b != 0])
                 logfile.write(e.encode())
                 logging.debug('[%d] bookmark at syscall %d' % (pid, syscall))
 
