@@ -484,7 +484,7 @@ class Session:
                 else:
                     add_resource_edges()
                     pr_ev = nr_ev
-                    nr_ev = dict()
+                    nr_ev = dict({next:(next, nind)})
                     serial = r_ev.event.serial
             else:
                 add_resource_edges()
