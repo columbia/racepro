@@ -17,7 +17,7 @@ def load_session(logfile):
     try:
         file = open(logfile, 'r')
     except:
-        logging.error('Failed to open log file')
+        print('Cannot open log file')
         exit(1)
 
     session = racepro.Session()
@@ -126,16 +126,16 @@ def show_races(args):
         except KeyError:
             map_races[(node1, node2)] = list([(i1, i2)])
 
-    logging.info('Found %d potential races (%d after duplicates removal)' %
-                 (len(all_races), len(sys_races)))
+    print('Found %d potential races (%d after duplicates removal)' %
+          (len(all_races), len(sys_races)))
 
     if len(all_races) == 0:
         return 0
 
     r = random.sample(sys_races, len(sys_races))
 
-    logging.info('Random sample to generate at most %d races:' % (args.count))
-    logging.info('-' * 75)
+    print('Random sample to generate at most %d races:' % (args.count))
+    print('-' * 75)
 
     n_race = 0
     n_fail = 0
@@ -149,18 +149,17 @@ def show_races(args):
 
         bookmark1 = session.crosscut_graph(graph, vclocks, node1, node2)
         if not bookmark1:
-            logging.info('No consistent cut for: ' +
-                         'pid %d syscnt %d  -->  pid %d syscnt %d'
-                         % (proc1.pid, pindex1, proc2.pid, pindex2))
+            print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
+                  (proc1.pid, pindex1, proc2.pid, pindex2))
             n_fail += 1
             continue
 
-        logging.info('RACE %2d:  ' % (n_race + 1) +
-                     'pid %d syscnt %d [sys(%d)=%d]' %
-                     (proc1.pid, pindex1, event1.nr, event1.ret) +
-                     '  -->   pid %d syscnt %d [sys(%d)=%d]' %
-                     (proc2.pid, pindex2, event2.nr, event2.ret))
-        logging.info('          cut:  %s' % bookmark1.values())
+        print('RACE %2d:  ' % (n_race + 1) +
+              'pid %d syscnt %d [sys(%d)=%d]' %
+              (proc1.pid, pindex1, event1.nr, event1.ret) +
+              '  -->   pid %d syscnt %d [sys(%d)=%d]' %
+              (proc2.pid, pindex2, event2.nr, event2.ret))
+        print('          cut:  %s' % bookmark1.values())
 
         bookmark2 = dict(bookmark1)
         bookmark2[proc1.pid] = -bookmark2[proc1.pid]
@@ -189,9 +188,10 @@ def show_races(args):
         if (n_race == args.count):
             break;
 
-    logging.info('-' * 75)
-    logging.info('Generated %d logs out of total %d races examined',
-                 n_race, n_race + n_fail)
+    print('-' * 75)
+    print('Generated %d logs out of total %d races examined' %
+          (n_race, n_race + n_fail))
+    print('-' * 75)
 
     return n_race
 
@@ -199,48 +199,53 @@ def show_races(args):
 
 def test_races(args):
     cmd_replay = 'sudo replay -c 1'
-    cmd_suffix = ' 2>&1 > /dev/null' if not args.silent else ''
+    cmd_suffix = ' > /dev/null 2>&1' if args.silent else ''
 
-    for n in range(args.count):
-        try:
-            os.unlink('%s.%d.log' % (args.outfile, n))
-        except OSError:
-            pass
+    if args.detect:
+        total = show_races(args)
+    else:
+        total = -1
 
-    nr = show_races(args)
+    n = 0
+    while True:
+        n += 1
+        if total >= 0 and n > total:
+            break;
+        logfile = '%s.%d.log' % (args.outfile, n)
+        if not os.access(logfile, os.R_OK):
+            break
 
-    for n in range(1, nr + 1):
         if args.script_pre:
             ret = os.system('sudo ' + args.script_pre + cmd_suffix)
             if ret > 0:
-                logging.info('Bad exit code %d from pre-script'
-                             ' (race %d)... skipping' % (ret, n))
+                print('Bad exit code %d from pre-script'
+                      ' (race %d)... skipping' % (ret, n))
                 continue;
 
-        ret = os.system('%s %s.%d.log %s' %
-                        (cmd_replay, args.outfile, n, cmd_suffix))
+        logging.debug('command: %s %s %s' % (cmd_replay, logfile, cmd_suffix))
+        ret = os.system('%s %s %s' % (cmd_replay, logfile, cmd_suffix))
         if ret > 0:
-            logging.info('REPLAY %2d failed (exit %d)' % (n, ret))
+            print('REPLAY %2d: failed (exit %d)' % (n, ret))
             continue
         else:
-            logging.info('REPLAY %2d completed' % n)
+            print('REPLAY %2d: completed' % n)
             success = True
 
         if args.script_test:
             ret = os.system('sudo ' + args.script_test + cmd_suffix)
             if ret == 2:
-                logging.info('Bad exit code %d from test-script'
-                             ' (race %d)... skipping' % (ret, n))
+                print('Bad exit code %d from test-script'
+                      ' (race %d)... skipping' % (ret, n))
                 continue
             success = True if ret == 1 else False
 
-        logging.info('BUG %s' % 'PRODUCED' if success else 'not triggered')
+        print('    BUG %s' % ('PRODUCED' if success else 'not triggered'))
 
         if args.script_post:
             ret = os.system('sudo ' + args.script_post + cmd_suffix)
             if ret > 0:
-                logging.info('Bad exit code %d from post-script'
-                             ' (race %d)' % (ret, n))
+                print('Bad exit code %d from post-script'
+                     ' (race %d)' % (ret, n))
 
 ##############################################################################
 
@@ -252,7 +257,7 @@ parser_io.add_argument('-o', '--output', dest='outfile',
 
 parser_races = argparse.ArgumentParser(add_help=False)
 parser_races.add_argument('-c', '--count', dest='count',
-                          metavar='COUNT', type=int, default=100,
+                          metavar='COUNT', type=int, default=1000,
                           help='Limit results to COUNT races')
 parser_races.add_argument('-r', '--random', dest='random',
                           action='store_true', default=False,
@@ -298,6 +303,9 @@ parser_test_races.add_argument('--script-test', dest='script_test',
 parser_test_races.add_argument('-s', '--silent', dest='silent',
                                action='store_true', default=False,
                                help='Hide scribe/scripts/tests output')
+parser_test_races.add_argument('-d', '--detect', dest='detect',
+                               action='store_true', default=False,
+                               help='Detect races and generate logs')
 
 args = parser.parse_args()
 

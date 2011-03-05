@@ -257,7 +257,7 @@ class Session:
                 e.id = n
                 e.npr = len([b for b in bmark.values() if b != 0])
                 logfile.write(e.encode())
-                logging.debug('[%d] bookmark at syscall %d' % (pid, syscall))
+                logging.info('[%d] bookmark at syscall %d' % (pid, syscall))
 
     def __check_inject(self, pid, syscall, injects, logfile):
         noregs = False
@@ -268,14 +268,14 @@ class Session:
                 e.arg1 = a.arg1
                 e.arg2 = a.arg2
                 logfile.write(e.encode())
-                logging.debug('[%d] inject at syscall %d' % (pid, syscall))
+                logging.info('[%d] inject at syscall %d' % (pid, syscall))
                 if a.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
                     noregs = True
         return noregs
 
     def __check_cutoff(self, pid, syscall, cutoff):
         if syscall == cutoff[pid]:
-            logging.debug('[%d] cutoff at syscall %d' % (pid, cutoff[pid]))
+            logging.info('[%d] cutoff at syscall %d' % (pid, cutoff[pid]))
             return True
         else:
             return False
@@ -603,10 +603,12 @@ class Session:
                     break
                 pindex = proc.next_syscall(pindex)
 
-            logging.debug('[pid %d] tproc %s tindex %s', proc.pid, tproc, tindex)
             if tproc:
+                logging.debug('[pid %d] tproc %s tindex %s' %
+                              (proc.pid, tproc, tindex))
                 nodes[tproc.pid] = tindex
             elif vc.before(vc1) and vc.before(vc2):
+                logging.debug('[pid %d] exited, no bookmark' % (proc.pid))
                 nodes[proc.pid] = 0
             else:
                 logging.debug('consistent cut failed for pid %d' % (proc.pid))
