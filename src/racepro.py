@@ -402,7 +402,6 @@ class Session:
             logfile.write(event.encode())
 
             if isinstance(event, scribe.EventSyscallEnd):
-
                 # pid bookmark ?
                 self.__check_bookmarks(pid, syscall[pid], bookmarks, logfile)
                 # pid inject ?
@@ -485,35 +484,37 @@ class Session:
 
         for r in self.resource_list:
             prev, pind = self.r_ev_to_proc(r.events[0])
-            pr_ev = dict()
-            nr_ev = dict()
+            pr_ev = list()
+            nr_ev = list()
             serial = 0
 
             def add_resource_edges():
-                dst = None
-                tr_ev = product(pr_ev.values(), nr_ev.values())
+                tr_ev = product(pr_ev, nr_ev)
+
                 for (prev, pind), (next, nind) in tr_ev:
                     if prev == next:
                         continue
+                    logging.info('%d:%d -> %d:%d' % (prev.pid,pind,next.pid,nind))
                     src = self.make_node(prev.pid, prev.events[pind].syscnt)
                     dst = self.make_node(next.pid, next.events[nind].syscnt)
-                if dst and dst not in graph[src]:
                     if 'resource' not in graph.node[src]:
                         graph.node[src]['resource'] = ''
                     graph.node[src]['resource'] += str(r.id)
-                    graph.add_edge(src, dst,
-                                   resource=str(r.id),
-                                   label='r%d(%d)' % (r.id, serial))
+                    if dst not in graph[src]:
+                        graph.add_edge(src, dst,
+                                       resource=str(r.id),
+                                       label='r%d(%d)' % (r.id, serial))
 
             for r_ev in r.events:
                 next, nind = self.r_ev_to_proc(r_ev)
                 if r_ev.event.serial == serial:
-                    if next not in nr_ev.keys():
-                        nr_ev[next] = (next, nind)
+                    nr_ev.append((next, nind))
+                    # if next not in nr_ev.keys():
+                    #    nr_ev[next] = (next, nind)
                 else:
                     add_resource_edges()
                     pr_ev = nr_ev
-                    nr_ev = dict({next:(next, nind)})
+                    nr_ev = list([(next, nind)])
                     serial = r_ev.event.serial
             else:
                 add_resource_edges()
