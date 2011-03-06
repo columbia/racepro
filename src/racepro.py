@@ -610,44 +610,53 @@ class Session:
             if proc == proc1 or proc == proc2:
                 continue
 
+            pid = proc.pid
             pindex = proc.next_syscall(-1)
 
             p_ev = proc.events[pindex]
             vc = vclocks[(proc, p_ev.syscnt)]
             logging.debug('[pid %d] pindex %d vclock %s' %
-                          (proc.pid, pindex, vc.clocks))
-            if vc1.before(vc) and vc2.before(vc):
+                          (pid, pindex, vc.clocks))
+
+            # process yet to be created ...
+            if ((vc1.before(vc) and not vc.before(vc2)) or
+                (vc2.before(vc) and not vc.before(vc1))):
                 continue
 
             tproc = None
             tindex = None
+
             while True:
                 p_ev = proc.events[pindex]
                 vc = vclocks[(proc, p_ev.syscnt)]
-                logging.debug('vc %s' % (vc.clocks))
-#                if vc.race(vc1) and vc.race(vc2):
-#                    tproc = proc
-#                    tindex = p_ev.syscnt
-#                    break
-#                logging.debug('vc.pre %s' %(vc.pre().clocks))
-                if vc.pre().race(vc1) and vc.pre().race(vc2):
+                logging.debug('[pid/cnt %d:%d] vc %s' %
+                              (proc.pid, p_ev.syscnt, vc.clocks))
+
+                if ((vc.pre().race(vc1) and vc.pre().race(vc2)) or
+                    (vc.pre().race(vc1) and vc.race(vc2.pre())) or
+                    (vc.race(vc1.pre()) and vc.pre().race(vc2)) or
+                    (vc.race(vc1.pre()) and vc.race(vc2.pre()))):
+                    if vc1 < vc or vc2 < vc:
+                        break
                     tproc = proc
                     tindex = -p_ev.syscnt
-                    break
+
                 if p_ev.event.nr in unistd.Syscalls.SYS_exit:
                     logging.debug('exit ?')
                     break
+
                 pindex = proc.next_syscall(pindex)
 
-            if tproc:
+            if ((vc.before(vc1) and not vc2.before(vc)) or
+                (vc.before(vc2) and not vc1.before(vc))):
+                logging.debug('[pid %d] exited, no bookmark' % (proc.pid))
+                nodes[proc.pid] = 0
+            elif tproc:
                 logging.debug('[pid %d] tproc %s tindex %s' %
                               (proc.pid, tproc, tindex))
                 nodes[tproc.pid] = tindex
-            elif vc.before(vc1) and vc.before(vc2):
-                logging.debug('[pid %d] exited, no bookmark' % (proc.pid))
-                nodes[proc.pid] = 0
             else:
-                logging.debug('consistent cut failed for pid %d' % (proc.pid))
+                logging.info('consistent cut failed for pid %d' % (proc.pid))
                 return None
 
         return nodes
