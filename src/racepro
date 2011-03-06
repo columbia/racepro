@@ -32,11 +32,10 @@ def diet_graph(graph):
             continue
         t = graph.successors(n)[0]
         s = graph.predecessors(n)[0]
+        if s.split(':')[0] != n.split(':')[0]:
+            continue
         if n.split(':')[0] != t.split(':')[0]:
             continue
-        if t.split(':')[0] != n.split(':')[0]:
-            continue
-        print('%s->%s->%s delete' % (s, n, t))
         graph.remove_edge(s, n)
         graph.remove_edge(n, t)
         graph.remove_node(n)
