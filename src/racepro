@@ -22,6 +22,8 @@ def load_session(logfile):
 
     session = racepro.Session()
     session.load_events(file)
+    file.close()
+
     return session
 
 ##############################################################################
@@ -125,15 +127,19 @@ def show_races(args):
         except KeyError:
             map_races[(node1, node2)] = list([(i1, i2)])
 
+    print('-' * 75)
     print('Found %d potential races (%d after duplicates removal)' %
           (len(all_races), len(sys_races)))
 
     if len(all_races) == 0:
         return 0
 
-    r = random.sample(sys_races, len(sys_races))
+    if args.random:
+        r = random.sample(sys_races, len(sys_races))
+        print('Random sample to generate at most %d races:' % (args.count))
+    else:
+        r = sys_races
 
-    print('Random sample to generate at most %d races:' % (args.count))
     print('-' * 75)
 
     n_race = 0
