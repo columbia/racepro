@@ -66,9 +66,10 @@ def show_graph(args):
     def do_show_graph(graph, output):
         plot = style_cluster if args.clustered else style_plain
         plot(graph, output + '.dot')
-        g = pygraphviz.AGraph(output + '.dot')
-        g.layout(prog='dot')
-        g.draw(output + '.pdf')
+        if args.pdf:
+            g = pygraphviz.AGraph(output + '.dot')
+            g.layout(prog='dot')
+            g.draw(output + '.pdf')
 
     session = load_session(args.logfile)
     graph = session.make_graph(full=False, resources=False)
@@ -309,6 +310,9 @@ parser_show_graph.add_argument('-c', '--clustered', dest='clustered',
 parser_show_graph.add_argument('-t', '--thin', dest='thin',
                                action='store_true',
                                help='Thin mode (minimal syscalls graph')
+parser_show_graph.add_argument('-p', '--pdf', dest='pdf',
+                               action='store_true',
+                               help='Output graph in PDF format')
 
 parser_show_syscalls = subparsers.add_parser(
     'show-syscalls', parents=[parser_io])
