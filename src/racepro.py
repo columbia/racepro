@@ -494,12 +494,10 @@ class Session:
                 for (prev, pind), (next, nind) in tr_ev:
                     if prev == next:
                         continue
-                    logging.info('%d:%d -> %d:%d' % (prev.pid,pind,next.pid,nind))
+                    logging.debug('%d:%d -> %d:%d' %
+                                  (prev.pid,pind,next.pid,nind))
                     src = self.make_node(prev.pid, prev.events[pind].syscnt)
                     dst = self.make_node(next.pid, next.events[nind].syscnt)
-                    if 'resource' not in graph.node[src]:
-                        graph.node[src]['resource'] = ''
-                    graph.node[src]['resource'] += str(r.id)
                     if dst not in graph[src]:
                         graph.add_edge(src, dst,
                                        resource=str(r.id),
