@@ -141,9 +141,7 @@ class Session:
     def i_to_event(self, i):
         return self.events_list[i].event
 
-
-
-    # order of arguments: ebx, ecx, edx, esi ...
+    ##########################################################################
 
     def parse_syscall(self, i):
         """Parse a syscall event"""
@@ -179,11 +177,11 @@ class Session:
         else:
             out.write('%s(%#x, %#x, %#x)' %
                       (unistd.syscall_str(e_syscall.nr),
-                       args[1], args[2], args[3]))
+                       args[0], args[1], args[2]))
         out.write(' = %ld\n' % (ret))
 
-    def print_process(self, pid):
-        """Print all the events of a process"""
+    def syscalls_process(self, pid):
+        """Print all the syscalls of a process"""
         try:
             proc = self.process_map[pid]
         except KeyError:
@@ -194,6 +192,16 @@ class Session:
             if isinstance(p_ev.event, scribe.EventSyscallExtra):
                 sys.stdout.write('pid=%3d:cnt=%3d:' % (proc.pid, p_ev.syscnt))
                 self.parse_syscall(p_ev.index)
+
+    def profile_process(self, pid):
+        """Print profile of all the events of a process"""
+        proc = self.process_map[pid]
+        for p_ev in proc.events:
+            print("[%02d][%d] %s%s%s" %
+                  (proc.pid, p_ev.syscnt,
+                   ("", "    ")[p_ev.info.in_syscall],
+                   "  " * p_ev.info.res_depth,
+                   p_ev.event))
 
     def load_events(self, logfile):
         """Parse the scribe log from @logfile"""
@@ -274,7 +282,7 @@ class Session:
                 e.id = n
                 e.npr = len([b for b in bmark.values() if b != 0])
                 logfile.write(e.encode())
-                logging.info('[%d] bookmark at syscall %d' % (pid, syscall))
+                logging.debug('[%d] bookmark at syscall %d' % (pid, syscall))
 
     def __check_inject(self, pid, syscall, injects, logfile):
         noregs = False
@@ -285,14 +293,14 @@ class Session:
                 e.arg1 = a.arg1
                 e.arg2 = a.arg2
                 logfile.write(e.encode())
-                logging.info('[%d] inject at syscall %d' % (pid, syscall))
+                logging.debug('[%d] inject at syscall %d' % (pid, syscall))
                 if a.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
                     noregs = True
         return noregs
 
     def __check_cutoff(self, pid, syscall, cutoff):
         if syscall == cutoff[pid]:
-            logging.info('[%d] cutoff at syscall %d' % (pid, cutoff[pid]))
+            logging.debug('[%d] cutoff at syscall %d' % (pid, cutoff[pid]))
             return True
         else:
             return False
@@ -581,9 +589,16 @@ class Session:
         proc1, index1 = self.split_node(node1)
         proc2, index2 = self.split_node(node2)
 
+        pid1 = proc1.pid
+        pid2 = proc2.pid
+
+        assert index1 > 0 and index2 > 0, \
+            'Potential race before process creation (%d:%d, %d:%d)' % \
+            (pid1, index1, pid2, index2)
+
         nodes = dict()
-        nodes[proc1.pid] = -index1
-        nodes[proc2.pid] = -index2
+        nodes[pid1] = -index1
+        nodes[pid2] = -index2
 
         vc1 = vclocks[(proc1, index1)]
         vc2 = vclocks[(proc2, index2)]

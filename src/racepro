@@ -87,7 +87,14 @@ def show_syscalls(args):
     session = load_session(args.logfile)
     for pid in session.process_map.keys():
         print('')
-        session.print_process(pid)
+        session.syscalls_process(pid)
+
+##############################################################################
+def show_profile(args):
+    session = load_session(args.logfile)
+    for pid in session.process_map.keys():
+        print('')
+        session.profile_process(pid)
 
 ##############################################################################
 
@@ -306,6 +313,10 @@ parser_show_graph.add_argument('-t', '--thin', dest='thin',
 parser_show_syscalls = subparsers.add_parser(
     'show-syscalls', parents=[parser_io])
 parser_show_syscalls.set_defaults(func=show_syscalls)
+
+parser_show_profile = subparsers.add_parser(
+    'show-profile', parents=[parser_io])
+parser_show_profile.set_defaults(func=show_profile)
 
 parser_show_races = subparsers.add_parser(
     'show-races', parents=[parser_io, parser_races])
