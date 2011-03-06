@@ -465,13 +465,13 @@ class Session:
                 newpid = event.ret
                 node = self.make_node(pid, p_ev.syscnt)
                 graph.add_node(node, index=str(p_ev.index))
-                graph.add_edge(ancestor, node, label='exit')
+                graph.add_edge(ancestor, node)
                 child = self.make_node(newpid, self.process_map[newpid].syscnt)
-                graph.add_edge(child, node)
+                graph.add_edge(child, node, label='exit')
                 ancestor = node
             elif event.nr in unistd.Syscalls.SYS_exit:
                 node = self.make_node(pid, p_ev.syscnt)
-                graph.add_node(node, index=str(p_ev.index))
+                graph.add_node(node, index=str(p_ev.index), exit='1')
                 graph.add_edge(ancestor, node)
                 ancestor = node
             elif full:
