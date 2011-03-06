@@ -2,6 +2,7 @@
 
 import os
 import sys
+import pdb
 import random
 import argparse
 import logging
@@ -82,6 +83,13 @@ def show_graph(args):
     return(0)
 
 ##############################################################################
+def show_syscalls(args):
+    session = load_session(args.logfile)
+    for pid in session.process_map.keys():
+        print('')
+        session.print_process(pid)
+
+##############################################################################
 
 def show_races(args):
     session = load_session(args.logfile)
@@ -116,9 +124,15 @@ def show_races(args):
                       (vc1.clocks, proc1.pid, p_ev1.syscnt,
                        vc2.clocks, proc2.pid, p_ev2.syscnt))
 
+        assert r_ev1.event.serial != r_ev2.event.serial, \
+            'Race between %s and %s with same serial' % \
+            (r_ev1.event, e_ev2.event)
+
         if r_ev1.event.serial < r_ev2.event.serial:
             node1, node2 = node2, node1
             i1, i2 = i2, i1
+
+        logging.info('\tadding %s --> %s to races' % (node1, node2))
 
         sys_races.add((node1, node2))
 
@@ -288,6 +302,10 @@ parser_show_graph.add_argument('-c', '--clustered', dest='clustered',
 parser_show_graph.add_argument('-t', '--thin', dest='thin',
                                action='store_true',
                                help='Thin mode (minimal syscalls graph')
+
+parser_show_syscalls = subparsers.add_parser(
+    'show-syscalls', parents=[parser_io])
+parser_show_syscalls.set_defaults(func=show_syscalls)
 
 parser_show_races = subparsers.add_parser(
     'show-races', parents=[parser_io, parser_races])

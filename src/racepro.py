@@ -1,3 +1,5 @@
+import sys
+import pdb
 import mmap
 import logging
 import networkx
@@ -136,34 +138,49 @@ class Session:
             s_ev = self.events_list[r_ev.index]
         return (s_ev.proc, s_ev.pindex)
 
+    def i_to_event(self, i):
+        return self.events_list[i].event
+
+
+
     # order of arguments: ebx, ecx, edx, esi ...
 
-    def parse_syscall(self, i, j):
+    def parse_syscall(self, i):
         """Parse a syscall event"""
 
-        e_syscall = self.events_list[i].event
-        e_data = self.events_list[i+1].event
-        args = self.events_list[j].event.args
-        ret = unistd.syscall_ret(syscall.ret)
+        s_ev = self.events_list[i]
+        e_syscall = self.i_to_event(i)
+        args = self.i_to_event(s_ev.regind).args
+        ret = unistd.syscall_ret(e_syscall.ret)
 
+        for j in xrange(s_ev.pindex + 1, len(s_ev.proc.events)):
+            e_data = s_ev.proc.events[j].event
+            if isinstance(e_data, scribe.EventDataExtra): break
+
+        out = sys.stdout
         if e_syscall.nr == unistd.Syscalls.NR_open:
-            logging.info('[%d] open("%s", %#x, %#3o) = %ld' %
-                         (i, e_data.data, args[1], args[2], ret))
-        if e_syscall.nr == unistd.Syscalls.NR_close:
-            logging.info('[%d] close(%d) = %ld' %
-                         (i, args[0], ret))
-        if e_syscall.nr == unistd.Syscalls.NR_access:
-            logging.info('[%d] access("%s", %#3o) = %ld' %
-                         (i, e_data.data, args[0], ret))
-        if e_syscall.nr == unistd.Syscalls.NR_execve:
-            logging.info('[%d] execve("%s", %#x, %#x) = %ld' %
-                         (i, e_data.data, args[0], args[1], ret))
-        if e_syscall.nr == unistd.Syscalls.NR_stat:
-            logging.info('[%d] stat("%s", %#x) = %ld' %
-                         (i, e_data.data, args[0], ret))
-        if e_syscall.nr == unistd.Syscalls.NR_stat64:
-            logging.info('[%d] stat64("%s", %#x, %#x) = %ld' %
-                         (i, e_data.data, args[0], args[1], ret))
+            out.write('open("%s", %#x, %#3o)' %
+                      (e_data.data, args[1], args[2]))
+        elif e_syscall.nr == unistd.Syscalls.NR_close:
+            out.write('close(%d)' %
+                      (args[0]))
+        elif e_syscall.nr == unistd.Syscalls.NR_access:
+            out.write('access("%s", %#3o)' %
+                      (e_data.data, args[1]))
+        elif e_syscall.nr == unistd.Syscalls.NR_execve:
+            out.write('execve("%s", %#x, %#x)' %
+                      (e_data.data, args[1], args[2]))
+        elif e_syscall.nr == unistd.Syscalls.NR_stat:
+            out.write('stat("%s", %#x)' %
+                      (e_data.data, args[1]))
+        elif e_syscall.nr == unistd.Syscalls.NR_stat64:
+            out.write('stat64("%s", %#x, %#x)' %
+                      (e_data.data, args[1], args[2]))
+        else:
+            out.write('%s(%#x, %#x, %#x)' %
+                      (unistd.syscall_str(e_syscall.nr),
+                       args[1], args[2], args[3]))
+        out.write(' = %ld\n' % (ret))
 
     def print_process(self, pid):
         """Print all the events of a process"""
@@ -175,8 +192,8 @@ class Session:
 
         for p_ev in proc.events:
             if isinstance(p_ev.event, scribe.EventSyscallExtra):
-                ev = self.events_list[i]
-                self.parse_syscall(p_ev.sysind, p_ev.regind)
+                sys.stdout.write('pid=%3d:cnt=%3d:' % (proc.pid, p_ev.syscnt))
+                self.parse_syscall(p_ev.index)
 
     def load_events(self, logfile):
         """Parse the scribe log from @logfile"""
@@ -210,7 +227,7 @@ class Session:
             if pid == 0:
                 s_ev = SessionEvent(info, event, None, 0, None, 0, 0, 0)
                 self.events_list.append(s_ev)
-                continue;
+                continue
 
             if isinstance(event, scribe.EventRegs):
                 proc.regind = ind
@@ -425,22 +442,22 @@ class Session:
         for p_ev in proc.events:
             event = p_ev.event
             if not isinstance(event, scribe.EventSyscallExtra):
-                continue
-            if event.nr in unistd.Syscalls.SYS_fork and event.ret > 0:
+                pass
+            elif event.nr in unistd.Syscalls.SYS_fork and event.ret > 0:
                 newpid = event.ret
                 parent = self.make_node(pid, p_ev.syscnt)
                 graph.add_node(parent, index=str(p_ev.index), fork='1')
                 graph.add_edge(ancestor, parent)
                 child = self.make_node(newpid, 0)
                 graph.add_node(child)
-                graph.add_edge(parent, child, fork='1')
+                graph.add_edge(parent, child, fork='1', label='fork')
                 self.__build_graph(graph, self.process_map[newpid], full)
                 ancestor = parent
             elif event.nr in unistd.Syscalls.SYS_wait and event.ret > 0:
                 newpid = event.ret
                 node = self.make_node(pid, p_ev.syscnt)
                 graph.add_node(node, index=str(p_ev.index))
-                graph.add_edge(ancestor, node)
+                graph.add_edge(ancestor, node, label='exit')
                 child = self.make_node(newpid, self.process_map[newpid].syscnt)
                 graph.add_edge(child, node)
                 ancestor = node
@@ -458,8 +475,8 @@ class Session:
     def __resources_graph(self, graph):
         """Add dependencies due to resources to an execution graph"""
 
-        for resource in self.resource_list:
-            prev, pind = self.r_ev_to_proc(resource.events[0])
+        for r in self.resource_list:
+            prev, pind = self.r_ev_to_proc(r.events[0])
             pr_ev = dict()
             nr_ev = dict()
             serial = 0
@@ -473,10 +490,14 @@ class Session:
                     src = self.make_node(prev.pid, prev.events[pind].syscnt)
                     dst = self.make_node(next.pid, next.events[nind].syscnt)
                 if dst and dst not in graph[src]:
-                    graph.node[src]['resource'] = str(resource.id)
-                    graph.add_edge(src, dst, resource=str(resource.id))
+                    if 'resource' not in graph.node[src]:
+                        graph.node[src]['resource'] = ''
+                    graph.node[src]['resource'] += str(r.id)
+                    graph.add_edge(src, dst,
+                                   resource=str(r.id),
+                                   label='r%d(%d)' % (r.id, serial))
 
-            for r_ev in resource.events:
+            for r_ev in r.events:
                 next, nind = self.r_ev_to_proc(r_ev)
                 if r_ev.event.serial == serial:
                     if next not in nr_ev.keys():
@@ -503,7 +524,7 @@ class Session:
 
         if resources:
             # add dependencies of resources
-            self.__resources_graph(graph)  # resources
+            self.__resources_graph(graph)
 
         return graph
 
@@ -592,14 +613,14 @@ class Session:
 #                if vc.race(vc1) and vc.race(vc2):
 #                    tproc = proc
 #                    tindex = p_ev.syscnt
-#                    break;
+#                    break
 #                logging.debug('vc.pre %s' %(vc.pre().clocks))
                 if vc.pre().race(vc1) and vc.pre().race(vc2):
                     tproc = proc
                     tindex = -p_ev.syscnt
-                    break;
-                logging.debug('exit ?')
+                    break
                 if p_ev.event.nr in unistd.Syscalls.SYS_exit:
+                    logging.debug('exit ?')
                     break
                 pindex = proc.next_syscall(pindex)
 
@@ -638,7 +659,10 @@ class Session:
             while n < len(q1) and m < len(q2):
                 vc1, i1 = q1[n]
                 vc2, i2 = q2[m]
-                if vc1.before(vc2):
+
+                if self.i_to_event(i1).serial == self.i_to_event(i2).serial:
+                    n += 1
+                elif vc1.before(vc2):
                     n += 1
                 elif vc2.before(vc1):
                     m += 1
@@ -653,9 +677,9 @@ class Session:
 
     def races_resources(self, vclocks):
         """Given vclocks of all syscalls, find resources races:
-        For each resource, iterate through its events and accumuldate
+        For each resource, iterate through its events and accumulate
         them in a per-process list - stored in @access dictionary,
-        such theat access[pid] is a list of (vclock, index) tuples of
+        such that access[pid] is a list of (vclock, index) tuples of
         the events and their vector-clocks belonging to that process.
         This is passsed to __races_accesses() which returns a list of
         actual races: (vclock1, index1, vclock2, index2)
