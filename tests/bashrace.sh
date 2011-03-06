@@ -1,20 +1,21 @@
 #!/bin/bash --norc
 
-echo "DEBUG starting"
-
 hist=/tmp/bashrace.history
+export HISTFILE=$hist
 
 rm -f $hist
 touch $hist
 echo "common line" > $hist
 
-bash --norc `dirname $0`/bashrace-a.sh $hist &
-bash --norc `dirname $0`/bashrace-b.sh $hist &
+mkdir -p /tmp/bashrace.tmp/a
+mkdir -p /tmp/bashrace.tmp/b
+
+bash --norc `dirname $0`/bashrace-a.sh $hist >& /tmp/bashrace.tmp/a/out &
+bash --norc `dirname $0`/bashrace-b.sh $hist >& /tmp/bashrace.tmp/b/out &
 
 wait
 wait
 
-export HISTFILE=$hist
 history -c
 history -r
 
