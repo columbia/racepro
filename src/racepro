@@ -63,6 +63,26 @@ def show_graph(args):
     def style_plain(graph, output):
         networkx.write_dot(graph, output)
 
+    def do_filter_graph(graph):
+
+        def convert(s):
+            pid = int(s[0])
+            s, e = map(int, s[1].split(':')) if len(s) > 1 else (0, sys.maxint)
+            return (pid, (s, e))
+
+        pids = dict(map(convert, [s.split('=') for s in args.pids.split(',')]))
+
+        for s, t in graph.edges():
+            ps, ns = map(int, s.split(':'))
+            pt, nt = map(int, t.split(':'))
+            if (ps not in pids or ns < pids[ps][0] or ns > pids[ps][1] or
+                pt not in pids or nt < pids[pt][0] or nt > pids[pt][1]):
+                graph.remove_edge(s, t)
+        for n in graph.nodes():
+            pn, nn = map(int, n.split(':'))
+            if pn not in pids or nn < pids[pn][0] or nn > pids[pn][1]:
+                graph.remove_node(n)
+
     def do_show_graph(graph, output):
         plot = style_cluster if args.clustered else style_plain
         plot(graph, output + '.dot')
@@ -73,12 +93,14 @@ def show_graph(args):
 
     session = load_session(args.logfile)
     graph = session.make_graph(full=False, resources=False)
-    if args.thin:  diet_graph(graph)
+    if args.pids: do_filter_graph(graph)
+    if args.thin: diet_graph(graph)
     do_show_graph(graph, args.outfile + '.hb')
 
     session = load_session(args.logfile)
     graph = session.make_graph(full=True, resources=True)
-    if args.thin:  diet_graph(graph)
+    if args.pids: do_filter_graph(graph)
+    if args.thin: diet_graph(graph)
     do_show_graph(graph, args.outfile + '.ob')
 
     return(0)
@@ -309,10 +331,13 @@ parser_show_graph.add_argument('-c', '--clustered', dest='clustered',
                                help='Clustered output style')
 parser_show_graph.add_argument('-t', '--thin', dest='thin',
                                action='store_true',
-                               help='Thin mode (minimal syscalls graph')
-parser_show_graph.add_argument('-p', '--pdf', dest='pdf',
+                               help='Thin mode (minimal syscalls graph)')
+parser_show_graph.add_argument('--pdf', dest='pdf',
                                action='store_true',
                                help='Output graph in PDF format')
+parser_show_graph.add_argument('-p', '--pids', dest='pids',
+                               metavar='PID[,PID...]', default='',
+                               help='Pid(s) to include in the graph')
 
 parser_show_syscalls = subparsers.add_parser(
     'show-syscalls', parents=[parser_io])
