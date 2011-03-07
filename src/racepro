@@ -103,8 +103,6 @@ def show_graph(args):
     if args.thin: diet_graph(graph)
     do_show_graph(graph, args.outfile + '.ob')
 
-    return(0)
-
 ##############################################################################
 def show_syscalls(args):
     session = load_session(args.logfile)
@@ -292,7 +290,7 @@ def test_races(args):
             break;
         logfile = '%s.%d.log' % (args.outfile, n)
         if not os.access(logfile, os.R_OK):
-            break
+            return 1
 
         if args.script_pre:
             ret = os.system('sudo ' + args.script_pre + cmd_suffix)
@@ -325,6 +323,9 @@ def test_races(args):
             if ret > 0:
                 print('Bad exit code %d from post-script'
                      ' (race %d)' % (ret, n))
+
+    if not success:
+        exit(1)
 
 ##############################################################################
 
@@ -410,6 +411,4 @@ if args.verbose: log = logging.INFO
 if args.debug: log = logging.DEBUG
 logging.basicConfig(level=log, stream=sys.stdout)
 
-ret = args.func(args)
-
-exit(ret)
+args.func(args)
