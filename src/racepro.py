@@ -180,7 +180,7 @@ class Session:
                        args[0], args[1], args[2]))
         out.write(' = %ld\n' % (ret))
 
-    def syscalls_process(self, pid):
+    def syscalls_process(self, pid, vclocks=None):
         """Print all the syscalls of a process"""
         try:
             proc = self.process_map[pid]
@@ -192,6 +192,9 @@ class Session:
             if isinstance(p_ev.event, scribe.EventSyscallExtra):
                 sys.stdout.write('pid=%3d:cnt=%3d:' % (proc.pid, p_ev.syscnt))
                 sys.stdout.write('ind=%4d:' % (self.events_list[p_ev.index].pindex))
+                if vclocks is not None:
+                    sys.stdout.write('vc=%s:' 
+                                     % vclocks[(proc, p_ev.syscnt)].clocks)
                 self.parse_syscall(p_ev.index)
 
     def profile_process(self, pid):
@@ -318,14 +321,14 @@ class Session:
                     nrepeat = 1 # number of repeated occurences of a serial
                     new_serial = 0
                     if e.event.serial != new_serial:
-                        logging.debug("changed resource %d serial from %d to 0" 
+                        logging.debug("changed id=%d serial=%d to serial=0" 
                                       % (e.event.id, e.event.serial))
                     # first event always has serial 0
                     prev_serial = e.event.serial = new_serial
                     continue
                 if e.event.serial == prev_serial + ndel:
                     # same as previous serial
-                    ++ nrepeat
+                    nrepeat += 1
                     new_serial = e.event.serial - ndel
                 else:
                     # different than previous serial
@@ -333,7 +336,7 @@ class Session:
                     ndel = e.event.serial - new_serial
                     nrepeat = 1
                 if e.event.serial != new_serial:
-                    logging.debug("changed resource %d serial from %d to %d" 
+                    logging.debug("changed id=%d serial=%d to serial=%d" 
                                   % (e.event.id, e.event.serial, new_serial))
                 prev_serial = e.event.serial = new_serial
         return
