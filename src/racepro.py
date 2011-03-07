@@ -701,7 +701,7 @@ class Session:
                     (vc.pre().race(vc1) and vc.race(vc2.pre())) or
                     (vc.race(vc1.pre()) and vc.pre().race(vc2)) or
                     (vc.race(vc1.pre()) and vc.race(vc2.pre()))):
-                    if vc1 < vc or vc2 < vc:
+                    if vc1.before(vc) or vc2.before(vc):
                         break
                     tproc = proc
                     tindex = -p_ev.syscnt
