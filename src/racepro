@@ -144,13 +144,13 @@ def show_races(args):
     map_races = dict()
 
     for vc1, i1, vc2, i2 in all_races:
-        s_ev1 = session.events_list[i1]
+        s_ev1 = session.events[i1]
         r_ev1 = s_ev1.resource.events[s_ev1.rindex]
         proc1, pindex1 = session.r_ev_to_proc(r_ev1, sysind=True)
         p_ev1 = proc1.events[pindex1]
         node1 = session.make_node(proc1.pid, p_ev1.syscnt)
 
-        s_ev2 = session.events_list[i2]
+        s_ev2 = session.events[i2]
         r_ev2 = s_ev2.resource.events[s_ev2.rindex]
         proc2, pindex2 = session.r_ev_to_proc(r_ev2, sysind=True)
         p_ev2 = proc2.events[pindex2]
@@ -196,11 +196,11 @@ def show_races(args):
     n_fail = 0
 
     for (node1, node2) in r:
-        proc1, pindex1 = session.split_node(node1)
-        event1 = session.events_list[int(graph.node[node1]['index'])].event
+        proc1, cnt1 = session.split_node(node1)
+        event1 = session.events[int(graph.node[node1]['index'])].event
 
-        proc2, pindex2 = session.split_node(node2)
-        event2 = session.events_list[int(graph.node[node2]['index'])].event
+        proc2, cnt2 = session.split_node(node2)
+        event2 = session.events[int(graph.node[node2]['index'])].event
 
         # YJF: print out race
         if args.debug:
@@ -219,15 +219,15 @@ def show_races(args):
         bookmark1 = session.crosscut_graph(graph, vclocks, node1, node2)
         if not bookmark1:
             print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
-                  (proc1.pid, pindex1, proc2.pid, pindex2))
+                  (proc1.pid, cnt1, proc2.pid, cnt2))
             n_fail += 1
             continue
 
         print('RACE %2d:  ' % (n_race + 1) +
               'pid %d syscnt %d [sys(%d)=%d]' %
-              (proc1.pid, pindex1, event1.nr, event1.ret) +
+              (proc1.pid, cnt1, event1.nr, event1.ret) +
               '  -->   pid %d syscnt %d [sys(%d)=%d]' %
-              (proc2.pid, pindex2, event2.nr, event2.ret))
+              (proc2.pid, cnt2, event2.nr, event2.ret))
         print('          cut:  %s' % bookmark1.values())
 
         bookmark2 = dict(bookmark1)
@@ -237,7 +237,7 @@ def show_races(args):
         action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
                                 0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
         injects = dict()
-        injects[proc1.pid] = dict({-pindex1 : action})
+        injects[proc1.pid] = dict({-cnt1 : action})
 
         cutoff = dict(bookmark2)
 

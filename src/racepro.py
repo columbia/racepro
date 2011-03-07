@@ -126,30 +126,27 @@ class Session:
     @process_list: list of all Process instances
     @resource_map: map a unique identifier to the coresponding Resource
     @resource_list: list of all Resource instances
-    @events_list: list of all events (pointers to Process/Resources)
+    @events: list of all events (pointers to Process/Resources)
     """
 
     # helpers
 
     def r_ev_to_proc(self, r_ev, sysind=False):
         if sysind:
-            s_ev = self.events_list[r_ev.sysind]
+            s_ev = self.events[r_ev.sysind]
         else:
-            s_ev = self.events_list[r_ev.index]
+            s_ev = self.events[r_ev.index]
         return (s_ev.proc, s_ev.pindex)
-
-    def i_to_event(self, i):
-        return self.events_list[i].event
 
     ##########################################################################
 
     def parse_syscall(self, i):
         """Parse a syscall event"""
 
-        s_ev = self.events_list[i]
-        e_syscall = self.i_to_event(i)
-        args = self.i_to_event(s_ev.regind).args
-        ret = unistd.syscall_ret(e_syscall.ret)
+        s_ev = self.events[i]
+        args = self.events[s_ev.regind].event.args
+        event = s_ev.event
+        ret = unistd.syscall_ret(event.ret)
 
         for j in xrange(s_ev.pindex + 1, len(s_ev.proc.events)):
             e_data = s_ev.proc.events[j].event
@@ -190,8 +187,8 @@ class Session:
 
         for p_ev in proc.events:
             if isinstance(p_ev.event, scribe.EventSyscallExtra):
-                sys.stdout.write('pid=%3d:cnt=%3d:' % (proc.pid, p_ev.syscnt))
-                sys.stdout.write('ind=%4d:' % (self.events_list[p_ev.index].pindex))
+                sys.stdout.write('pid=%3:cnt=%3:' % (proc.pid, p_ev.syscnt))
+                sys.stdout.write('ind=%4d:' % (self.events[p_ev.index].pindex))
                 if vclocks is not None:
                     sys.stdout.write('vc=%s:' 
                                      % vclocks[(proc, p_ev.syscnt)].clocks)
@@ -226,7 +223,7 @@ class Session:
 
             if isinstance(event, scribe.EventPid):
                 s_ev = SessionEvent(info, event, None, 0, None, 0, 0, 0)
-                self.events_list.append(s_ev)
+                self.events.append(s_ev)
                 pid = info.pid
                 try:
                     proc = self.process_map[pid]
@@ -238,7 +235,7 @@ class Session:
 
             if pid == 0:
                 s_ev = SessionEvent(info, event, None, 0, None, 0, 0, 0)
-                self.events_list.append(s_ev)
+                self.events.append(s_ev)
                 continue
 
             if isinstance(event, scribe.EventRegs):
@@ -261,7 +258,7 @@ class Session:
 
             s_ev = SessionEvent(info, event, proc, len(proc.events),
                                 None, 0, proc.sysind, proc.regind)
-            self.events_list.append(s_ev)
+            self.events.append(s_ev)
 
             p_ev = ProcessEvent(info, event, ind, proc.syscnt)
             proc.events.append(p_ev)
@@ -274,7 +271,7 @@ class Session:
             ind = 0
             resource.events.sort(key=lambda s_ev: s_ev.event.serial)
             for r_ev in resource.events:
-                s_ev = self.events_list[r_ev.index]
+                s_ev = self.events[r_ev.index]
                 s_ev.resource = resource
                 s_ev.rindex = ind
                 ind += 1
@@ -343,7 +340,7 @@ class Session:
         return
 
     def save_raw_events(self, logfile):
-        for s_ev in self.events_list:        
+        for s_ev in self.events:        
             logfile.write(s_ev.event.encode())
         return
 
@@ -380,7 +377,7 @@ class Session:
         if cutoff is None:
             cutoff = dict()
 
-        for s_ev in self.events_list:
+        for s_ev in self.events:
             info = s_ev.info
             event = s_ev.event
             pid = info.pid
@@ -820,4 +817,4 @@ class Session:
         self.process_list = list()
         self.resource_map = dict()
         self.resource_list = list()
-        self.events_list = list()
+        self.events = list()
