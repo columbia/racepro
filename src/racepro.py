@@ -91,11 +91,11 @@ class SessionEvent:
     @info: pointer to scribe's info
     @event: pointer to scribe's event
     @proc: pointer to respective Process
-    @pindex: index of event inside respective Process
+    @pindex: process index of event (in respective Process)
     @resource: pointer to respective Resource
-    @rindex: index of event inside respective Resource
-    @sysind: index of owning syscall event
-    @regind: index of owning regs event
+    @rindex: resource index of event (in respective Resource)
+    @sysind: global index of owning syscall event
+    @regind: global index of owning regs event
     """
     __slots__ = ('info', 'event',
                  'proc', 'pindex',
@@ -126,57 +126,54 @@ class Session:
     @process_list: list of all Process instances
     @resource_map: map a unique identifier to the coresponding Resource
     @resource_list: list of all Resource instances
-    @events_list: list of all events (pointers to Process/Resources)
+    @events: list of all events (pointers to Process/Resources)
     """
 
     # helpers
 
     def r_ev_to_proc(self, r_ev, sysind=False):
         if sysind:
-            s_ev = self.events_list[r_ev.sysind]
+            s_ev = self.events[r_ev.sysind]
         else:
-            s_ev = self.events_list[r_ev.index]
+            s_ev = self.events[r_ev.index]
         return (s_ev.proc, s_ev.pindex)
-
-    def i_to_event(self, i):
-        return self.events_list[i].event
 
     ##########################################################################
 
     def parse_syscall(self, i):
         """Parse a syscall event"""
 
-        s_ev = self.events_list[i]
-        e_syscall = self.i_to_event(i)
-        args = self.i_to_event(s_ev.regind).args
-        ret = unistd.syscall_ret(e_syscall.ret)
+        s_ev = self.events[i]
+        args = self.events[s_ev.regind].event.args
+        event = s_ev.event
+        ret = unistd.syscall_ret(event.ret)
 
         for j in xrange(s_ev.pindex + 1, len(s_ev.proc.events)):
             e_data = s_ev.proc.events[j].event
             if isinstance(e_data, scribe.EventDataExtra): break
 
         out = sys.stdout
-        if e_syscall.nr == unistd.Syscalls.NR_open:
+        if event.nr == unistd.Syscalls.NR_open:
             out.write('open("%s", %#x, %#3o)' %
                       (e_data.data, args[1], args[2]))
-        elif e_syscall.nr == unistd.Syscalls.NR_close:
+        elif event.nr == unistd.Syscalls.NR_close:
             out.write('close(%d)' %
                       (args[0]))
-        elif e_syscall.nr == unistd.Syscalls.NR_access:
+        elif event.nr == unistd.Syscalls.NR_access:
             out.write('access("%s", %#3o)' %
                       (e_data.data, args[1]))
-        elif e_syscall.nr == unistd.Syscalls.NR_execve:
+        elif event.nr == unistd.Syscalls.NR_execve:
             out.write('execve("%s", %#x, %#x)' %
                       (e_data.data, args[1], args[2]))
-        elif e_syscall.nr == unistd.Syscalls.NR_stat:
+        elif event.nr == unistd.Syscalls.NR_stat:
             out.write('stat("%s", %#x)' %
                       (e_data.data, args[1]))
-        elif e_syscall.nr == unistd.Syscalls.NR_stat64:
+        elif event.nr == unistd.Syscalls.NR_stat64:
             out.write('stat64("%s", %#x, %#x)' %
                       (e_data.data, args[1], args[2]))
         else:
             out.write('%s(%#x, %#x, %#x)' %
-                      (unistd.syscall_str(e_syscall.nr),
+                      (unistd.syscall_str(event.nr),
                        args[0], args[1], args[2]))
         out.write(' = %ld\n' % (ret))
 
@@ -190,11 +187,10 @@ class Session:
 
         for p_ev in proc.events:
             if isinstance(p_ev.event, scribe.EventSyscallExtra):
-                sys.stdout.write('pid=%3d:cnt=%3d:' % (proc.pid, p_ev.syscnt))
-                sys.stdout.write('ind=%4d:' % (self.events_list[p_ev.index].pindex))
+                sys.stdout.write('pid=%3:cnt=%3:' % (proc.pid, p_ev.syscnt))
+                sys.stdout.write('ind=%4d:' % (self.events[p_ev.index].pindex))
                 if vclocks is not None:
-                    sys.stdout.write('vc=%s:' 
-                                     % vclocks[(proc, p_ev.syscnt)].clocks)
+                    sys.stdout.write('vc=%s:' % vclocks[(proc, p_ev.syscnt)])
                 self.parse_syscall(p_ev.index)
 
     def profile_process(self, pid):
@@ -226,7 +222,7 @@ class Session:
 
             if isinstance(event, scribe.EventPid):
                 s_ev = SessionEvent(info, event, None, 0, None, 0, 0, 0)
-                self.events_list.append(s_ev)
+                self.events.append(s_ev)
                 pid = info.pid
                 try:
                     proc = self.process_map[pid]
@@ -238,7 +234,7 @@ class Session:
 
             if pid == 0:
                 s_ev = SessionEvent(info, event, None, 0, None, 0, 0, 0)
-                self.events_list.append(s_ev)
+                self.events.append(s_ev)
                 continue
 
             if isinstance(event, scribe.EventRegs):
@@ -261,7 +257,7 @@ class Session:
 
             s_ev = SessionEvent(info, event, proc, len(proc.events),
                                 None, 0, proc.sysind, proc.regind)
-            self.events_list.append(s_ev)
+            self.events.append(s_ev)
 
             p_ev = ProcessEvent(info, event, ind, proc.syscnt)
             proc.events.append(p_ev)
@@ -274,7 +270,7 @@ class Session:
             ind = 0
             resource.events.sort(key=lambda s_ev: s_ev.event.serial)
             for r_ev in resource.events:
-                s_ev = self.events_list[r_ev.index]
+                s_ev = self.events[r_ev.index]
                 s_ev.resource = resource
                 s_ev.rindex = ind
                 ind += 1
@@ -342,12 +338,6 @@ class Session:
                 prev_serial = e.event.serial = new_serial
         return
 
-    def save_raw_events(self, logfile):
-        for s_ev in self.events_list:        
-            logfile.write(s_ev.event.encode())
-        return
-
-
     def save_events(self, logfile,
                     bookmarks = None,
                     injects = None,
@@ -360,9 +350,15 @@ class Session:
         locations (per process) to cut remaining log.
 
         @logfile: output file object (opened for binary write)
-        @bookmarks: array of bookmarks [{ pid: sc1 }]
-        @injects: actions to inject { pid : {sc1:act1},{sc2:act2}, ...] }
-        @cutoff: where to cutoff queues { pid : sc }
+        @bookmarks: array of bookmarks [{ pid: cnt1 }]
+        @injects: actions to inject { pid : {cnt1:act1},{cnt2:act2}, ...] }
+        @cutoff: where to cutoff queues { pid : cnt }
+
+        The 'cnt' value above specifies a system call:
+        cnt > 0: effect occurs post-syscall (before return to userspace)
+        cnt < 0: effect occufs pre-syscall
+        cnt == 0: no effect because process exited so leave log as is
+        else (if pid not a key) then process not started, ignore the log
         """
 
         active = dict()
@@ -370,8 +366,14 @@ class Session:
         noregs = dict()
         endofq = dict({0:False})
 
-        # any(ifilter(lambda d: pid in d, a))
-        include = reduce(lambda d1, d2: dict(d1, **d2), bookmarks)
+        # include all pids that belong to any bookmark; pid's not here
+         # should not yet be created, and their logs will be skipped
+        if bookmarks:
+            include = reduce(lambda d1, d2: dict(d1, **d2), bookmarks)
+        else:
+            include = dict([(k, k) for k in self.process_map.keys()])
+
+        logging.debug('pids included in the log: %s' % include.keys())
 
         if bookmarks is None:
             bookmarks = dict()
@@ -380,19 +382,22 @@ class Session:
         if cutoff is None:
             cutoff = dict()
 
-        for s_ev in self.events_list:
+        for s_ev in self.events:
             info = s_ev.info
             event = s_ev.event
             pid = info.pid
 
+            # pid==0 is a special event
             if pid == 0:
                 logfile.write(event.encode())
                 continue
 
+            # pid's not in @include are ignored (not created yet)
             if pid not in include:
                 continue
 
-            # pid first time ?
+            # first time we see this pid ?
+            # note: setting cutoff[pid] ensures no cutoff
             if pid not in active:
                 active[pid] = True
                 syscall[pid] = 0
@@ -657,17 +662,17 @@ class Session:
             tick = False
 
             for nn in graph.neighbors(node):
-                next, nindex = self.split_node(nn)
+                next, ncnt = self.split_node(nn)
 
                 # disregard resource dependencies if not @resource ?
                 if not resources and 'resource' in graph.edge[node][nn]:
                     continue
 
                 # need to creat vclock for this node ?
-                if (next, nindex) not in vclocks:
-                    vclocks[(next, nindex)] = VectorClock(next.pid, vc)
+                if (next, ncnt) not in vclocks:
+                    vclocks[(next, ncnt)] = VectorClock(next.pid, vc)
                 else:
-                    vclocks[(next, nindex)].merge(vc)
+                    vclocks[(next, ncnt)].merge(vc)
 
                 # is this an edge that should cause a tick ?
                 if next.pid != proc.pid:
@@ -678,13 +683,13 @@ class Session:
                 else:
                     # remember for below
                     tproc = next
-                    tindex = nindex
+                    tcnt = ncnt
 
             if tick:
                 # tick before the merge, but w/o effect on @vc
                 vctmp = VectorClock(proc.pid, vc)
                 vctmp.tick(proc.pid)
-                vclocks[(tproc, tindex)].merge(vctmp)
+                vclocks[(tproc, tcnt)].merge(vctmp)
 
         return vclocks
 
@@ -695,25 +700,24 @@ class Session:
         such that both nodes are just about to be executed.
         Returns bookmarks dict of the cut, or None if none found
         """
-        proc1, index1 = self.split_node(node1)
-        proc2, index2 = self.split_node(node2)
+        proc1, cnt1 = self.split_node(node1)
+        proc2, cnt2 = self.split_node(node2)
 
         pid1 = proc1.pid
         pid2 = proc2.pid
 
-        assert index1 > 0 and index2 > 0, \
+        assert cnt1 > 0 and cnt2 > 0, \
             'Potential race before process creation (%d:%d, %d:%d)' % \
-            (pid1, index1, pid2, index2)
+            (pid1, cnt1, pid2, cnt2)
 
         nodes = dict()
-        nodes[pid1] = -index1
-        nodes[pid2] = -index2
+        nodes[pid1] = -cnt1
+        nodes[pid2] = -cnt2
 
-        vc1 = vclocks[(proc1, index1)]
-        vc2 = vclocks[(proc2, index2)]
+        vc1 = vclocks[(proc1, cnt1)]
+        vc2 = vclocks[(proc2, cnt2)]
 
-        logging.debug('find cut for clocks %s and %s' %
-                      (vc1.clocks, vc2.clocks))
+        logging.debug('find cut for clocks %s and %s' % (vc1, vc2))
 
         # proc, local clock -> syscnt that first has this local clock
         ticks = dict()
@@ -736,7 +740,7 @@ class Session:
 
             logging.debug("pid=%d, local clock=%d" % (pid, c));
 
-            if (proc, c+1) in ticks:
+            if (proc, c + 1) in ticks:
                 syscnt = ticks[(proc, c+1)];
             else:
                 syscnt = 0; # bookmark 0 for exited process
@@ -753,12 +757,12 @@ class Session:
 
 
     def __races_accesses(self, access):
-        """Given vclocks of a resource per process (increasing order),
-        find resources races:
+        """Given vclocks of a resource per process (non-decreasing
+        order), find resources races:
 
         For each two processes, iterate in parallel over accesses and
         find those that are neither before nor after each other. Each
-        such race is reported as (vclock1, index1, vclock2, index2).
+        such race is reported as (vclock1, r_ev1, vclock2, r_ev2).
 
         This works because, given two process A[1..n] and B[1..m]:
         - for i < j:  Ai < Aj,  Bi < Bj
@@ -784,8 +788,10 @@ class Session:
                     m += 1
                 else:
                     for vc3, r_ev3 in q2[m:]:
+                        # going too far ?
                         if vc1.before(vc3):
                             break
+                        # read-read case ?
                         if (r_ev1.event.write_access == 0 and
                             r_ev2.event.write_access == 0):
                             continue
@@ -826,4 +832,4 @@ class Session:
         self.process_list = list()
         self.resource_map = dict()
         self.resource_list = list()
-        self.events_list = list()
+        self.events = list()

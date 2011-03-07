@@ -35,6 +35,9 @@ class VectorClock:
     def race(self, v):
         return not (self.before(v) or v.before(self))
 
+    def __repr__(self):
+        return str(self.clocks)
+    
     def __init__(self, pid=None, v=None):
         if v:
             self.clocks = dict(v.clocks)
