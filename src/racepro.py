@@ -609,7 +609,7 @@ class Session:
         logging.debug('find cut for clocks %s and %s' %
                       (vc1.clocks, vc2.clocks))
 
-        # proc, local clock -> syscnt that first has this clock
+        # proc, local clock -> syscnt that first has this local clock
         ticks = dict()
         for (proc, syscnt), vc in vclocks.iteritems():
             ticks[(proc, vc.get(proc.pid))] = syscnt
@@ -621,25 +621,9 @@ class Session:
             pid = proc.pid
             # last time we heard from pid, its local clock is at c
             c = max([vc1.get(pid), vc2.get(pid)])
-            
-            # TODO: build clock -> event index map to speed up this lookup
-            pindex = -1
-            syscnt = 0
-            while True:
-                pindex = proc.next_syscall(pindex)
-                p_ev = proc.events[pindex]
-                vc = vclocks[(proc, p_ev.syscnt)]
-                logging.debug('[pid %d] pindex %d vclock %s' %
-                              (pid, pindex, vc.clocks))
-                # first node with local clock > c, include it in cut
-                if vc.get(pid) > c:
-                    syscnt = p_ev.syscnt
-                    break
-
-                if p_ev.event.nr in unistd.Syscalls.SYS_exit:
-                    logging.debug('exit ?')
-                    pindex = -1 # no bookmark for exited process
-                    break
+            syscnt = ticks[(proc, c+1)];
+            if syscnt is None:
+                syscnt = 0; # no bookmark for exited process
             nodes[pid] = -syscnt;
 
         return nodes
