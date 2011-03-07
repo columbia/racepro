@@ -5,6 +5,7 @@ import sys
 import pdb
 import random
 import argparse
+import subprocess
 import logging
 import networkx
 import pygraphviz
@@ -26,6 +27,9 @@ def load_session(logfile):
     file.close()
 
     return session
+
+def do_exec(cmd):
+    return subprocess.call(cmd.split())
 
 ##############################################################################
 
@@ -297,29 +301,26 @@ def test_races(args):
             break
 
         if args.script_pre:
-            ret = os.system('sudo ' + args.script_pre + cmd_suffix)
-            if ret > 0:
-                print('Bad exit code %d from pre-script'
-                      ' (race %d)... skipping' % (ret, n))
+            r = do_exec('/usr/bin/sudo ' + args.script_pre + cmd_suffix)
+            if r > 0:
+                print('RACE %d: bad exit code %d from pre-script' % (n, r))
                 continue;
 
-        logging.debug('command: %s %s %s' % (cmd_replay, logfile, cmd_suffix))
-        ret = os.system('%s %s %s' % (cmd_replay, logfile, cmd_suffix))
-        if ret == 35:
-            print('REPLAY %2d: deadlock (exit %d)' % (n, ret))
+        r = do_exec('%s %s %s' % (cmd_replay, logfile, cmd_suffix))
+        if r == 35:
+            print('REPLAY %2d: deadlock (exit %d)' % (n, r))
             continue
-        if ret > 0:
-            print('REPLAY %2d: failed (exit %d)' % (n, ret))
+        if r > 0:
+            print('REPLAY %2d: failed (exit %d)' % (n, r))
             return -1
         else:
             print('REPLAY %2d: completed' % n)
 
         if args.script_test:
-            ret = os.system('sudo ' + args.script_test + cmd_suffix)
-            if ret == 2:
-                print('Bad exit code %d from test-script'
-                      ' (race %d)... skipping' % (ret, n))
-            elif ret == 1:
+            r = do_exec('sudo ' + args.script_test + cmd_suffix)
+            if r == 2:
+                print('RACE %d: bad exit code %d from test-script' % (n, r))
+            elif r == 1:
                 print('    BUG PRODUCED')
             else:
                 print('    BUG not triggered')
@@ -327,10 +328,9 @@ def test_races(args):
             print('    BUG only replayed')
 
         if args.script_post:
-            ret = os.system('sudo ' + args.script_post + cmd_suffix)
+            r = do_exec('sudo ' + args.script_post + cmd_suffix)
             if ret > 0:
-                print('Bad exit code %d from post-script'
-                     ' (race %d)' % (ret, n))
+                print('RACE %d: nad exit code %d from post-script' % (n, r))
 
     return 0
 

@@ -5,7 +5,11 @@ import sys
 import shutil
 import logging
 import argparse
+import subprocess
 import pdb
+
+def do_exec(cmd):
+    return subprocess.call(cmd.split())
 
 def do_one_test(args, t_name, t_exec):
     e_record = 'sudo record'
@@ -42,15 +46,15 @@ def do_one_test(args, t_name, t_exec):
         logging.info('    clean-up before recording...')
         logging.error(t_pre + ' %s' % (path + '.log'))
     logging.info('    1st recording ...')
-    ret = os.system(e_record + ' -l 15 -o %s ./%s' % (path + '.log', t_exec))
+    ret = do_exec(e_record + ' -l 15 -o %s ./%s' % (path + '.log', t_exec))
     if ret != 0:
         logging.error('failed 1st recording')
         return False
     if t_pre:
         logging.info('    clean-up before recording...')
-        os.system(t_pre + ' %s' % (path + '.log'))
+        do_exec(t_pre + ' %s' % (path + '.log'))
     logging.info('    2nd recording ...')
-    ret = os.system(e_record + ' -l 15 -o %s ./%s' % (path + '.log', t_exec))
+    ret = do_exec(e_record + ' -l 15 -o %s ./%s' % (path + '.log', t_exec))
     if ret != 0:
         logging.error('failed 2nd recording')
         return False
@@ -58,23 +62,23 @@ def do_one_test(args, t_name, t_exec):
     logging.info('  replaying original execution')
     if t_pre:
         logging.info('    clean-up before replaying...')
-        os.system(t_pre + ' %s' % (path + '.log'))
+        do_exec(t_pre + ' %s' % (path + '.log'))
     logging.info('    replaying ...')
-    ret = os.system(e_replay + ' %s' % (path + '.log'))
+    ret = do_exec(e_replay + ' %s' % (path + '.log'))
     if ret != 0:
         logging.error('failed original replay')
         return False
 
     logging.info('  generating the races')
-    ret = os.system(e_racepro + ' %s show-races -i %s -o %s' %
-                    (opts1, path + '.log', path))
+    ret = do_exec(e_racepro + ' %s show-races -i %s -o %s' %
+                  (opts1, path + '.log', path))
     if ret != 0:
         logging.error('failed to generate races')
         return False
 
     logging.info('  testing the races')
-    ret = os.system(e_racepro + ' %s test-races -i %s -o %s %s' %
-                    (opts1, path + '.log', path, opts2))
+    ret = do_exec(e_racepro + ' %s test-races -i %s -o %s %s' %
+                  (opts1, path + '.log', path, opts2))
     if ret != 0:
         logging.error('failed to test the races %d' % ret)
         return False
