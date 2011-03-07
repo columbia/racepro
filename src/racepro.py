@@ -191,6 +191,7 @@ class Session:
         for p_ev in proc.events:
             if isinstance(p_ev.event, scribe.EventSyscallExtra):
                 sys.stdout.write('pid=%3d:cnt=%3d:' % (proc.pid, p_ev.syscnt))
+                sys.stdout.write('ind=%4d:' % (self.events_list[p_ev.index].pindex))
                 self.parse_syscall(p_ev.index)
 
     def profile_process(self, pid):
@@ -421,6 +422,71 @@ class Session:
                 e = scribe.EventQueueEof()
                 logfile.write(e.encode())
 
+    def order_syscalls(self, crosscut, syscalls):
+        """Generate bookmarks, inject, and cutoff, that will produce a
+        serialize (total order) execution from a given crosscut in the
+        graph through a given list of syscalls.
+        @crosscut: { pid:cnt } cut in the graph
+        @syscalls: [ (proc, pindex) ] list of syscalls to serialize
+        Returns (bookmarks, injects, cutoff)
+        """
+        bookmarks = list()
+        bookmarks.append(dict(crosscut))
+        cutoff = dict(crosscut)
+        injects = dict()
+
+        salive = dict(crosscut)
+        alive = dict(crosscut)
+        spid = -1
+
+        def inc_syscall(p, c):
+            if alive[p] < 0:
+                alive[p] = abs(alive[p])
+            else:
+                alive[p] += 1
+            assert c == alive[p], \
+                'Bad syscall specs: pid %d expect syscnt %d got %d' % \
+                (p, c, alive[p])
+
+        def set_bookmark(p, c):
+            bookmarks.append(dict(alive))
+            if p not in injects:
+                action = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                                0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+                injects[p] = dict({-alive[p] : action})
+
+        for pid, pindex in syscalls:
+            p_ev = self.process_map[pid].events[pindex]
+            event = p_ev.event
+            pcnt = p_ev.syscnt
+            print('pcnt %d' % (pcnt))
+
+            if spid == -1:
+                spid = pid
+                scnt = abs(alive[pid])
+                continue
+
+            inc_syscall(spid, scnt)
+            if pid != spid:
+                set_bookmark(spid, scnt)
+
+            if event.nr in unistd.Syscalls.SYS_exit:
+                del alive[pid]
+                del cutoff[pid]
+            elif event.nr in unistd.Syscalls.SYS_fork and event.ret > 0:
+                alive[event.ret] = -1
+
+            scnt = pcnt
+            spid = pid
+
+        inc_syscall(spid, scnt)
+        set_bookmark(spid, scnt)
+
+        for pid in alive:
+            cutoff[pid] = alive[pid]
+
+        return bookmarks, injects, cutoff
+            
 ##############################################################################
 #   generate thread calls graph (fork,exit,wait,syscalls)
 
@@ -671,7 +737,7 @@ class Session:
         This works because, given two process A[1..n] and B[1..m]:
         - for i < j:  Ai < Aj,  Bi < Bj
         - for i, j:   Ai < Bj  or  Ai > Bj  or  Ai || Bj
-        - the relations '<' and '||' are transitive
+        - the relation '<' is transitive
         """
         races = list()
 
@@ -730,4 +796,3 @@ class Session:
         self.resource_map = dict()
         self.resource_list = list()
         self.events_list = list()
-
