@@ -746,20 +746,24 @@ class Session:
 
             n, m = 0, 0
             while n < len(q1) and m < len(q2):
-                vc1, i1 = q1[n]
-                vc2, i2 = q2[m]
+                vc1, r_ev1 = q1[n]
+                vc2, r_ev2 = q2[m]
 
-                if self.i_to_event(i1).serial == self.i_to_event(i2).serial:
-                    n += 1
-                elif vc1.before(vc2):
+                aa,ab = self.r_ev_to_proc(r_ev1)
+                ba,bb = self.r_ev_to_proc(r_ev2)
+
+                if vc1.before(vc2):
                     n += 1
                 elif vc2.before(vc1):
                     m += 1
                 else:
-                    for vc3, i3 in q2[m:]:
+                    for vc3, r_ev3 in q2[m:]:
                         if vc1.before(vc3):
                             break
-                        races.append((vc1, i1, vc3, i3))
+                        if (r_ev1.event.write_access == 0 and
+                            r_ev2.event.write_access == 0):
+                            continue
+                        races.append((vc1, r_ev1, vc3, r_ev3))
                     n += 1
 
         return races
@@ -784,11 +788,12 @@ class Session:
                 p_ev = proc.events[index]
                 node = self.make_node(proc.pid, p_ev.syscnt)
                 vc = vclocks[(proc, p_ev.syscnt)]
-                access[proc.pid].append((vc, r_ev.index))
+                access[proc.pid].append((vc, r_ev))
 
             races.extend(self.__races_accesses(access))
 
-        return races
+        return [(vc1, r_ev1.index, vc2, r_ev2.index) for
+                vc1, r_ev1, vc2, r_ev2 in races]
 
     def __init__(self):
         self.process_map = dict()
