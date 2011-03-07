@@ -653,17 +653,17 @@ class Session:
             tick = False
 
             for nn in graph.neighbors(node):
-                next, nindex = self.split_node(nn)
+                next, ncnt = self.split_node(nn)
 
                 # disregard resource dependencies if not @resource ?
                 if not resources and 'resource' in graph.edge[node][nn]:
                     continue
 
                 # need to creat vclock for this node ?
-                if (next, nindex) not in vclocks:
-                    vclocks[(next, nindex)] = VectorClock(next.pid, vc)
+                if (next, ncnt) not in vclocks:
+                    vclocks[(next, ncnt)] = VectorClock(next.pid, vc)
                 else:
-                    vclocks[(next, nindex)].merge(vc)
+                    vclocks[(next, ncnt)].merge(vc)
 
                 # is this an edge that should cause a tick ?
                 if next.pid != proc.pid:
@@ -674,13 +674,13 @@ class Session:
                 else:
                     # remember for below
                     tproc = next
-                    tindex = nindex
+                    tcnt = ncnt
 
             if tick:
                 # tick before the merge, but w/o effect on @vc
                 vctmp = VectorClock(proc.pid, vc)
                 vctmp.tick(proc.pid)
-                vclocks[(tproc, tindex)].merge(vctmp)
+                vclocks[(tproc, tcnt)].merge(vctmp)
 
         return vclocks
 
@@ -691,22 +691,22 @@ class Session:
         such that both nodes are just about to be executed.
         Returns bookmarks dict of the cut, or None if none found
         """
-        proc1, index1 = self.split_node(node1)
-        proc2, index2 = self.split_node(node2)
+        proc1, cnt1 = self.split_node(node1)
+        proc2, cnt2 = self.split_node(node2)
 
         pid1 = proc1.pid
         pid2 = proc2.pid
 
-        assert index1 > 0 and index2 > 0, \
+        assert cnt1 > 0 and cnt2 > 0, \
             'Potential race before process creation (%d:%d, %d:%d)' % \
-            (pid1, index1, pid2, index2)
+            (pid1, cnt1, pid2, cnt2)
 
         nodes = dict()
-        nodes[pid1] = -index1
-        nodes[pid2] = -index2
+        nodes[pid1] = -cnt1
+        nodes[pid2] = -cnt2
 
-        vc1 = vclocks[(proc1, index1)]
-        vc2 = vclocks[(proc2, index2)]
+        vc1 = vclocks[(proc1, cnt1)]
+        vc2 = vclocks[(proc2, cnt2)]
 
         logging.debug('find cut for clocks %s and %s' % (vc1, vc2))
 
@@ -731,10 +731,11 @@ class Session:
 
             logging.debug("pid=%d, local clock=%d" % (pid, c));
 
-            if (proc, c+1) in ticks:
+            if (proc, c + 1) in ticks:
                 syscnt = ticks[(proc, c+1)];
             else:
                 syscnt = 0; # no bookmark for exited process
+
             # bookmark for not-yet-created process is -1 automatically
             nodes[pid] = -syscnt;
 
@@ -742,12 +743,12 @@ class Session:
 
 
     def __races_accesses(self, access):
-        """Given vclocks of a resource per process (increasing order),
-        find resources races:
+        """Given vclocks of a resource per process (non-decreasing
+        order), find resources races:
 
         For each two processes, iterate in parallel over accesses and
         find those that are neither before nor after each other. Each
-        such race is reported as (vclock1, index1, vclock2, index2).
+        such race is reported as (vclock1, r_ev1, vclock2, r_ev2).
 
         This works because, given two process A[1..n] and B[1..m]:
         - for i < j:  Ai < Aj,  Bi < Bj
@@ -773,8 +774,10 @@ class Session:
                     m += 1
                 else:
                     for vc3, r_ev3 in q2[m:]:
+                        # going too far ?
                         if vc1.before(vc3):
                             break
+                        # read-read case ?
                         if (r_ev1.event.write_access == 0 and
                             r_ev2.event.write_access == 0):
                             continue
