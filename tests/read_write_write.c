@@ -30,13 +30,17 @@ main()
 		exit(1);
         case 0:
                 memset(buf, 'C', sizeof buf);
+                printf("child writes\n");
                 write(fd, buf, sizeof buf);
                 break;
         default:
+                printf("parent reads\n");
                 read(fd, buf, sizeof buf);
                 memset(buf, 'P', sizeof buf); 
                 lseek(fd, 0, SEEK_SET);
+                printf("parent writes\n");
                 write(fd, buf, sizeof buf);
         }
+        close(fd);
 	exit(0);
 }

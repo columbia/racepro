@@ -303,7 +303,7 @@ class Session:
             logging.debug('[%d] cutoff at syscall %d' % (pid, cutoff[pid]))
             return True
         else:
-            return False
+            return 
 
     def save_events(self, logfile,
                     bookmarks = None,
@@ -582,6 +582,8 @@ class Session:
 
         return vclocks
 
+
+    # YJF: improved version
     def crosscut_graph(self, graph, vclocks, node1, node2):
         """Given two nodes in the graph, find a consistent crosscut,
         such that both nodes are just about to be executed.
@@ -607,60 +609,41 @@ class Session:
         logging.debug('find cut for clocks %s and %s' %
                       (vc1.clocks, vc2.clocks))
 
+        # proc, local clock -> syscnt that first has this clock
+        ticks = dict()
+        for (proc, syscnt), vc in vclocks.iteritems():
+            ticks[(proc, vc.get(proc.pid))] = syscnt
+
         for proc in self.process_list:
             if proc == proc1 or proc == proc2:
                 continue
 
             pid = proc.pid
-            pindex = proc.next_syscall(-1)
-
-            p_ev = proc.events[pindex]
-            vc = vclocks[(proc, p_ev.syscnt)]
-            logging.debug('[pid %d] pindex %d vclock %s' %
-                          (pid, pindex, vc.clocks))
-
-            # process yet to be created ...
-            if ((vc1.before(vc) and not vc.before(vc2)) or
-                (vc2.before(vc) and not vc.before(vc1))):
-                continue
-
-            tproc = None
-            tindex = None
-
+            # last time we heard from pid, its local clock is at c
+            c = max([vc1.get(pid), vc2.get(pid)])
+            
+            # TODO: build clock -> event index map to speed up this lookup
+            pindex = -1
+            syscnt = 0
             while True:
+                pindex = proc.next_syscall(pindex)
                 p_ev = proc.events[pindex]
                 vc = vclocks[(proc, p_ev.syscnt)]
-                logging.debug('[pid/cnt %d:%d] vc %s' %
-                              (proc.pid, p_ev.syscnt, vc.clocks))
-
-                if ((vc.pre().race(vc1) and vc.pre().race(vc2)) or
-                    (vc.pre().race(vc1) and vc.race(vc2.pre())) or
-                    (vc.race(vc1.pre()) and vc.pre().race(vc2)) or
-                    (vc.race(vc1.pre()) and vc.race(vc2.pre()))):
-                    if vc1 < vc or vc2 < vc:
-                        break
-                    tproc = proc
-                    tindex = -p_ev.syscnt
+                logging.debug('[pid %d] pindex %d vclock %s' %
+                              (pid, pindex, vc.clocks))
+                # first node with local clock > c, include it in cut
+                if vc.get(pid) > c:
+                    syscnt = p_ev.syscnt
+                    break
 
                 if p_ev.event.nr in unistd.Syscalls.SYS_exit:
                     logging.debug('exit ?')
+                    pindex = -1 # no bookmark for exited process
                     break
-
-                pindex = proc.next_syscall(pindex)
-
-            if ((vc.before(vc1) and not vc2.before(vc)) or
-                (vc.before(vc2) and not vc1.before(vc))):
-                logging.debug('[pid %d] exited, no bookmark' % (proc.pid))
-                nodes[proc.pid] = 0
-            elif tproc:
-                logging.debug('[pid %d] tproc %s tindex %s' %
-                              (proc.pid, tproc, tindex))
-                nodes[tproc.pid] = tindex
-            else:
-                logging.info('consistent cut failed for pid %d' % (proc.pid))
-                return None
+            nodes[pid] = -syscnt;
 
         return nodes
+
 
     def __races_accesses(self, access):
         """Given vclocks of a resource per process (increasing order),

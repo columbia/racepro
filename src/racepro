@@ -174,6 +174,19 @@ def show_races(args):
         proc2, pindex2 = session.split_node(node2)
         event2 = session.events_list[int(graph.node[node2]['index'])].event
 
+        # YJF: print out race
+        print('Two racing system calls are:');
+        sys.stdout.write('p%d @ %s:' 
+                         % (proc1.pid, vclocks[(proc1, pindex1)].clocks));
+        session.parse_syscall(int(graph.node[node1]['index']));
+        sys.stdout.write('p%d @ %s:' 
+                         % (proc2.pid, vclocks[(proc2, pindex2)].clocks));
+        session.parse_syscall(int(graph.node[node2]['index']));
+
+        # YJF: TODO: sort races.  races on stdout or stderr not
+        # interesting, mostly.  races on file data more interesting than
+        # stat v.s. write race
+
         bookmark1 = session.crosscut_graph(graph, vclocks, node1, node2)
         if not bookmark1:
             print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
