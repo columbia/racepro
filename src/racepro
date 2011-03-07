@@ -222,13 +222,6 @@ def show_races(args):
             n_fail += 1
             continue
 
-        print('RACE %2d:  ' % (n_race + 1) +
-              'pid %d syscnt %d [sys(%d)=%d]' %
-              (proc1.pid, cnt1, event1.nr, event1.ret) +
-              '  -->   pid %d syscnt %d [sys(%d)=%d]' %
-              (proc2.pid, cnt2, event2.nr, event2.ret))
-        print('          cut:  %s' % bookmark1.values())
-
         bookmark2 = dict(bookmark1)
         bookmark2[proc1.pid] = -bookmark2[proc1.pid]
         bookmarks = [bookmark1, bookmark2]
@@ -240,10 +233,17 @@ def show_races(args):
 
         cutoff = dict(bookmark2)
 
+        print('RACE %2d:  ' % (n_race + 1) +
+              'pid %d syscnt %d [sys(%d)=%d]' %
+              (proc1.pid, cnt1, event1.nr, event1.ret) +
+              '  -->   pid %d syscnt %d [sys(%d)=%d]' %
+              (proc2.pid, cnt2, event2.nr, event2.ret))
+        print('          cut:  %s' % bookmark1.values())
+
         logging.debug('   boobkmark1: %s' % (bookmark1))
         logging.debug('   boobkmark2: %s' % (bookmark2))
-        logging.debug('   injects: %s' % (injects))
-        logging.debug('   cutoff: %s' % (cutoff))
+        logging.debug('      injects: %s' % (injects))
+        logging.debug('       cutoff: %s' % (cutoff))
 
         outfile = open(args.outfile + '.' + str(n_race + 1) + '.log', 'w')
         session.save_events(outfile,
