@@ -246,6 +246,17 @@ def show_races(args):
                             cutoff=cutoff)
         outfile.close()
 
+        # YJF: condense event serial and rewrite log
+        outfile = open(args.outfile + '.' + str(n_race + 1) + '.log', 'r')
+        # create a newsession so it's easier for me to traverse the log
+        newsession = racepro.Session()
+        newsession.load_events(outfile)
+        newsession.condense_events()
+        outfile.close()
+        outfile = open(args.outfile + '.' + str(n_race + 1) + '.log', 'w')
+        newsession.save_raw_events(outfile)
+        outfile.close()
+
         n_race += 1
         if (n_race == args.count):
             break;
@@ -260,7 +271,7 @@ def show_races(args):
 ##############################################################################
 
 def test_races(args):
-    cmd_replay = 'sudo replay -c 1'
+    cmd_replay = 'sudo replay -c %d' % int(args.timeout)
     cmd_suffix = ' > /dev/null 2>&1' if args.silent else ''
 
     if args.detect:
@@ -370,6 +381,9 @@ parser_test_races.set_defaults(func=test_races)
 parser_test_races.add_argument('--script-pre', dest='script_pre',
                                default=None,
                                help='Script to run before test')
+parser_test_races.add_argument('--timeout', dest='timeout',
+                               default=1,
+                               help='Log replay timeout')
 parser_test_races.add_argument('--script-post', dest='script_post',
                                default=None,
                                help='Script to run after test')

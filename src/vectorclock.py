@@ -22,7 +22,8 @@ class VectorClock:
         return v
 
     def merge(self, v):
-        for pid in v.clocks.keys():
+        # YJF: need this union to handle merges of [1:5], [2,5] for example
+        for pid in set(self.clocks.keys() + v.clocks.keys()):
             self.clocks[pid] = max([self.get(pid), v.get(pid)])
 
     def before(self, v):

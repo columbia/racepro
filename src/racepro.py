@@ -125,7 +125,7 @@ class Session:
     @process_map: map a pid to the corresponding Process
     @process_list: list of all Process instances
     @resource_map: map a unique identifier to the coresponding Resource
-    @process_list: list of all Resource instances
+    @resource_list: list of all Resource instances
     @events_list: list of all events (pointers to Process/Resources)
     """
 
@@ -305,6 +305,44 @@ class Session:
             return True
         else:
             return 
+
+    # YJF: remove holes in serial number sequence.  
+    # FIXME: this should be really in py-scribe because we essentially
+    # reverse engineer the serial assignment logic here.
+    def condense_events(self):
+        for r in self.resource_list:
+            prev_serial = -1
+            for e in r.events:
+                if prev_serial == -1:
+                    ndel = e.event.serial # number of deleted events
+                    nrepeat = 1 # number of repeated occurences of a serial
+                    new_serial = 0
+                    if e.event.serial != new_serial:
+                        logging.debug("changed resource %d serial from %d to 0" 
+                                      % (e.event.id, e.event.serial))
+                    # first event always has serial 0
+                    prev_serial = e.event.serial = new_serial
+                    continue
+                if e.event.serial == prev_serial + ndel:
+                    # same as previous serial
+                    ++ nrepeat
+                    new_serial = e.event.serial - ndel
+                else:
+                    # different than previous serial
+                    new_serial = prev_serial + nrepeat
+                    ndel = e.event.serial - new_serial
+                    nrepeat = 1
+                if e.event.serial != new_serial:
+                    logging.debug("changed resource %d serial from %d to %d" 
+                                  % (e.event.id, e.event.serial, new_serial))
+                prev_serial = e.event.serial = new_serial
+        return
+
+    def save_raw_events(self, logfile):
+        for s_ev in self.events_list:        
+            logfile.write(s_ev.event.encode())
+        return
+
 
     def save_events(self, logfile,
                     bookmarks = None,
@@ -676,18 +714,28 @@ class Session:
         # proc, local clock -> syscnt that first has this local clock
         ticks = dict()
         for (proc, syscnt), vc in vclocks.iteritems():
-            ticks[(proc, vc.get(proc.pid))] = syscnt
+            if syscnt == 0: # real syscnt starts from 1
+                continue
+            c = vc.get(proc.pid)
+            if (proc, c) in ticks: # use earlier ones
+                ticks[(proc, c)] = min(syscnt, ticks[(proc, c)])
+            else:
+                ticks[(proc, c)] = syscnt
 
         for proc in self.process_list:
             if proc == proc1 or proc == proc2:
                 continue
 
+            # find out the last time we heard from pid
             pid = proc.pid
-            # last time we heard from pid, its local clock is at c
             c = max([vc1.get(pid), vc2.get(pid)])
-            syscnt = ticks[(proc, c+1)];
-            if syscnt is None:
-                syscnt = 0; # no bookmark for exited process
+
+            logging.debug("pid=%d, local clock=%d" % (pid, c));
+
+            if (proc, c+1) in ticks:
+                syscnt = ticks[(proc, c+1)];
+            else:
+                syscnt = 0; # no bookmark for exited or not-created process
             nodes[pid] = -syscnt;
 
         return nodes
