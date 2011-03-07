@@ -1,3 +1,4 @@
+#!/bin/bash
 export HISTFILE=$1
 set -o history
 
