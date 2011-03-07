@@ -103,12 +103,15 @@ def show_graph(args):
     if args.thin: diet_graph(graph)
     do_show_graph(graph, args.outfile + '.ob')
 
+    return 0
+
 ##############################################################################
 def show_syscalls(args):
     session = load_session(args.logfile)
     for pid in session.process_map.keys():
         print('')
         session.syscalls_process(pid)
+    return 0
 
 ##############################################################################
 def show_profile(args):
@@ -116,6 +119,7 @@ def show_profile(args):
     for pid in session.process_map.keys():
         print('')
         session.profile_process(pid)
+    return 0
 
 ##############################################################################
 
@@ -290,7 +294,7 @@ def test_races(args):
             break;
         logfile = '%s.%d.log' % (args.outfile, n)
         if not os.access(logfile, os.R_OK):
-            return 1
+            break
 
         if args.script_pre:
             ret = os.system('sudo ' + args.script_pre + cmd_suffix)
@@ -301,22 +305,26 @@ def test_races(args):
 
         logging.debug('command: %s %s %s' % (cmd_replay, logfile, cmd_suffix))
         ret = os.system('%s %s %s' % (cmd_replay, logfile, cmd_suffix))
+        if ret == 35:
+            print('REPLAY %2d: deadlock (exit %d)' % (n, ret))
+            continue
         if ret > 0:
             print('REPLAY %2d: failed (exit %d)' % (n, ret))
-            continue
+            return -1
         else:
             print('REPLAY %2d: completed' % n)
-            success = True
 
         if args.script_test:
             ret = os.system('sudo ' + args.script_test + cmd_suffix)
             if ret == 2:
                 print('Bad exit code %d from test-script'
                       ' (race %d)... skipping' % (ret, n))
-                continue
-            success = True if ret == 1 else False
-
-        print('    BUG %s' % ('PRODUCED' if success else 'not triggered'))
+            elif ret == 1:
+                print('    BUG PRODUCED')
+            else:
+                print('    BUG not triggered')
+        else:
+            print('    BUG only replayed')
 
         if args.script_post:
             ret = os.system('sudo ' + args.script_post + cmd_suffix)
@@ -324,8 +332,7 @@ def test_races(args):
                 print('Bad exit code %d from post-script'
                      ' (race %d)' % (ret, n))
 
-    if not success:
-        exit(1)
+    return 0
 
 ##############################################################################
 
@@ -411,4 +418,5 @@ if args.verbose: log = logging.INFO
 if args.debug: log = logging.DEBUG
 logging.basicConfig(level=log, stream=sys.stdout)
 
-args.func(args)
+ret = args.func(args)
+exit(0 if ret >= 0 else -ret)
