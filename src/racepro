@@ -131,7 +131,6 @@ def show_races(args):
     for k in vclocks.keys():
         logging.debug('%2d %5d -> %s' % (k[0].pid, k[1], vclocks[k]))
 
-
     # YJF: show sysaclls with clocks
     if args.debug:
         for proc in session.process_list:
@@ -261,7 +260,7 @@ def show_races(args):
         newsession.condense_events()
         outfile.close()
         outfile = open(args.outfile + '.' + str(n_race + 1) + '.log', 'w')
-        newsession.save_raw_events(outfile)
+        newsession.save_events(outfile)
         outfile.close()
 
         n_race += 1

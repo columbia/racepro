@@ -338,12 +338,6 @@ class Session:
                 prev_serial = e.event.serial = new_serial
         return
 
-    def save_raw_events(self, logfile):
-        for s_ev in self.events:        
-            logfile.write(s_ev.event.encode())
-        return
-
-
     def save_events(self, logfile,
                     bookmarks = None,
                     injects = None,
