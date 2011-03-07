@@ -190,8 +190,7 @@ class Session:
                 sys.stdout.write('pid=%3:cnt=%3:' % (proc.pid, p_ev.syscnt))
                 sys.stdout.write('ind=%4d:' % (self.events[p_ev.index].pindex))
                 if vclocks is not None:
-                    sys.stdout.write('vc=%s:' 
-                                     % vclocks[(proc, p_ev.syscnt)].clocks)
+                    sys.stdout.write('vc=%s:' % vclocks[(proc, p_ev.syscnt)])
                 self.parse_syscall(p_ev.index)
 
     def profile_process(self, pid):
@@ -709,8 +708,7 @@ class Session:
         vc1 = vclocks[(proc1, index1)]
         vc2 = vclocks[(proc2, index2)]
 
-        logging.debug('find cut for clocks %s and %s' %
-                      (vc1.clocks, vc2.clocks))
+        logging.debug('find cut for clocks %s and %s' % (vc1, vc2))
 
         # proc, local clock -> syscnt that first has this local clock
         ticks = dict()
