@@ -91,11 +91,11 @@ class SessionEvent:
     @info: pointer to scribe's info
     @event: pointer to scribe's event
     @proc: pointer to respective Process
-    @pindex: index of event inside respective Process
+    @pindex: process index of event (in respective Process)
     @resource: pointer to respective Resource
-    @rindex: index of event inside respective Resource
-    @sysind: index of owning syscall event
-    @regind: index of owning regs event
+    @rindex: resource index of event (in respective Resource)
+    @sysind: global index of owning syscall event
+    @regind: global index of owning regs event
     """
     __slots__ = ('info', 'event',
                  'proc', 'pindex',
@@ -153,27 +153,27 @@ class Session:
             if isinstance(e_data, scribe.EventDataExtra): break
 
         out = sys.stdout
-        if e_syscall.nr == unistd.Syscalls.NR_open:
+        if event.nr == unistd.Syscalls.NR_open:
             out.write('open("%s", %#x, %#3o)' %
                       (e_data.data, args[1], args[2]))
-        elif e_syscall.nr == unistd.Syscalls.NR_close:
+        elif event.nr == unistd.Syscalls.NR_close:
             out.write('close(%d)' %
                       (args[0]))
-        elif e_syscall.nr == unistd.Syscalls.NR_access:
+        elif event.nr == unistd.Syscalls.NR_access:
             out.write('access("%s", %#3o)' %
                       (e_data.data, args[1]))
-        elif e_syscall.nr == unistd.Syscalls.NR_execve:
+        elif event.nr == unistd.Syscalls.NR_execve:
             out.write('execve("%s", %#x, %#x)' %
                       (e_data.data, args[1], args[2]))
-        elif e_syscall.nr == unistd.Syscalls.NR_stat:
+        elif event.nr == unistd.Syscalls.NR_stat:
             out.write('stat("%s", %#x)' %
                       (e_data.data, args[1]))
-        elif e_syscall.nr == unistd.Syscalls.NR_stat64:
+        elif event.nr == unistd.Syscalls.NR_stat64:
             out.write('stat64("%s", %#x, %#x)' %
                       (e_data.data, args[1], args[2]))
         else:
             out.write('%s(%#x, %#x, %#x)' %
-                      (unistd.syscall_str(e_syscall.nr),
+                      (unistd.syscall_str(event.nr),
                        args[0], args[1], args[2]))
         out.write(' = %ld\n' % (ret))
 
