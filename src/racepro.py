@@ -356,9 +356,15 @@ class Session:
         locations (per process) to cut remaining log.
 
         @logfile: output file object (opened for binary write)
-        @bookmarks: array of bookmarks [{ pid: sc1 }]
-        @injects: actions to inject { pid : {sc1:act1},{sc2:act2}, ...] }
-        @cutoff: where to cutoff queues { pid : sc }
+        @bookmarks: array of bookmarks [{ pid: cnt1 }]
+        @injects: actions to inject { pid : {cnt1:act1},{cnt2:act2}, ...] }
+        @cutoff: where to cutoff queues { pid : cnt }
+
+        The 'cnt' value above specifies a system call:
+        cnt > 0: effect occurs post-syscall (before return to userspace)
+        cnt < 0: effect occufs pre-syscall
+        cnt == 0: no effect because process exited so leave log as is
+        else (if pid not a key) then process not started, ignore the log
         """
 
         active = dict()
@@ -366,8 +372,14 @@ class Session:
         noregs = dict()
         endofq = dict({0:False})
 
-        # any(ifilter(lambda d: pid in d, a))
-        include = reduce(lambda d1, d2: dict(d1, **d2), bookmarks)
+        # include all pids that belong to any bookmark; pid's not here
+         # should not yet be created, and their logs will be skipped
+        if bookmarks:
+            include = reduce(lambda d1, d2: dict(d1, **d2), bookmarks)
+        else:
+            include = dict([(k, k) for k in self.process_map.keys()])
+
+        logging.debug('pids included in the log: %s' % include.keys())
 
         if bookmarks is None:
             bookmarks = dict()
@@ -381,14 +393,17 @@ class Session:
             event = s_ev.event
             pid = info.pid
 
+            # pid==0 is a special event
             if pid == 0:
                 logfile.write(event.encode())
                 continue
 
+            # pid's not in @include are ignored (not created yet)
             if pid not in include:
                 continue
 
-            # pid first time ?
+            # first time we see this pid ?
+            # note: setting cutoff[pid] ensures no cutoff
             if pid not in active:
                 active[pid] = True
                 syscall[pid] = 0
