@@ -26,10 +26,10 @@ class VectorClock:
             self.clocks[pid] = max([self.get(pid), v.get(pid)])
 
     def before(self, v):
-        for pid in v.clocks.keys():
+        for pid in set(self.clocks.keys() + v.clocks.keys()):
             if self.get(pid) > v.get(pid):
                 return False
-        return self.len() <= v.len()
+        return True
 
     def race(self, v):
         return not (self.before(v) or v.before(self))
