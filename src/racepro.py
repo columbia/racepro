@@ -187,7 +187,7 @@ class Session:
 
         for p_ev in proc.events:
             if isinstance(p_ev.event, scribe.EventSyscallExtra):
-                sys.stdout.write('pid=%3:cnt=%3:' % (proc.pid, p_ev.syscnt))
+                sys.stdout.write('pid=%3d:cnt=%3d:' % (proc.pid, p_ev.syscnt))
                 sys.stdout.write('ind=%4d:' % (self.events[p_ev.index].pindex))
                 if vclocks is not None:
                     sys.stdout.write('vc=%s:' % vclocks[(proc, p_ev.syscnt)])

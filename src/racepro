@@ -205,10 +205,10 @@ def show_races(args):
         if args.debug:
             print('Two racing system calls are:');
             sys.stdout.write('p%d @ %s:' 
-                             % (proc1.pid, vclocks[(proc1, pindex1)]));
+                             % (proc1.pid, vclocks[(proc1, cnt1)]));
             session.parse_syscall(int(graph.node[node1]['index']));
             sys.stdout.write('p%d @ %s:' 
-                             % (proc2.pid, vclocks[(proc2, pindex2)]));
+                             % (proc2.pid, vclocks[(proc2, cnt2)]));
             session.parse_syscall(int(graph.node[node2]['index']));
 
         # YJF: TODO: sort races.  races on stdout or stderr not
