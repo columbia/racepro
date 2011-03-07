@@ -312,6 +312,7 @@ class Session:
     # YJF: remove holes in serial number sequence.  
     # FIXME: this should be really in py-scribe because we essentially
     # reverse engineer the serial assignment logic here.
+    # FIXME: should use read/write access info, since we may remove writes
     def condense_events(self):
         for r in self.resource_list:
             prev_serial = -1
@@ -738,7 +739,8 @@ class Session:
             if (proc, c+1) in ticks:
                 syscnt = ticks[(proc, c+1)];
             else:
-                syscnt = 0; # no bookmark for exited or not-created process
+                syscnt = 0; # no bookmark for exited process
+            # bookmark for not-yet-created process is -1 automatically
             nodes[pid] = -syscnt;
 
         return nodes
