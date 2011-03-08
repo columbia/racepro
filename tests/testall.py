@@ -77,7 +77,7 @@ def do_one_test(args, t_name, t_exec):
         return False
 
     logging.info('  testing the races')
-    ret = do_exec(e_racepro + ' %s test-races -i %s -o %s %s' %
+    ret = do_exec(e_racepro + ' %s test-races -i %s -o %s %s  --timeout 2 --exit-on-failed-replay' %
                   (opts1, path + '.log', path, opts2))
     if ret != 0:
         logging.error('failed to test the races %d' % ret)
