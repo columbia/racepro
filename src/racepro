@@ -174,20 +174,20 @@ def find_pairwise_races(session, vclocks):
 def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
     """prepare a race by computing bookmacks, injects, and cutoff"""
     proc1, cnt1 = session.split_node(node1)
-    event1 = session.events[int(graph.node[node1]['index'])].event
+    index1 = int(graph.node[node1]['index'])
+    event1 = session.events[index1].event
 
     proc2, cnt2 = session.split_node(node2)
-    event2 = session.events[int(graph.node[node2]['index'])].event
+    index2 = int(graph.node[node2]['index'])
+    event2 = session.events[index2].event
 
     # YJF: print out race
     if args.debug:
-        print('Two racing system calls are:');
-        sys.stdout.write('p%d @ %s:'
-                         % (proc1.pid, vclocks[(proc1, cnt1)]));
-        session.parse_syscall(int(graph.node[node1]['index']));
-        sys.stdout.write('p%d @ %s:'
-                         % (proc2.pid, vclocks[(proc2, cnt2)]));
-        session.parse_syscall(int(graph.node[node2]['index']));
+        print('Two racing system calls are:')
+        sys.stdout.write('p%d @ %s:' % (proc1.pid, vclocks[(proc1, cnt1)]))
+        session.parse_syscall(index1)
+        sys.stdout.write('p%d @ %s:' % (proc2.pid, vclocks[(proc2, cnt2)]))
+        session.parse_syscall(index2)
 
     # YJF: TODO: sort races.  races on stdout or stderr not
     # interesting, mostly.  races on file data more interesting than
@@ -317,12 +317,13 @@ def show_races(args):
     all_races, sys_races = find_pairwise_races(session, vclocks)
 
     print('-' * 75)
+    print('REGULAR RACES')
     print('Found %d potential races (%d after duplicates removal)' %
           (len(all_races), len(sys_races)))
 
     if args.random:
         r = random.sample(sys_races, len(sys_races))
-        print('Random sample to generate %d races:' % (args.count))
+        print('Random sample to generate u pto %d races:' % (args.count))
     else:
         r = sys_races
 
