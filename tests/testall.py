@@ -108,7 +108,7 @@ logging.basicConfig(level=log, stream=sys.stdout)
 
 all_tests = list()
 with open('tests.list', 'r') as file:
-    all_tests_l = [ l.split() for l in file ]
+    all_tests_l = [ l.split() for l in file if l.strip() and l[0] != '#' ]
     all_tests_d = dict(all_tests_l)
 
 req_tests = args.tests if args.tests else [n for n ,t in all_tests_l]
