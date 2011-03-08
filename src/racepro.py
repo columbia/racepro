@@ -708,6 +708,55 @@ class Session:
 
         return vclocks
 
+
+    def score_race(self, graph, race):
+        # TODO: priority may change?
+        # file data > path > exit > signal > file metadata > stdout
+        # basescores = {'file':400, 'path':300, 'exit-exit':200, 'signal':100}
+        
+        score = 0
+
+        # events closer in one of the resource access lists > farther
+        n1, n2 = race
+        i1 = int(graph.node[n1]['index'])
+        evl1 = self.syscall_events(self.events[i1].proc, self.events[i1].pindex)
+        i2 = int(graph.node[n2]['index'])
+        evl2 = self.syscall_events(self.events[i2].proc, self.events[i2].pindex)
+        
+        # average distance of resource accesses
+        distance = 0
+        nresource = 0
+        for e1 in evl1:
+            for e2 in evl2:
+                if e1.resource == e2.resource:
+                    assert e1 != e2
+                    if(e1.event.write_access == 0 and
+                       e2.event.write_access == 0):
+                        continue
+                    distance += abs(e1.event.serial-e2.event.serial)
+                    nresource += 1
+        if nresource != 0:
+            distance = float(distance) / nresource
+        else:
+            distance = 5 # why no common resources?
+        logging.debug('race %s,%s avg distance=%d' % (n1, n2, distance))
+        return score - distance;
+
+    def syscall_events(self, proc, pindex):
+
+        assert isinstance(proc.events[pindex].event, scribe.EventSyscallExtra)
+
+        events = list()
+        while True:
+            p_ev = proc.events[pindex]
+            if isinstance(p_ev.event, scribe.EventSyscallEnd):
+                break
+            elif isinstance(p_ev.event, scribe.EventResourceLockExtra):
+                events.append(self.events[p_ev.index])
+            pindex += 1
+
+        return events
+
     # YJF: improved version
     # FIXME: (1) should just merge syscnt and vector clock.  
     #        (2) should create special nodes to represent process

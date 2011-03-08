@@ -248,10 +248,6 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exti2, wait, n_race):
         sys.stdout.write('p%d @ %s:' % (proc3.pid, vclocks[(proc3, cnt3)]))
         session.parse_syscall(proc3.events[pindex3].index)
 
-    # YJF: TODO: sort races.  races on stdout or stderr not
-    # interesting, mostly.  races on file data more interesting than
-    # stat v.s. write race
-
     # TODO: extend crosscut_graph to handle 3-somes
     bookmark1 = session.crosscut_graph(graph, vclocks, exit1, exit2)
     if not bookmark1:
@@ -339,6 +335,11 @@ def show_races(args):
     print('REGULAR RACES')
     print('Found %d potential races (%d after duplicates removal)' %
           (len(all_races), len(sys_races)))
+
+    # YJF: sort them
+    sys_races = sorted(sys_races, reverse=True,
+                       key=lambda race: session.score_race(graph, race))
+    logging.debug('sorted race list %s' % sys_races)
 
     if args.random:
         r = random.sample(sys_races, len(sys_races))
