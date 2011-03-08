@@ -77,6 +77,9 @@ class Resource:
     """
     __slots__ = ('type', 'id', 'events')
 
+    def is_virtual(self):
+        return False if self.type >= 0 else True
+
     def __init__(self, event=None):
         if event:
             self.type = event.type
@@ -387,6 +390,8 @@ class Session:
     def condense_events(self):
         """ remove holes in serial number sequences of resources """
         for r in self.resource_list:
+            if r.is_virtual():
+                continue
             prev_serial = -1
             for e in r.events:
                 if prev_serial == -1:
@@ -678,7 +683,7 @@ class Session:
             pr_ev = list()
             nr_ev = list()
             serial = 0
-            virtual = False if r.type >= 0 else True
+            virtual = r.is_virtual()
 
             def add_resource_edges():
                 tr_ev = product(pr_ev, nr_ev)
