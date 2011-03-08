@@ -193,7 +193,7 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
     # interesting, mostly.  races on file data more interesting than
     # stat v.s. write race
 
-    bookmark1 = session.crosscut_graph(graph, vclocks, node1, node2)
+    bookmark1 = session.crosscut_graph(graph, vclocks, [node1, node2])
     if not bookmark1:
         print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
               (proc1.pid, cnt1, proc2.pid, cnt2))

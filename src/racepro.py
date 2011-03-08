@@ -709,35 +709,15 @@ class Session:
         return vclocks
 
     # YJF: improved version
-    def crosscut_graph(self, graph, vclocks, node1, node2):
-        """Given two nodes in the graph, find a consistent crosscut,
-        such that both nodes are just about to be executed.
+    # FIXME: (1) should just merge syscnt and vector clock.  
+    #        (2) should create special nodes to represent process
+    #            start and exit.  these nodes are not connected to
+    #            nodes in other processes
+    def crosscut_graph(self, graph, vclocks, init_nodes):
+        """Given a list of initial nodes in the graph, find a consistent
+        crosscut, such that both nodes are just about to be executed.
         Returns bookmarks dict of the cut, or None if none found
         """
-        proc1, cnt1 = self.split_node(node1)
-        proc2, cnt2 = self.split_node(node2)
-
-        pid1 = proc1.pid
-        pid2 = proc2.pid
-
-        assert cnt1 > 0 and cnt2 > 0, \
-            'Potential race before process creation (%d:%d, %d:%d)' % \
-            (pid1, cnt1, pid2, cnt2)
-
-        nodes = dict()
-        nodes[pid1] = cnt1
-        nodes[pid2] = cnt2
-
-        vc1 = vclocks[(proc1, cnt1)]
-        vc2 = vclocks[(proc2, cnt2)]
-
-        logging.debug('find cut for clocks %s and %s' % (vc1, vc2))
-
-        # FIXME: (1) should just merge syscnt and vector clock.  
-        #        (2) should create special nodes to represent process
-        #            start and exit.  these nodes are not connected to
-        #            nodes in other processes
-
         # proc, local clock -> syscnt that first has this local clock
         ticks = dict()
         for (proc, syscnt), vc in vclocks.iteritems():
@@ -764,13 +744,25 @@ class Session:
         #         nj[j] >= max(vc1[j], vc2[j] ==> nj hb n1 or n2
         #         ==> ni >= n1 or n2.  contradictory !
 
+        vc = VectorClock() # vector clocks for init_nodes
+        logging.debug('finding cut for nodes %s' % (", ".join(init_nodes)))
+        for n in init_nodes:
+            proc, cnt = self.split_node(n)
+            assert cnt > 0, \
+                'Potential race before process creation (%d:%d)' % \
+                (pproc.pid, cnt)
+            vc.merge(vclocks[(proc, cnt)])
+            logging.debug('    vc: %s' % vclocks[(proc, cnt)])
+        logging.debug('merged clocks %s' % vc.clocks)
+
+        nodes = dict() # nodes before which we'll cut
         for proc in self.process_list:
-            if proc == proc1 or proc == proc2:
+            if proc in nodes:
                 continue
 
             # find out the last time we heard from pid
             pid = proc.pid
-            c = max([vc1.get(pid), vc2.get(pid)])
+            c = vc.get(pid) # last heard local clock of pid
 
             logging.debug("pid=%d, local clock=%d" % (pid, c));
 
@@ -781,6 +773,8 @@ class Session:
                 syscnt = sys.maxint # maxint for exited process
             nodes[pid] = syscnt;
 
+        logging.debug("found nodes to cut before: %s" % nodes)
+
         # extra hack because our hb graph is awkward
         cut = dict()
         for pid, mark in nodes.iteritems():
@@ -788,10 +782,12 @@ class Session:
                 cut[pid] = 0 # include everything for already exited process
                 continue
             if mark > 0:
-                cut[pid] = -mark # normal case: copy
+                cut[pid] = -mark # normal case: negate to indicate cut before
                 continue
+
             assert(mark == 0)
-            # process not yet created or have not run first system call
+            # process not yet cloned or already cloned by have not run
+            # first system call
             n = self.make_node(pid, mark)
             for prvn in graph.predecessors(n):
                 if 'fork' not in graph.edge[prvn][n]:
@@ -800,16 +796,17 @@ class Session:
                 logging.debug('parent %d, child %d, clone@%d, cut@%d' 
                               % (prvproc.pid, pid, prvcnt, nodes[prvproc.pid]))
                 if nodes[prvproc.pid] < prvcnt: # clone call not in cut
-                    logging.debug('exclude child not yet created')
+                    logging.debug('exclude child not yet cloned')
                 else: # clone call in cut
-                    logging.debug("include child")
+                    logging.debug("include child already cloned")
                     cut[pid] = -1 # -1 to include clone ret
-            
-        msg = "found cut: ";
-        for pid, mark in nodes.iteritems():
-            msg += "%d:%d, " % (pid, mark)
-        logging.debug(msg)
 
+        # cut for initial nodes 
+        for n in init_nodes:
+            proc, cnt = self.split_node(n)
+            cut[proc.pid] = -cnt
+
+        logging.debug('found cut: %s' % cut)
         return cut
 
 
