@@ -140,6 +140,32 @@ class Session:
             s_ev = self.events[r_ev.index]
         return (s_ev.proc, s_ev.pindex)
 
+    def get_syscall_event(self, index):
+        sysind = self.events[index].sysind
+        proc = self.events[sysind].proc
+        pindex = self.events[sysind].pindex
+        return proc.events[pindex].event
+
+    def get_syscall_events(self, index, event_class):
+        """Given an event, find the owning syscall, and return all the
+        events of of a certain type (event_class) that belong the that
+        syscall. If @event_class == None, return all syscall events.
+        """
+        sysind = self.events[index].sysind
+        proc = self.events[sysind].proc
+        pindex = self.events[sysind].pindex
+
+        event_list = list()
+
+        event = proc.events[pindex].event
+        while not isinstance(event, scribe.EventSyscallEnd):
+            if isinstance(event, event_class):
+                event_list.append((event, proc.events[pindex].index))
+            pindex += 1
+            event = proc.events[pindex].event
+
+        return event_list
+
     ##########################################################################
 
     def parse_syscall(self, i):
@@ -291,7 +317,7 @@ class Session:
 
     def __check_bookmarks(self, pid, syscall, bookmarks, logfile):
         for n, bmark in enumerate(bookmarks):
-            if syscall == bmark[pid]:
+            if pid in bmark and syscall == bmark[pid]:
                 e = scribe.EventBookmark()
                 e.id = n
                 e.npr = len([b for b in bmark.values() if b != 0])
@@ -319,44 +345,11 @@ class Session:
         else:
             return 
 
-    # YJF: remove holes in serial number sequence.  
-    # FIXME: this should really be in py-scribe because we essentially
-    # reverse engineer the serial assignment logic here.
-    # FIXME: should use read/write access info, since we may remove writes
-    def condense_events(self):
-        """ remove holes in serial number sequences of resources """
-        for r in self.resource_list:
-            prev_serial = -1
-            for e in r.events:
-                if prev_serial == -1:
-                    ndel = e.event.serial # number of deleted events
-                    nrepeat = 1 # number of repeated occurences of a serial
-                    new_serial = 0
-                    if e.event.serial != new_serial:
-                        logging.debug("changed id=%d serial=%d to serial=0" 
-                                      % (e.event.id, e.event.serial))
-                    # first event always has serial 0
-                    prev_serial = e.event.serial = new_serial
-                    continue
-                if e.event.serial == prev_serial + ndel:
-                    # same as previous serial
-                    nrepeat += 1
-                    new_serial = e.event.serial - ndel
-                else:
-                    # different than previous serial
-                    new_serial = prev_serial + nrepeat
-                    ndel = e.event.serial - new_serial
-                    nrepeat = 1
-                if e.event.serial != new_serial:
-                    logging.debug("changed id=%d serial=%d to serial=%d" 
-                                  % (e.event.id, e.event.serial, new_serial))
-                prev_serial = e.event.serial = new_serial
-        return
-
     def save_events(self, logfile,
                     bookmarks = None,
                     injects = None,
-                    cutoff = None):
+                    cutoff = None,
+                    events = None):
         """Write the (perhaps modified) scribe log to @logfile
 
         Write out the scribe log while potentially modifying it. Two
@@ -368,6 +361,7 @@ class Session:
         @bookmarks: array of bookmarks [{ pid: cnt1 }]
         @injects: actions to inject { pid : {cnt1:act1},{cnt2:act2}, ...] }
         @cutoff: where to cutoff queues { pid : cnt }
+        @events: (ordered) events to substitutee [(old1,new1),(old2,new2)..]
 
         The 'cnt' value above specifies a system call:
         cnt > 0: effect occurs post-syscall (before return to userspace)
@@ -383,19 +377,24 @@ class Session:
 
         # include all pids that belong to any bookmark; pid's not here
          # should not yet be created, and their logs will be skipped
-        if bookmarks:
+        if not bookmarks is None:
             include = reduce(lambda d1, d2: dict(d1, **d2), bookmarks)
+            drop_old_bookmarks = True
         else:
             include = dict([(k, k) for k in self.process_map.keys()])
+            drop_old_bookmarks = False
 
         logging.debug('pids included in the log: %s' % include.keys())
 
-        if bookmarks is None:
-            bookmarks = dict()
-        if injects is None:
-            injects = dict()
-        if cutoff is None:
-            cutoff = dict()
+        if bookmarks is None: bookmarks = dict()
+        if injects is None: injects = dict()
+        if cutoff is None: cutoff = dict()
+        if events is None: events = list()
+
+        try:
+            event_old, event_new = events.pop(0)
+        except IndexError:
+            event_old, event_new = None, None
 
         for s_ev in self.events:
             info = s_ev.info
@@ -431,7 +430,7 @@ class Session:
                 continue
 
             # ignore original bookmarks
-            if isinstance(event, scribe.EventBookmark):
+            if drop_old_bookmarks and isinstance(event, scribe.EventBookmark):
                 continue
 
             #
@@ -462,6 +461,15 @@ class Session:
                 endofq[pid] = True
                 active[pid] = False
 
+            # substitute for this event ?
+            if event == event_old:
+                event = event_new
+                print('yay')
+                try:
+                    event_old, event_new = events.pop(0)
+                except IndexError:
+                    event_old, event_new = None, None
+
             logfile.write(event.encode())
 
             if isinstance(event, scribe.EventSyscallEnd):
@@ -483,6 +491,40 @@ class Session:
                 logfile.write(e.encode())
                 e = scribe.EventQueueEof()
                 logfile.write(e.encode())
+
+    # YJF: remove holes in serial number sequence.
+    # FIXME: this should really be in py-scribe because we essentially
+    # reverse engineer the serial assignment logic here.
+    # FIXME: should use read/write access info, since we may remove writes
+    def condense_events(self):
+        """ remove holes in serial number sequences of resources """
+        for r in self.resource_list:
+            prev_serial = -1
+            for e in r.events:
+                if prev_serial == -1:
+                    ndel = e.event.serial # number of deleted events
+                    nrepeat = 1 # number of repeated occurences of a serial
+                    new_serial = 0
+                    if e.event.serial != new_serial:
+                        logging.debug("changed id=%d serial=%d to serial=0"
+                                      % (e.event.id, e.event.serial))
+                    # first event always has serial 0
+                    prev_serial = e.event.serial = new_serial
+                    continue
+                if e.event.serial == prev_serial + ndel:
+                    # same as previous serial
+                    nrepeat += 1
+                    new_serial = e.event.serial - ndel
+                else:
+                    # different than previous serial
+                    new_serial = prev_serial + nrepeat
+                    ndel = e.event.serial - new_serial
+                    nrepeat = 1
+                if e.event.serial != new_serial:
+                    logging.debug("changed id=%d serial=%d to serial=%d"
+                                  % (e.event.id, e.event.serial, new_serial))
+                prev_serial = e.event.serial = new_serial
+        return
 
     def order_syscalls(self, crosscut, syscalls):
         """Generate bookmarks, inject, and cutoff, that will produce a
@@ -813,14 +855,14 @@ class Session:
             pid = proc.pid
             c = vc.get(pid) # last heard local clock of pid
 
-            logging.debug("pid=%d, local clock=%d" % (pid, c));
+            logging.debug("pid=%d, local clock=%d" % (pid, c))
 
             if (proc, c + 1) in ticks:
-                syscnt = ticks[(proc, c+1)]; # normal case
+                syscnt = ticks[(proc, c+1)]  # normal case
             else: # process has exited
                 assert (c > 0) 
                 syscnt = sys.maxint # maxint for exited process
-            nodes[pid] = syscnt;
+            nodes[pid] = syscnt
 
         logging.debug("found nodes to cut before: %s" % nodes)
 
@@ -995,13 +1037,13 @@ class Session:
                         w_vc2 = vclocks[wp2, wp2.events[wi2].syscnt]
 
                         if w_vc1.before(w_vc2):
-                            exitwait.append(((ep2.pid, ei2),
-                                            (ep1.pid, ei1),
-                                            (wp1.pid, wi1)))
+                            exitwait.append(((ep2, ei2),
+                                            (ep1, ei1),
+                                            (wp1, wi1)))
                         else:
-                            exitwait.append(((ep1.pid, ei1),
-                                            (ep2.pid, ei2),
-                                            (wp2.pid, wi2)))
+                            exitwait.append(((ep1, ei1),
+                                            (ep2, ei2),
+                                            (wp2, wi2)))
 
         return exitwait
 

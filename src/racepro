@@ -4,6 +4,7 @@ import os
 import sys
 import pdb
 import random
+import struct
 import argparse
 import subprocess
 import logging
@@ -222,9 +223,15 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
     logging.debug('      injects: %s' % (injects))
     logging.debug('       cutoff: %s' % (cutoff))
 
-    return bookmarks, injects, cutoff
+    return bookmarks, injects, cutoff, None
 
-def prep_exitwait_race(session, graph, vclocks, exit1, exti2, wait, n_race):
+def find_exitwait_races(session, vclocks):
+    """Find all exit-wait races and return in a list"""
+    exit_races = session.races_exitwait(vclocks)
+    logging.debug('total exit-races %d' % (len(all_races)))
+    return exit_races
+
+def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
     """prepare a race by computing bookmacks, injects, and cutoff"""
     proc1, pindex1 = exit1
     event1 = proc1.events[pindex1].event
@@ -234,7 +241,7 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exti2, wait, n_race):
     event2 = proc2.events[pindex2].event
     cnt2 = proc2.events[pindex2].syscnt
 
-    proc3, pindex3 = exit3
+    proc3, pindex3 = wait
     event3 = proc3.events[pindex3].event
     cnt3 = proc3.events[pindex3].syscnt
 
@@ -249,7 +256,11 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exti2, wait, n_race):
         session.parse_syscall(proc3.events[pindex3].index)
 
     # TODO: extend crosscut_graph to handle 3-somes
-    bookmark1 = session.crosscut_graph(graph, vclocks, exit1, exit2)
+    nodes = [session.make_node(proc1.pid, cnt1),
+             session.make_node(proc2.pid, cnt2),
+             session.make_node(proc3.pid, cnt3)]
+    bookmark1 = session.crosscut_graph(graph, vclocks, nodes)
+
     if not bookmark1:
         print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
               (proc1.pid, cnt1, proc2.pid, cnt2))
@@ -258,22 +269,36 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exti2, wait, n_race):
     bookmark2 = dict(bookmark1)
     bookmark2[proc1.pid] = -bookmark2[proc1.pid]
 
-    bookmark3 = dict(bookmark2)
+    bookmark3 = dict([(p, v) for p, v in bookmark2.items() if p != proc1.pid])
     bookmark3[proc3.pid] = -bookmark3[proc3.pid]
 
     bookmarks = [bookmark1, bookmark2, bookmark3]
 
-    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
     injects = dict()
-    injects[proc1.pid] = dict({-cnt1 : action})
-
-    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+    action1 = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
                             0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
-    injects = dict()
-    injects[proc3.pid] = dict({-cnt3 : action})
+    injects[proc1.pid] = dict({-cnt1 : action1})
+    action2 = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+    injects[proc3.pid] = dict({-cnt3 : action2})
 
     cutoff = dict(bookmark3)
+
+    # get data (internal) event described wait() during replay
+    syscall_old = proc3.events[pindex3].event
+    syscall_new = scribe.EventSyscallExtra()
+    syscall_new.nr = syscall_old.nr
+    syscall_new.ret = proc1.pid
+
+    e_data = session.get_syscall_events(proc3.events[pindex3].index,
+                                        scribe.EventDataExtra)
+    data_old = e_data.pop()[0]
+    data_new = scribe.EventDataExtra()
+    data_new.data_type = scribe.SCRIBE_DATA_INTERNAL
+    data_new.data = struct.pack('i', proc1.pid)
+    data_new.user_ptr = 0
+
+    events = list([(syscall_old, syscall_new), (data_old, data_new)])
 
     print('RACE %2d:  ' % (n_race + 1) +
           'pid %d syscnt %d [sys(%d)=%d]' %
@@ -284,21 +309,23 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exti2, wait, n_race):
           (proc2.pid, cnt2, event2.nr, event2.ret))
     print('          cut:  %s' % bookmark1.values())
 
-    logging.debug('   boobkmark1: %s' % (bookmark1))
-    logging.debug('   boobkmark2: %s' % (bookmark2))
-    logging.debug('   boobkmark3: %s' % (bookmark3))
-    logging.debug('      injects: %s' % (injects))
-    logging.debug('       cutoff: %s' % (cutoff))
+    logging.info('   boobkmark1: %s' % (bookmark1))
+    logging.info('   boobkmark2: %s' % (bookmark2))
+    logging.info('   boobkmark3: %s' % (bookmark3))
+    logging.info('      injects: %s' % (injects))
+    logging.info('       cutoff: %s' % (cutoff))
+    logging.info('       events: %s' % (events))
 
-    return bookmarks, injects, cutoff
+    return (bookmarks, injects, cutoff, events)
 
-def save_modify_log(session, bookmarks, injects, cutoff, output):
+def save_modify_log(session, bookmarks, injects, cutoff, events, output):
     """Generate and save a modified scribe log for a race"""
     with open(output, 'w') as file:
         session.save_events(file,
                             bookmarks=bookmarks,
                             injects=injects,
-                            cutoff=cutoff)
+                            cutoff=cutoff,
+                            events=events)
 
     # YJF: condense event serial and rewrite log
     # create a newsession so it's easier for me to traverse the log
@@ -359,10 +386,9 @@ def show_races(args):
             continue
         n_race += 1
 
-        bookmarks, injects, cutoff = ret
+        (bookmarks, injects, cutoff, events) = ret
         output = args.outfile + '.' + str(n_race) + '.log'
-
-        save_modify_log(session, bookmarks, injects, cutoff, output)
+        save_modify_log(session, bookmarks, injects, cutoff, events, output)
 
         if n_race == args.count:
             break;
@@ -386,23 +412,20 @@ def show_races(args):
 
     print('-' * 75)
 
-    # for (exit1, exit2, wait) in exit_races:
-    #     ret = prep_exitwait_race(session, graph, vclocks,
-    #                              exit1, exit2, wait, n_race)
-    #     if not ret:
-    #         n_fail += 1
-    #         continue
-    #     n_race += 1
+    for (exit1, exit2, wait) in exit_races:
+        ret = prep_exitwait_race(session, graph, vclocks,
+                                 exit1, exit2, wait, n_race)
+        if not ret:
+            n_fail += 1
+            continue
+        n_race += 1
 
-    #     bookmarks, injects, cutoff = ret
-    #     output = args.outfile + '.' + str(n_race) + '.log'
+        (bookmarks, injects, cutoff, events) = ret
+        output = args.outfile + '.' + str(n_race) + '.log'
+        save_modify_log(session, bookmarks, injects, cutoff, events, output)
 
-    #     save_modify_log(session, bookmarks, injects, cutoff, output)
-
-    #     if n_race == args.count:
-    #         break;
-
-    print(exit_races)
+        if n_race == args.count:
+            break
 
     ######################################################################
     # step 3: Statistics ..
@@ -429,7 +452,7 @@ def test_races(args):
     while True:
         n += 1
         if total >= 0 and n > total:
-            break;
+            break
         logfile = '%s.%d.log' % (args.outfile, n)
         if not os.access(logfile, os.R_OK):
             break
@@ -438,7 +461,7 @@ def test_races(args):
             r = do_exec('sudo ' + args.script_pre + cmd_suffix)
             if r > 0:
                 print('RACE %d: bad exit code %d from pre-script' % (n, r))
-                continue;
+                continue
 
         r = do_exec('%s %s %s' % (cmd_replay, logfile, cmd_suffix))
         if r == 35:
