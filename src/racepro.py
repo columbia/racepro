@@ -29,13 +29,10 @@ class Process:
     @pid: pid of the process
     @name: name of the program
     @events: (ordered) list of events performed by this process
-    @waitid: id for the process's wait/exit (virtual) resource
-    @signalid: id for the process's signal/kill (virtual) resource
     @sysind: track current (last) syscall event (temporary)
     @regind: track current (last) regs events (temporary)
     """
-    __slots__ = ('pid', 'name', 'events', 'syscnt',
-                 'waitid', 'signalid', 'sysind', 'regind')
+    __slots__ = ('pid', 'name', 'events', 'syscnt', 'sysind', 'regind')
 
     def next_syscall(self, index):
         """Find the next syscall in a process events log"""
@@ -50,7 +47,6 @@ class Process:
         self.name = None
         self.events = list()
         self.syscnt = 0
-        self.waitid = 0
         self.sysind = -1
         self.regind = -1
         
@@ -77,13 +73,9 @@ class Resource:
     """
     __slots__ = ('type', 'id', 'events')
 
-    def is_virtual(self):
-        return False if self.type >= 0 else True
-
-    def __init__(self, event=None):
-        if event:
-            self.type = event.type
-            self.id = event.id
+    def __init__(self, event):
+        self.type = event.type
+        self.id = event.id
         self.events = list()
 
 class Action:
@@ -134,8 +126,9 @@ class Session:
     @process_list: list of all Process instances
     @resource_map: map a unique identifier to the coresponding Resource
     @resource_list: list of all Resource instances
-    @resource_next: next available resource identifier
     @events: list of all events (pointers to Process/Resources)
+    @wait_e: list of all wait() events
+    @exit_e: list of all exit() events
     """
 
     # helpers
@@ -212,47 +205,6 @@ class Session:
                    "  " * p_ev.info.res_depth,
                    p_ev.event))
 
-    def __virtual_resource(self, type):
-        """Allocate virtual resource (one instance per process)"""
-        for rid, proc in enumerate(self.process_list, start=self.resource_next):
-            resource = Resource()
-            resource.id = rid
-            resource.type = -type
-            self.resource_list.append(resource)
-            self.resource_map[rid] = resource
-            if type == 1: proc.waitid = rid
-            elif type == 2: proc.signalid = rid
-            else: assert False, 'Logical error: which = %d' % (type)
-        self.resource_next += len(self.process_list)
-
-    def __wait_exit_events(self, wait_events, exit_events):
-        """Accumulate the wait/exit into the (virtal) wait resource:
-        NOTE: the race detection algorithm expects the events of each
-        resource to be ordered by their ocurence, or at least the
-        their vclocks. Unfortunately, we don't know those yet; the
-        actual sorting will take place in vclock_graph()
-        """
-        self.__virtual_resource(1)
-        for i in wait_events + exit_events:
-            s_ev = self.events[i]
-            r_ev = ResourceEvent(s_ev.info, s_ev.event, i, i)
-            rid = self.events[i].proc.waitid
-            self.resource_map[rid].events.append(r_ev)
-
-    def __signal_kill_events(self, kill_events, signal_events):
-        """Accumulate the kill/signal into the (virtal) signal resource:
-        NOTE: the race detection algorithm expects the events of each
-        resource to be ordered by their ocurence, or at least the
-        their vclocks. Unfortunately, we don't know those yet; the
-        actual sorting will take place in vclock_graph()
-        """
-        self.__virtual_resource(2)
-        for i in kill_events + signal_events:
-            s_ev = self.events[i]
-            r_ev = ResourceEvent(s_ev.info, s_ev.event, i, i)
-            rid = self.events[i].proc.signalid
-            self.resource_map[rid].events.append(r_ev)
-
     def load_events(self, logfile):
         """Parse the scribe log from @logfile"""
 
@@ -260,12 +212,10 @@ class Session:
         e = list(scribe.EventsFromBuffer(m, remove_annotations=False))
         m.close()
 
-        # we also collect all wait/exit, and signal/delivery events
-        # into separate lists for further processing
-        wait_events = list()
-        exit_events = list()
-        signal_events = list()
-        kill_events = list()
+        # we also collect all wait/exit for further processing
+        # TODO: also add kill/signal
+        self.wait_e = list()
+        self.exit_e = list()
 
         # @pid and @proc track current process
         # @i tracks current index in self.events
@@ -302,20 +252,13 @@ class Session:
                 proc.syscnt += 1
                 # NOTE: track separately of certain syscalls
                 if event.nr in unistd.Syscalls.SYS_exit:
-                    exit_events.append(ind)
+                    self.exit_e.append(ind)
                 elif event.nr in unistd.Syscalls.SYS_wait:
-                    wait_events.append(ind)
-                elif event.nr in unistd.Syscalls.SYS_kill:
-                    kill_events.append(ind)
+                    self.wait_e.append(ind)
 
             elif isinstance(event, scribe.EventSyscallEnd):
                 proc.regind = -1
                 proc.sysind = -1
-
-            elif isinstance(event, scribe.EventSignal):
-                # NOTE: keep track separately of signal events
-                if event.nr in unistd.Syscalls.SYS_exit:
-                    signal_events.append(ind)
 
             elif isinstance(event, scribe.EventResourceLockExtra):
                 if event.id not in self.resource_map:
@@ -345,13 +288,6 @@ class Session:
                 s_ev.resource = resource
                 s_ev.rindex = ind
                 ind += 1
-
-        # resource id's are sequential: the first free entry is:
-        self.resource_next = len(self.resource_list) + 1
-
-        # special processing of wait/exit and signal/delivery pairs
-        self.__wait_exit_events(wait_events, exit_events)
-        self.__signal_kill_events(kill_events, signal_events)
 
     def __check_bookmarks(self, pid, syscall, bookmarks, logfile):
         for n, bmark in enumerate(bookmarks):
@@ -390,8 +326,6 @@ class Session:
     def condense_events(self):
         """ remove holes in serial number sequences of resources """
         for r in self.resource_list:
-            if r.is_virtual():
-                continue
             prev_serial = -1
             for e in r.events:
                 if prev_serial == -1:
@@ -683,7 +617,6 @@ class Session:
             pr_ev = list()
             nr_ev = list()
             serial = 0
-            virtual = r.is_virtual()
 
             def add_resource_edges():
                 tr_ev = product(pr_ev, nr_ev)
@@ -702,13 +635,13 @@ class Session:
 
             for r_ev in r.events:
                 next, nind = self.r_ev_to_proc(r_ev)
-                if not virtual and r_ev.event.serial == serial:
+                if r_ev.event.serial == serial:
                     nr_ev.append((next, nind))
                 else:
                     add_resource_edges()
                     pr_ev = nr_ev
                     nr_ev = list([(next, nind)])
-                    if not virtual: serial = r_ev.event.serial
+                    serial = r_ev.event.serial
             else:
                 add_resource_edges()
 
@@ -772,26 +705,6 @@ class Session:
                 vctmp = VectorClock(proc.pid, vc)
                 vctmp.tick(proc.pid)
                 vclocks[(tproc, tcnt)].merge(vctmp)
-
-        # NOTE: now that we have the vclocks, we can finally sort the
-        # events in each virtual resource by their vclocks:
-        def vclock_cmp(r_ev1, r_ev2):
-            p1, i1 = self.r_ev_to_proc(r_ev1)
-            p2, i2 = self.r_ev_to_proc(r_ev2)
-
-            vc1 = vclocks[p1, p1.events[i1].syscnt]
-            vc2 = vclocks[p2, p2.events[i2].syscnt]
-
-            if vc1.before(vc2):
-                return -1
-            elif vc2.before(vc1):
-                return 1
-            else:
-                return 0
-
-        for proc in self.process_list:
-            r = self.resource_map[proc.waitid]
-            r.events.sort(cmp=vclock_cmp)
 
         return vclocks
 
@@ -970,6 +883,77 @@ class Session:
 
         return [(vc1, r_ev1.index, vc2, r_ev2.index) for
                 vc1, r_ev1, vc2, r_ev2 in races]
+
+    def races_exitwait(self, vclocks):
+        """Given vclocks of all syscalls, find exit-wait races:
+        For each exit() successfully waited for, find all the other
+        exit() calls that may be concurrent to this one and thus
+        could be waited for instead."""
+
+        # step one: divide the exits() into per-parent lists, each
+        # list ordered by vclocks: loop on waits to determine where
+        # each exit (by pid) belongss and then add exits.
+        exit_events = dict([ (k, list()) for k in self.process_map ])
+        exit_to_wait = dict()
+
+        # create mapping:  pid --> parent
+        for i in self.wait_e:
+            s_ev = self.events[i]
+            proc, event = s_ev.proc, s_ev.event
+
+            if event.ret > 0:
+                exit_to_wait[event.ret] = (proc, s_ev.pindex)
+
+        # collect exit calls per parent
+        for i in self.exit_e:
+            s_ev = self.events[i]
+            proc = s_ev.proc
+            try:
+                parent, z = exit_to_wait[proc.pid]
+            except:
+                pass
+            else:
+                exit_events[parent.pid].append((proc, s_ev.pindex))
+
+        def vclock_cmp(exit_e1, exit_e2):
+            p1, i1 = exit_e1
+            p2, i2 = exit_e2
+            vc1 = vclocks[(p1, p1.events[i1].syscnt)]
+            vc2 = vclocks[(p2, p2.events[i2].syscnt)]
+            if vc1.before(vc2):
+                return -1
+            elif vc2.before(vc1):
+                return 1
+            else:
+                return 0
+
+        print(exit_events.values())
+
+        # sort the exit calls by their vclocks
+        for exit_l in exit_events.values():
+            exit_l.sort(cmp=vclock_cmp)
+
+        exitwait = list()
+
+        # find potential races: for each exit event, search ahead for
+        # races with other races that are concurrent with this exit
+        for pid in exit_events.keys():
+            exit_l = exit_events[pid]
+            for n, (ep1, ei1) in enumerate(exit_l):
+                vc1 = vclocks[ep1, ep1.events[ei1].syscnt]
+                for ep2, ei2 in exit_l[n + 1:]:
+                    vc2 = vclocks[ep2, ep2.events[ei2].syscnt]
+                    if vc1.race(vc2):
+                        wp1, wi1 = exit_to_wait[ep1.pid]
+                        wp2, wi2 = exit_to_wait[ep2.pid]
+                        exitwait.append((ep1.pid, ei1,
+                                         ep2.pid, ei2,
+                                         wp2.pid, wi2))
+                        exitwait.append((ep2.pid, ei2,
+                                         ep1.pid, ei1,
+                                         wp1.pid, wi1))
+
+        return exitwait
 
     def __init__(self):
         self.process_map = dict()
