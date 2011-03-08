@@ -927,8 +927,6 @@ class Session:
             else:
                 return 0
 
-        print(exit_events.values())
-
         # sort the exit calls by their vclocks
         for exit_l in exit_events.values():
             exit_l.sort(cmp=vclock_cmp)

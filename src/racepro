@@ -127,21 +127,8 @@ def show_profile(args):
 
 ##############################################################################
 
-def show_races(args):
-    session = load_session(args.logfile)
-
-    graph = session.make_graph(full=True, resources=True)
-    logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
-
-    vclocks = session.vclock_graph(graph)
-    for k in vclocks.keys():
-        logging.debug('%2d %5d -> %s' % (k[0].pid, k[1], vclocks[k]))
-
-    # YJF: show sysaclls with clocks
-    if args.debug:
-        for proc in session.process_list:
-            session.syscalls_process(proc.pid, vclocks)
-
+def find_pairwise_races(session, vclocks):
+    """Find all pairwise races and return in a list"""
     all_races = session.races_resources(vclocks)
     logging.debug('total races %d' % (len(all_races)))
 
@@ -182,16 +169,107 @@ def show_races(args):
         except KeyError:
             map_races[(node1, node2)] = list([(i1, i2)])
 
+    return all_races, sys_races
+
+def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
+    """prepare a race by computing bookmacks, injects, and cutoff"""
+    proc1, cnt1 = session.split_node(node1)
+    event1 = session.events[int(graph.node[node1]['index'])].event
+
+    proc2, cnt2 = session.split_node(node2)
+    event2 = session.events[int(graph.node[node2]['index'])].event
+
+    # YJF: print out race
+    if args.debug:
+        print('Two racing system calls are:');
+        sys.stdout.write('p%d @ %s:'
+                         % (proc1.pid, vclocks[(proc1, cnt1)]));
+        session.parse_syscall(int(graph.node[node1]['index']));
+        sys.stdout.write('p%d @ %s:'
+                         % (proc2.pid, vclocks[(proc2, cnt2)]));
+        session.parse_syscall(int(graph.node[node2]['index']));
+
+    # YJF: TODO: sort races.  races on stdout or stderr not
+    # interesting, mostly.  races on file data more interesting than
+    # stat v.s. write race
+
+    bookmark1 = session.crosscut_graph(graph, vclocks, node1, node2)
+    if not bookmark1:
+        print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
+              (proc1.pid, cnt1, proc2.pid, cnt2))
+        return None
+
+    bookmark2 = dict(bookmark1)
+    bookmark2[proc1.pid] = -bookmark2[proc1.pid]
+    bookmarks = [bookmark1, bookmark2]
+
+    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+    injects = dict()
+    injects[proc1.pid] = dict({-cnt1 : action})
+
+    cutoff = dict(bookmark2)
+
+    print('RACE %2d:  ' % (n_race + 1) +
+          'pid %d syscnt %d [sys(%d)=%d]' %
+          (proc1.pid, cnt1, event1.nr, event1.ret) +
+          '  -->   pid %d syscnt %d [sys(%d)=%d]' %
+          (proc2.pid, cnt2, event2.nr, event2.ret))
+    print('          cut:  %s' % bookmark1.values())
+
+    logging.debug('   boobkmark1: %s' % (bookmark1))
+    logging.debug('   boobkmark2: %s' % (bookmark2))
+    logging.debug('      injects: %s' % (injects))
+    logging.debug('       cutoff: %s' % (cutoff))
+
+    return bookmarks, injects, cutoff
+
+def save_modify_log(session, bookmarks, injects, cutoff, output):
+    """Generate and save a modified scribe log for a race"""
+    with open(output, 'w') as file:
+        session.save_events(file,
+                            bookmarks=bookmarks,
+                            injects=injects,
+                            cutoff=cutoff)
+
+    # YJF: condense event serial and rewrite log
+    # create a newsession so it's easier for me to traverse the log
+    with open(output, 'r') as file:
+        newsession = racepro.Session()
+        newsession.load_events(file)
+        newsession.condense_events()
+    with open(output, 'w') as file:
+        newsession.save_events(file)
+
+def show_races(args):
+    session = load_session(args.logfile)
+
+    graph = session.make_graph(full=True, resources=True)
+    logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
+
+    vclocks = session.vclock_graph(graph)
+    for k in vclocks.keys():
+        logging.debug('%2d %5d -> %s' % (k[0].pid, k[1], vclocks[k]))
+
+    # YJF: show sysaclls with clocks
+    if args.debug:
+        for proc in session.process_list:
+            session.syscalls_process(proc.pid, vclocks)
+
+    ######################################################################
+    # step 1: Find pairwise races, (maybe) randomize the order. Then
+    # for each race try to generate a (bookmarks, injects, cutoff)
+    # tuple. Finally, use those to write out a modified log.
+
+    all_races, sys_races = find_pairwise_races(session, vclocks)
+
     print('-' * 75)
     print('Found %d potential races (%d after duplicates removal)' %
           (len(all_races), len(sys_races)))
 
-    if len(all_races) == 0:
-        return 0
-
     if args.random:
         r = random.sample(sys_races, len(sys_races))
-        print('Random sample to generate at most %d races:' % (args.count))
+        print('Random sample to generate %d races:' % (args.count))
     else:
         r = sys_races
 
@@ -199,79 +277,29 @@ def show_races(args):
 
     n_race = 0
     n_fail = 0
-
     for (node1, node2) in r:
-        proc1, cnt1 = session.split_node(node1)
-        event1 = session.events[int(graph.node[node1]['index'])].event
-
-        proc2, cnt2 = session.split_node(node2)
-        event2 = session.events[int(graph.node[node2]['index'])].event
-
-        # YJF: print out race
-        if args.debug:
-            print('Two racing system calls are:');
-            sys.stdout.write('p%d @ %s:' 
-                             % (proc1.pid, vclocks[(proc1, cnt1)]));
-            session.parse_syscall(int(graph.node[node1]['index']));
-            sys.stdout.write('p%d @ %s:' 
-                             % (proc2.pid, vclocks[(proc2, cnt2)]));
-            session.parse_syscall(int(graph.node[node2]['index']));
-
-        # YJF: TODO: sort races.  races on stdout or stderr not
-        # interesting, mostly.  races on file data more interesting than
-        # stat v.s. write race
-
-        bookmark1 = session.crosscut_graph(graph, vclocks, node1, node2)
-        if not bookmark1:
-            print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
-                  (proc1.pid, cnt1, proc2.pid, cnt2))
+        ret = prep_pairwise_race(session, graph, vclocks,
+                                 node1, node2, n_race)
+        if not ret:
             n_fail += 1
             continue
-
-        bookmark2 = dict(bookmark1)
-        bookmark2[proc1.pid] = -bookmark2[proc1.pid]
-        bookmarks = [bookmark1, bookmark2]
-
-        action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                                0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
-        injects = dict()
-        injects[proc1.pid] = dict({-cnt1 : action})
-
-        cutoff = dict(bookmark2)
-
-        print('RACE %2d:  ' % (n_race + 1) +
-              'pid %d syscnt %d [sys(%d)=%d]' %
-              (proc1.pid, cnt1, event1.nr, event1.ret) +
-              '  -->   pid %d syscnt %d [sys(%d)=%d]' %
-              (proc2.pid, cnt2, event2.nr, event2.ret))
-        print('          cut:  %s' % bookmark1.values())
-
-        logging.debug('   boobkmark1: %s' % (bookmark1))
-        logging.debug('   boobkmark2: %s' % (bookmark2))
-        logging.debug('      injects: %s' % (injects))
-        logging.debug('       cutoff: %s' % (cutoff))
-
-        outfile = open(args.outfile + '.' + str(n_race + 1) + '.log', 'w')
-        session.save_events(outfile,
-                            bookmarks=bookmarks,
-                            injects=injects,
-                            cutoff=cutoff)
-        outfile.close()
-
-        # YJF: condense event serial and rewrite log
-        outfile = open(args.outfile + '.' + str(n_race + 1) + '.log', 'r')
-        # create a newsession so it's easier for me to traverse the log
-        newsession = racepro.Session()
-        newsession.load_events(outfile)
-        newsession.condense_events()
-        outfile.close()
-        outfile = open(args.outfile + '.' + str(n_race + 1) + '.log', 'w')
-        newsession.save_events(outfile)
-        outfile.close()
-
         n_race += 1
-        if (n_race == args.count):
+
+        bookmarks, injects, cutoff = ret
+        output = args.outfile + '.' + str(n_race) + '.log'
+
+        save_modify_log(session, bookmarks, injects, cutoff, output)
+
+        if n_race == args.count:
             break;
+
+    ######################################################################
+    # step 2: Find exit-exit-wait races, Then for each race try to
+    # generate a (bookmarks, injects, cutoff) tuple. Finally, use
+    # those to write out a modified log.
+
+    # TODO
+    print('exit-exit-wait races: %s' %  session.races_exitwait(vclocks))
 
     print('-' * 75)
     print('Generated %d logs out of total %d races examined' %
