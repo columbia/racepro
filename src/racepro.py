@@ -310,6 +310,7 @@ class Session:
     # reverse engineer the serial assignment logic here.
     # FIXME: should use read/write access info, since we may remove writes
     def condense_events(self):
+        """ remove holes in serial number sequences of resources """
         for r in self.resource_list:
             prev_serial = -1
             for e in r.events:
@@ -741,11 +742,14 @@ class Session:
             logging.debug("pid=%d, local clock=%d" % (pid, c));
 
             if (proc, c + 1) in ticks:
-                syscnt = ticks[(proc, c+1)];
-            else:
-                syscnt = 0; # bookmark 0 for exited process
-            # FIXME: should use syscnt 0 to represent forkret()
-            if syscnt != 1: # no bookmark for not-yet-created process
+                syscnt = ticks[(proc, c+1)]; # normal case
+            elif c > 0: # process has exited
+                syscnt = 0 # bookmark 0 for exited process
+            else: # process not yet created
+                assert(c==0)
+                syscnt = None # no bookmark for process not yet created
+
+            if syscnt is not None:
                 nodes[pid] = -syscnt;
 
         msg = "found cut: ";

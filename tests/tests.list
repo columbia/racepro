@@ -1,4 +1,2 @@
 fork_one_file	fork_one_file
 fork_two_file	fork_two_file
-bashrace	bashrace.sh
-ps_grep		ps_grep.sh
