@@ -226,27 +226,34 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
 
 def prep_exitwait_race(session, graph, vclocks, exit1, exti2, wait, n_race):
     """prepare a race by computing bookmacks, injects, and cutoff"""
-    proc1, cnt1 = session.split_node(node1)
-    event1 = session.events[int(graph.node[node1]['index'])].event
+    proc1, pindex1 = exit1
+    event1 = proc1.events[pindex1].event
+    cnt1 = proc1.events[pindex1].syscnt
 
-    proc2, cnt2 = session.split_node(node2)
-    event2 = session.events[int(graph.node[node2]['index'])].event
+    proc2, pindex2 = exit2
+    event2 = proc2.events[pindex2].event
+    cnt2 = proc2.events[pindex2].syscnt
 
-    # YJF: print out race
+    proc3, pindex3 = exit3
+    event3 = proc3.events[pindex3].event
+    cnt3 = proc3.events[pindex3].syscnt
+
     if args.debug:
-        print('Two racing system calls are:');
+        print('Three racing system calls (exit-exit-wait) are:')
         sys.stdout.write('p%d @ %s:'
-                         % (proc1.pid, vclocks[(proc1, cnt1)]));
-        session.parse_syscall(int(graph.node[node1]['index']));
-        sys.stdout.write('p%d @ %s:'
-                         % (proc2.pid, vclocks[(proc2, cnt2)]));
-        session.parse_syscall(int(graph.node[node2]['index']));
+                         % (proc1.pid, vclocks[(proc1, cnt1)]))
+        session.parse_syscall(proc1.events[pindex1].index)
+        sys.stdout.write('p%d @ %s:' % (proc2.pid, vclocks[(proc2, cnt2)]))
+        session.parse_syscall(proc2.events[pindex2].index)
+        sys.stdout.write('p%d @ %s:' % (proc3.pid, vclocks[(proc3, cnt3)]))
+        session.parse_syscall(proc3.events[pindex3].index)
 
     # YJF: TODO: sort races.  races on stdout or stderr not
     # interesting, mostly.  races on file data more interesting than
     # stat v.s. write race
 
-    bookmark1 = session.crosscut_graph(graph, vclocks, node1, node2)
+    # TODO: extend crosscut_graph to handle 3-somes
+    bookmark1 = session.crosscut_graph(graph, vclocks, exit1, exit2)
     if not bookmark1:
         print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
               (proc1.pid, cnt1, proc2.pid, cnt2))
@@ -254,24 +261,36 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exti2, wait, n_race):
 
     bookmark2 = dict(bookmark1)
     bookmark2[proc1.pid] = -bookmark2[proc1.pid]
-    bookmarks = [bookmark1, bookmark2]
+
+    bookmark3 = dict(bookmark2)
+    bookmark3[proc3.pid] = -bookmark3[proc3.pid]
+
+    bookmarks = [bookmark1, bookmark2, bookmark3]
 
     action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
                             0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
     injects = dict()
     injects[proc1.pid] = dict({-cnt1 : action})
 
-    cutoff = dict(bookmark2)
+    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+    injects = dict()
+    injects[proc3.pid] = dict({-cnt3 : action})
+
+    cutoff = dict(bookmark3)
 
     print('RACE %2d:  ' % (n_race + 1) +
           'pid %d syscnt %d [sys(%d)=%d]' %
           (proc1.pid, cnt1, event1.nr, event1.ret) +
+          '  -->   pid %d syscnt %d [sys(%d)=%d]' %
+          (proc3.pid, cnt3, event3.nr, event3.ret) +
           '  -->   pid %d syscnt %d [sys(%d)=%d]' %
           (proc2.pid, cnt2, event2.nr, event2.ret))
     print('          cut:  %s' % bookmark1.values())
 
     logging.debug('   boobkmark1: %s' % (bookmark1))
     logging.debug('   boobkmark2: %s' % (bookmark2))
+    logging.debug('   boobkmark3: %s' % (bookmark3))
     logging.debug('      injects: %s' % (injects))
     logging.debug('       cutoff: %s' % (cutoff))
 
@@ -352,10 +371,37 @@ def show_races(args):
     # generate a (bookmarks, injects, cutoff) tuple. Finally, use
     # those to write out a modified log.
 
-    exit_races = session.races_exitwait(vclocks))
+    exit_races = session.races_exitwait(vclocks)
+
+    print('-' * 75)
+    print('EXIT-WAIT RACES')
+    print('Found %d potential races' % len(exit_races))
+
+    if args.random:
+        r = random.sample(exit_races, len(exit_races))
+        print('Random sample to generate up to %d races:' % (args.count))
+    else:
+        r = exit_races
+
+    print('-' * 75)
+
+    # for (exit1, exit2, wait) in exit_races:
+    #     ret = prep_exitwait_race(session, graph, vclocks,
+    #                              exit1, exit2, wait, n_race)
+    #     if not ret:
+    #         n_fail += 1
+    #         continue
+    #     n_race += 1
+
+    #     bookmarks, injects, cutoff = ret
+    #     output = args.outfile + '.' + str(n_race) + '.log'
+
+    #     save_modify_log(session, bookmarks, injects, cutoff, output)
+
+    #     if n_race == args.count:
+    #         break;
+
     print(exit_races)
-
-
 
     ######################################################################
     # step 3: Statistics ..
