@@ -30,10 +30,10 @@ main()
 			exit(1);
 		} else if (ret == 0) {
 			str = "grandchild\n";
-			sleep(2);
+			usleep(20);
 		} else {
 			str = "child\n";
-			sleep(1);
+			usleep(10);
 		}
 	} else {
 		str = "parent\n";

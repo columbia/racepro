@@ -312,7 +312,8 @@ def test_races(args):
             continue
         if r > 0:
             print('REPLAY %2d: failed (exit %d)' % (n, r))
-            return -1
+            if args.exitiffail:
+                return -1 
         else:
             print('REPLAY %2d: completed' % n)
 
@@ -410,6 +411,9 @@ parser_test_races.add_argument('-s', '--silent', dest='silent',
 parser_test_races.add_argument('-d', '--detect', dest='detect',
                                action='store_true', default=False,
                                help='Detect races and generate logs')
+parser_test_races.add_argument('--exit-on-failed-replay', dest='exitiffail',
+                               action='store_true', default=False,
+                               help='Exit when there is a failed replay')
 
 args = parser.parse_args()
 
