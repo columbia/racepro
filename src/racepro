@@ -224,6 +224,59 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
 
     return bookmarks, injects, cutoff
 
+def prep_exitwait_race(session, graph, vclocks, exit1, exti2, wait, n_race):
+    """prepare a race by computing bookmacks, injects, and cutoff"""
+    proc1, cnt1 = session.split_node(node1)
+    event1 = session.events[int(graph.node[node1]['index'])].event
+
+    proc2, cnt2 = session.split_node(node2)
+    event2 = session.events[int(graph.node[node2]['index'])].event
+
+    # YJF: print out race
+    if args.debug:
+        print('Two racing system calls are:');
+        sys.stdout.write('p%d @ %s:'
+                         % (proc1.pid, vclocks[(proc1, cnt1)]));
+        session.parse_syscall(int(graph.node[node1]['index']));
+        sys.stdout.write('p%d @ %s:'
+                         % (proc2.pid, vclocks[(proc2, cnt2)]));
+        session.parse_syscall(int(graph.node[node2]['index']));
+
+    # YJF: TODO: sort races.  races on stdout or stderr not
+    # interesting, mostly.  races on file data more interesting than
+    # stat v.s. write race
+
+    bookmark1 = session.crosscut_graph(graph, vclocks, node1, node2)
+    if not bookmark1:
+        print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
+              (proc1.pid, cnt1, proc2.pid, cnt2))
+        return None
+
+    bookmark2 = dict(bookmark1)
+    bookmark2[proc1.pid] = -bookmark2[proc1.pid]
+    bookmarks = [bookmark1, bookmark2]
+
+    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+    injects = dict()
+    injects[proc1.pid] = dict({-cnt1 : action})
+
+    cutoff = dict(bookmark2)
+
+    print('RACE %2d:  ' % (n_race + 1) +
+          'pid %d syscnt %d [sys(%d)=%d]' %
+          (proc1.pid, cnt1, event1.nr, event1.ret) +
+          '  -->   pid %d syscnt %d [sys(%d)=%d]' %
+          (proc2.pid, cnt2, event2.nr, event2.ret))
+    print('          cut:  %s' % bookmark1.values())
+
+    logging.debug('   boobkmark1: %s' % (bookmark1))
+    logging.debug('   boobkmark2: %s' % (bookmark2))
+    logging.debug('      injects: %s' % (injects))
+    logging.debug('       cutoff: %s' % (cutoff))
+
+    return bookmarks, injects, cutoff
+
 def save_modify_log(session, bookmarks, injects, cutoff, output):
     """Generate and save a modified scribe log for a race"""
     with open(output, 'w') as file:
@@ -298,8 +351,13 @@ def show_races(args):
     # generate a (bookmarks, injects, cutoff) tuple. Finally, use
     # those to write out a modified log.
 
-    # TODO
-    print('exit-exit-wait races: %s' %  session.races_exitwait(vclocks))
+    exit_races = session.races_exitwait(vclocks))
+    print(exit_races)
+
+
+
+    ######################################################################
+    # step 3: Statistics ..
 
     print('-' * 75)
     print('Generated %d logs out of total %d races examined' %
