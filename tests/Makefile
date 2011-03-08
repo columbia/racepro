@@ -1,5 +1,6 @@
 
-PROGS = hello_world fork_one_file fork_two_file fork_two_proc read_write_write no_race
+PROGS = hello_world fork_one_file fork_two_file fork_two_proc read_write_write \
+	no_race no_race_pipe
 
 all: $(PROGS)
 
@@ -15,3 +16,4 @@ fork_two_file: fork_two_file.o
 fork_two_proc: fork_two_proc.o
 read_write_write: read_write_write.o
 no_race: no_race.o
+no_race_pipe: no_race_pipe.o
