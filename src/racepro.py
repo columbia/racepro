@@ -944,12 +944,18 @@ class Session:
                     if vc1.race(vc2):
                         wp1, wi1 = exit_to_wait[ep1.pid]
                         wp2, wi2 = exit_to_wait[ep2.pid]
-                        exitwait.append((ep1.pid, ep1.events[ei1].syscnt,
-                                         ep2.pid, ep2.events[ei2].syscnt,
-                                         wp2.pid, wp2.events[wi2].syscnt))
-                        exitwait.append((ep2.pid, ep2.events[ei2].syscnt,
-                                         ep1.pid, ep1.events[ei1].syscnt,
-                                         wp1.pid, wp1.events[wi1].syscnt))
+
+                        w_vc1 = vclocks[wp1, wp1.events[wi1].syscnt]
+                        w_vc2 = vclocks[wp2, wp2.events[wi2].syscnt]
+
+                        if w_vc1.before(w_vc2):
+                            exitwait.append(((ep2.pid, ei2),
+                                            (ep1.pid, ei1),
+                                            (wp1.pid, wi1)))
+                        else:
+                            exitwait.append(((ep1.pid, ei1),
+                                            (ep2.pid, ei2),
+                                            (wp2.pid, wi2)))
 
         return exitwait
 
