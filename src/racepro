@@ -301,7 +301,7 @@ def test_races(args):
             break
 
         if args.script_pre:
-            r = do_exec('/usr/bin/sudo ' + args.script_pre + cmd_suffix)
+            r = do_exec('sudo ' + args.script_pre + cmd_suffix)
             if r > 0:
                 print('RACE %d: bad exit code %d from pre-script' % (n, r))
                 continue;
