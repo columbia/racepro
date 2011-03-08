@@ -712,24 +712,44 @@ class Session:
             (pid1, cnt1, pid2, cnt2)
 
         nodes = dict()
-        nodes[pid1] = -cnt1
-        nodes[pid2] = -cnt2
+        nodes[pid1] = cnt1
+        nodes[pid2] = cnt2
 
         vc1 = vclocks[(proc1, cnt1)]
         vc2 = vclocks[(proc2, cnt2)]
 
         logging.debug('find cut for clocks %s and %s' % (vc1, vc2))
 
+        # FIXME: (1) should just merge syscnt and vector clock.  
+        #        (2) should create special nodes to represent process
+        #            start and exit.  these nodes are not connected to
+        #            nodes in other processes
+
         # proc, local clock -> syscnt that first has this local clock
         ticks = dict()
         for (proc, syscnt), vc in vclocks.iteritems():
-            if syscnt == 0: # real syscnt starts from 1
-                continue
+            #if syscnt == 0: # real syscnt starts from 1
+            #    continue
             c = vc.get(proc.pid)
             if (proc, c) in ticks: # use earlier ones
                 ticks[(proc, c)] = min(syscnt, ticks[(proc, c)])
             else:
                 ticks[(proc, c)] = syscnt
+
+        # given n1 with vc1 and n2 with vc2, find n in each process,
+        # s.t. each pair of nodes are concurrent.
+        #
+        # algorithm: for process i
+        #    find local clock ci s.t. ci = max(vc1[i], vc2[i])
+        #    find the first node n with vc such that vc[i] = ci+1
+        #    take edge from prev node -> n
+
+        # proof that this cut does not violate causality:
+        #    obviously each n taken || n1 and n || n2
+        #    suppose ni > nj, and ni is not taken, but nj is.
+        #         ni[i] >= nj[j] ==> ni hb nj
+        #         nj[j] >= max(vc1[j], vc2[j] ==> nj hb n1 or n2
+        #         ==> ni >= n1 or n2.  contradictory !
 
         for proc in self.process_list:
             if proc == proc1 or proc == proc2:
@@ -743,21 +763,41 @@ class Session:
 
             if (proc, c + 1) in ticks:
                 syscnt = ticks[(proc, c+1)]; # normal case
-            elif c > 0: # process has exited
-                syscnt = 0 # bookmark 0 for exited process
-            else: # process not yet created
-                assert(c==0)
-                syscnt = None # no bookmark for process not yet created
+            else: # process has exited
+                assert (c > 0) 
+                syscnt = sys.maxint # maxint for exited process
+            nodes[pid] = syscnt;
 
-            if syscnt is not None:
-                nodes[pid] = -syscnt;
-
+        # extra hack because our hb graph is awkward
+        cut = dict()
+        for pid, mark in nodes.iteritems():
+            if mark == sys.maxint:
+                cut[pid] = 0 # include everything for already exited process
+                continue
+            if mark > 0:
+                cut[pid] = -mark # normal case: copy
+                continue
+            assert(mark == 0)
+            # process not yet created or have not run first system call
+            n = self.make_node(pid, mark)
+            for prvn in graph.predecessors(n):
+                if 'fork' not in graph.edge[prvn][n]:
+                    continue
+                prvproc, prvcnt = self.split_node(prvn)
+                logging.debug('parent %d, child %d, clone@%d, cut@%d' 
+                              % (prvproc.pid, pid, prvcnt, nodes[prvproc.pid]))
+                if nodes[prvproc.pid] < prvcnt: # clone call not in cut
+                    logging.debug('exclude child not yet created')
+                else: # clone call in cut
+                    logging.debug("include child")
+                    cut[pid] = -1 # -1 to include clone ret
+            
         msg = "found cut: ";
         for pid, mark in nodes.iteritems():
             msg += "%d:%d, " % (pid, mark)
         logging.debug(msg)
 
-        return nodes
+        return cut
 
 
     def __races_accesses(self, access):
