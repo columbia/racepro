@@ -10,7 +10,7 @@ file = open('/tmp/bashrace.out', 'r')
 for l in lines:
     ll = file.readline()
     if (l != ll.rstrip()):
-        exit(1)
+        exit(2)
 
 exit(0)
 

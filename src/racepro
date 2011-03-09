@@ -466,7 +466,6 @@ def test_races(args):
         r = do_exec('%s %s %s' % (cmd_replay, logfile, cmd_suffix))
         if r == 35:
             print('REPLAY %2d: deadlock (exit %d)' % (n, r))
-            continue
         if r > 0:
             print('REPLAY %2d: failed (exit %d)' % (n, r))
             if args.exitiffail:
@@ -474,15 +473,15 @@ def test_races(args):
         else:
             print('REPLAY %2d: completed' % n)
 
-        if args.script_test:
+        if r == 0 and args.script_test:
             r = do_exec('sudo ' + args.script_test + cmd_suffix)
             if r == 2:
-                print('RACE %d: bad exit code %d from test-script' % (n, r))
-            elif r == 1:
                 print('    BUG PRODUCED')
+            elif r > 0:
+                print('RACE %d: bad exit code %d from test-script' % (n, r))
             else:
                 print('    BUG not triggered')
-        else:
+        elif r == 0:
             print('    BUG only replayed')
 
         if args.script_post:

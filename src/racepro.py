@@ -464,7 +464,6 @@ class Session:
             # substitute for this event ?
             if event == event_old:
                 event = event_new
-                print('yay')
                 try:
                     event_old, event_new = events.pop(0)
                 except IndexError:

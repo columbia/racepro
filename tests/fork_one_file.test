@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-lines = ['parent', 'child', 'grandchild']
-file = open('/tmp/fork_two_file.out', 'r')
+lines = ['parent', 'child']
+file = open('/tmp/fork_one_file.out', 'r')
 
 for l in lines:
     ll = file.readline()

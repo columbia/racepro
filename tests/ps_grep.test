@@ -5,7 +5,7 @@ file = open('/tmp/ps_grep.out', 'r')
 cnt = 0
 for lines in file: cnt += 1
 
-exit(0 if cnt == 2 else 1)
+exit(0 if cnt == 2 else 2)
 
 
 
