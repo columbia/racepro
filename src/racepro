@@ -51,23 +51,6 @@ def diet_graph(graph):
 
 def show_graph(args):
 
-    def style_cluster(graph, output):
-        with open(output, 'w') as file:
-            file.write('digraph G {\n')
-            for pid in session.process_map.keys():
-                file.write('\tsubgraph cluster_%d {\n' % pid)
-                nodes = [ n for n in graph.nodes() if n.split(':')[0] == str(pid) ]
-                nodes.sort(key=lambda n : int(n.split(':')[1]))
-                file.write('\t\t"' + '" -> "'.join(nodes) + '";\n')
-                file.write('\t}\n')
-            for s, t in graph.edges():
-                if s.split(':')[0] != t.split(':')[0]:
-                    file.write('\t"%s" -> "%s";\n' % (s, t))
-            file.write('}\n')
-
-    def style_plain(graph, output):
-        networkx.write_dot(graph, output)
-
     def do_filter_graph(graph):
 
         def convert(s):
@@ -89,8 +72,7 @@ def show_graph(args):
                 graph.remove_node(n)
 
     def do_show_graph(graph, output):
-        plot = style_cluster if args.clustered else style_plain
-        plot(graph, output + '.dot')
+        networkx.write_dot(graph, output + '.dot')
         if args.pdf:
             g = pygraphviz.AGraph(output + '.dot')
             g.layout(prog='dot')
@@ -530,9 +512,6 @@ subparsers = parser.add_subparsers(title='subcommands')
 parser_show_graph = subparsers.add_parser(
     'show-graph', parents=[parser_io])
 parser_show_graph.set_defaults(func=show_graph)
-parser_show_graph.add_argument('-c', '--clustered', dest='clustered',
-                               action='store_true',
-                               help='Clustered output style')
 parser_show_graph.add_argument('-t', '--thin', dest='thin',
                                action='store_true',
                                help='Thin mode (minimal syscalls graph)')
