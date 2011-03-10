@@ -428,7 +428,7 @@ def show_races(args):
 ##############################################################################
 
 def test_races(args):
-    cmd_replay = 'sudo replay -c %d' % int(args.timeout)
+    cmd_replay = 'sudo replay -l 5 -c %d' % int(args.timeout)
     cmd_suffix = ' > /dev/null 2>&1' if args.silent else ''
 
     if args.detect:
