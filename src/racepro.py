@@ -885,18 +885,29 @@ class Session:
     #        (2) should create special nodes to represent process
     #            start and exit.  these nodes are not connected to
     #            nodes in other processes
-    def crosscut_graph(self, graph, vclocks, init_nodes):
+    def crosscut_graph(self, graph, vclocks, anchors):
         """Given a list of initial nodes in the graph, find a consistent
         crosscut, such that both nodes are just about to be executed.
         Returns bookmarks dict of the cut, or None if none found
+        @graph: graph data
+        @vclock: vector vclocks
+        @anchors: list of (graph) nodes
         """
-        # proc, local clock -> syscnt that first has this local clock
+        # if any of the anchors HB another anchor - we're screwed
+        for n1, n2 in combinations(anchors, 2):
+            p1, c1 = self.split_node(n1)
+            p2, c2 = self.split_node(n2)
+            assert not vclocks[(p1, c1)].race(vclocks[(p1, c1)]), \
+                'Anchor nodes inconsistency: %s vs %s !' % (n1, n2)
+
+        # @ticks will map from a <proc, clock> tuple to the first
+        # syscall (syscnt) by which proc that value of local clock.
         ticks = dict()
         for (proc, syscnt), vc in vclocks.iteritems():
-            #if syscnt == 0: # real syscnt starts from 1
-            #    continue
+            if syscnt == 0:  # corresponds to a pseudo "fork" node
+                continue
             c = vc.get(proc.pid)
-            if (proc, c) in ticks: # use earlier ones
+            if (proc, c) in ticks:  # use earlier ones
                 ticks[(proc, c)] = min(syscnt, ticks[(proc, c)])
             else:
                 ticks[(proc, c)] = syscnt
@@ -916,71 +927,61 @@ class Session:
         #         nj[j] >= max(vc1[j], vc2[j] ==> nj hb n1 or n2
         #         ==> ni >= n1 or n2.  contradictory !
 
-        vc = VectorClock() # vector clocks for init_nodes
-        logging.debug('finding cut for nodes %s' % (", ".join(init_nodes)))
-        for n in init_nodes:
+        logging.debug('finding cut for nodes %s' % (", ".join(anchors)))
+
+        vc = VectorClock()  # vector clocks for anchors
+        for n in anchors:
             proc, cnt = self.split_node(n)
-            assert cnt > 0, \
-                'Potential race before process creation (%d:%d)' % \
-                (pproc.pid, cnt)
+            assert cnt > 0, 'Race before process fork (%d:%d)' % \
+                (proc.pid, cnt)
             vc.merge(vclocks[(proc, cnt)])
             logging.debug('    vc: %s' % vclocks[(proc, cnt)])
+
         logging.debug('merged clocks %s' % vc.clocks)
 
-        nodes = dict() # nodes before which we'll cut
+        cut = dict([(int(p), -int(c)) for p, c in
+                    [n.split(':') for n in anchors]])
+
+        print(cut)
+
         for proc in self.process_list:
-            if proc in nodes:
+            if proc.pid in cut:
                 continue
 
-            # find out the last time we heard from pid
+            # find the last time we heard from pid
             pid = proc.pid
-            c = vc.get(pid) # last heard local clock of pid
+            c = vc.get(pid)
 
+            print("pid=%d, local clock=%d" % (pid, c))
             logging.debug("pid=%d, local clock=%d" % (pid, c))
 
             if (proc, c + 1) in ticks:
-                syscnt = ticks[(proc, c+1)]  # normal case
-            else: # process has exited
-                assert (c > 0) 
-                syscnt = sys.maxint # maxint for exited process
-            nodes[pid] = syscnt
+                # normal case: stop before the syscall
+                syscnt = -ticks[(proc, c + 1)]
+            else:
+                # special case: process already exited
+                assert (c > 0), 'Invalid syscall count %d' % c
+                syscnt = 0
 
-        logging.debug("found nodes to cut before: %s" % nodes)
+            print('pid %d -> cnt %d'% (pid, syscnt))
+            cut[pid] = syscnt
 
-        # extra hack because our hb graph is awkward
-        cut = dict()
-        for pid, mark in nodes.iteritems():
-            if mark == sys.maxint:
-                cut[pid] = 0 # include everything for already exited process
-                continue
-            if mark > 0:
-                cut[pid] = -mark # normal case: negate to indicate cut before
-                continue
+            # Exception: for a process that was stopped on syscall 1
+            # means that our vector-clock didn't know about the
+            # process. This could be either if the process was not
+            # forked yet, but also if the process was __just_ forked
+            # but not communicate to us.  The former case does not
+            # consistute a valid crosscut, so we prune it here:
 
-            assert(mark == 0)
-            # process not yet cloned or already cloned by have not run
-            # first system call
-            n = self.make_node(pid, mark)
-            for prvn in graph.predecessors(n):
-                if 'fork' not in graph.edge[prvn][n]:
-                    continue
-                prvproc, prvcnt = self.split_node(prvn)
-                logging.debug('parent %d, child %d, clone@%d, cut@%d' 
-                              % (prvproc.pid, pid, prvcnt, nodes[prvproc.pid]))
-                if nodes[prvproc.pid] < prvcnt: # clone call not in cut
-                    logging.debug('exclude child not yet cloned')
-                else: # clone call in cut
-                    logging.debug("include child already cloned")
-                    cut[pid] = -1 # -1 to include clone ret
-
-        # cut for initial nodes 
-        for n in init_nodes:
-            proc, cnt = self.split_node(n)
-            cut[proc.pid] = -cnt
+            if syscnt == -1:
+                for p, c in [ self.split_node(n) for n in anchors]:
+                    if vclocks[(p, c)].before(vclocks[(proc, 1)]):
+                        print('forked child %d later than %d:%d' % (pid,p.pid,c))
+                        del cut[pid]
+                        break
 
         logging.debug('found cut: %s' % cut)
         return cut
-
 
     def __races_accesses(self, access):
         """Given vclocks of a resource per process (non-decreasing
