@@ -4,6 +4,7 @@ import mmap
 import logging
 import networkx
 from itertools import *
+from collections import *
 
 import scribe
 import unistd
@@ -68,13 +69,15 @@ class ResourceEvent:
 class Resource:
     """Describe execution log related to a resource isntance.
     @type: type of resource
+    @desc: descruption of resource
     @id: unique identifier of the resource
     @events: (ordered) list of events affecting this resource
     """
-    __slots__ = ('type', 'id', 'events')
+    __slots__ = ('type', 'desc', 'id', 'events')
 
     def __init__(self, event):
         self.type = event.type
+        self.subtype = None
         self.id = event.id
         self.events = list()
 
@@ -129,6 +132,7 @@ class Session:
     @events: list of all events (pointers to Process/Resources)
     @wait_e: list of all wait() events
     @exit_e: list of all exit() events
+    @pipe_e: all pipe/socket read/write events (keyed by pipe/socket)
     """
 
     # helpers
@@ -140,11 +144,13 @@ class Session:
             s_ev = self.events[r_ev.index]
         return (s_ev.proc, s_ev.pindex)
 
-    def get_syscall_event(self, index):
+    def get_syscall(self, index):
         sysind = self.events[index].sysind
-        proc = self.events[sysind].proc
-        pindex = self.events[sysind].pindex
-        return proc.events[pindex].event
+        return self.events[sysind].event
+
+    def get_registers(self, index):
+        sysind = self.events[index].regind
+        return self.events[sysind].event
 
     def get_syscall_events(self, index, event_class):
         """Given an event, find the owning syscall, and return all the
@@ -238,10 +244,13 @@ class Session:
         e = list(scribe.EventsFromBuffer(m, remove_annotations=False))
         m.close()
 
-        # we also collect all wait/exit for further processing
+        # we also collect for further processing:
+        # - wait/exit
+        # - pipe/socket read/write
         # TODO: also add kill/signal
         self.wait_e = list()
         self.exit_e = list()
+        self.pipe_e = dict()
 
         # @pid and @proc track current process
         # @i tracks current index in self.events
@@ -276,7 +285,9 @@ class Session:
             elif isinstance(event, scribe.EventSyscallExtra):
                 proc.sysind = ind
                 proc.syscnt += 1
-                # NOTE: track separately of certain syscalls
+                # NOTE: track separately of certain syscalls: we also
+                # collect all wait/exit for further processing
+                # TODO: also add kill/signal
                 if event.nr in unistd.Syscalls.SYS_exit:
                     self.exit_e.append(ind)
                 elif event.nr in unistd.Syscalls.SYS_wait:
@@ -314,6 +325,25 @@ class Session:
                 s_ev.resource = resource
                 s_ev.rindex = ind
                 ind += 1
+
+        # collect pipes/sockest dependencies
+        for resource in self.resource_list:
+            event = resource.events[0].event
+            desc = resource.desc = event.desc
+            if event.resource_type != scribe.SCRIBE_RES_TYPE_FILE:
+                continue
+            if not 'pipe:' in desc and not 'socket:' in desc:
+                continue
+            for r_ev in resource.events:
+                si = self.events[r_ev.index].sysind
+                sc = self.get_syscall(si)
+                if sc.ret >= 0:
+                    if desc not in self.pipe_e:
+                        self.pipe_e[desc] = (list(), list())  # R, W
+                    if sc.nr in unistd.Syscalls.SYS_write:
+                        self.pipe_e[desc][1].append((r_ev, sc.ret))
+                    elif sc.nr in unistd.Syscalls.SYS_read:
+                        self.pipe_e[desc][0].append((r_ev, sc.ret))
 
     def __check_bookmarks(self, pid, syscall, bookmarks, logfile):
         for n, bmark in enumerate(bookmarks):
@@ -647,13 +677,17 @@ class Session:
                 graph.add_node(node, index=str(p_ev.index))
                 graph.add_edge(ancestor, node)
                 ancestor = node
+            else:
+                # node already exists (from dependcies HBs) - connect it
+                node = self.make_node(pid, p_ev.syscnt)
+                if node in graph.node:
+                    graph.add_edge(ancestor, node)
+                    ancestor = node
 
     def __resources_graph(self, graph):
-        """Add dependencies due to resources to an execution graph"""
+        """Add OB dependencies due to resources to an execution graph"""
 
         for r in self.resource_list:
-            if len(r.events) == 0:
-                continue
             prev, pind = self.r_ev_to_proc(r.events[0])
             pr_ev = list()
             nr_ev = list()
@@ -686,14 +720,62 @@ class Session:
             else:
                 add_resource_edges()
 
-    def make_graph(self, full=False, resources=False):
+    def __dependency_graph(self, graph):
+        """Add HB dependencies due to resources to an execution graph"""
+        for pipe in self.pipe_e.values():
+            pipe_buf = 0
+            ri = 0  # current read event
+            wi = 0  # current write event
+            wleft = 0  # data "left" in the first write
+            writes = deque()
+
+            while ri < len(pipe[0]):
+                read_rev, read_nr = pipe[0][ri]
+
+                while pipe_buf < read_nr and wi < len(pipe[1]):
+                    write_rev, write_nr = pipe[1][wi]
+                    pipe_buf += write_nr
+                    writes.append((write_rev, write_nr))
+                    wi += 1
+
+                p2, i2 = self.r_ev_to_proc(read_rev, sysind=True)
+                sc2 = p2.events[i2].syscnt
+                node2 = self.make_node(p2.pid, sc2)
+
+                # add HB nodes from previous writes to us
+                for write_rev, write_nr in writes:
+                    p1, i1 = self.r_ev_to_proc(write_rev, sysind=True)
+                    sc1 = p1.events[i1].syscnt
+                    if p1 != p2:
+                        node1 = self.make_node(p1.pid, sc1)
+                        graph.add_edge(node1, node2, pipe='1', label='pipe')
+
+                # discard previous writes which have been consumed
+                while read_nr > 0:
+                    if wleft == 0:
+                        wleft = writes[0][1]
+                    nr = min([wleft, read_nr])
+                    pipe_buf -= nr
+                    read_nr -= nr
+                    wleft -= nr
+                    if wleft == 0:
+                        writes.popleft()
+
+                ri += 1
+
+    def make_graph(self, full=False, dependency=True, resources=False):
         """Build the execution DAG from the execution log.
         @full: if True, include all syscalls, else only fork/wait/exit
+        @depends: if True, add additional HB dependencies (e.g. pipes)
         @resources: if True, add dependencies induced by resources
         Return a graph.
         """
         graph = networkx.DiGraph()
         graph.add_node('1:0')
+
+        if dependency:
+            # add dependencies of mandatory HB
+            self.__dependency_graph(graph)
 
         # build initial graph
         self.__build_graph(graph, self.process_list[0], full)
