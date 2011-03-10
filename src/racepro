@@ -97,13 +97,17 @@ def show_graph(args):
             g.draw(output + '.pdf')
 
     session = load_session(args.logfile)
-    graph = session.make_graph(full=False, resources=False)
+    graph = session.make_graph(full=False,
+                               resources=False,
+                               dependency=args.depend)
     if args.pids: do_filter_graph(graph)
     if args.thin: diet_graph(graph)
     do_show_graph(graph, args.outfile + '.hb')
 
     session = load_session(args.logfile)
-    graph = session.make_graph(full=True, resources=True)
+    graph = session.make_graph(full=True,
+                               resources=True,
+                               dependency=args.depend)
     if args.pids: do_filter_graph(graph)
     if args.thin: diet_graph(graph)
     do_show_graph(graph, args.outfile + '.ob')
@@ -339,7 +343,9 @@ def save_modify_log(session, bookmarks, injects, cutoff, events, output):
 def show_races(args):
     session = load_session(args.logfile)
 
-    graph = session.make_graph(full=True, resources=True)
+    graph = session.make_graph(full=True,
+                               resources=True,
+                               dependency=args.depend)
     logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
 
     vclocks = session.vclock_graph(graph)
@@ -506,6 +512,9 @@ parser_races.add_argument('-c', '--count', dest='count',
 parser_races.add_argument('-r', '--random', dest='random',
                           action='store_true', default=False,
                           help='List races in random order')
+parser_races.add_argument('-D', '--depend', dest='depend',
+                          action='store_true', default=False,
+                          help='Consider happaned-before dependencies')
 
 desc = 'Process and modify scribe execution log'
 parser = argparse.ArgumentParser(description=desc)
@@ -527,12 +536,15 @@ parser_show_graph.add_argument('-c', '--clustered', dest='clustered',
 parser_show_graph.add_argument('-t', '--thin', dest='thin',
                                action='store_true',
                                help='Thin mode (minimal syscalls graph)')
-parser_show_graph.add_argument('--pdf', dest='pdf',
-                               action='store_true',
-                               help='Output graph in PDF format')
 parser_show_graph.add_argument('-p', '--pids', dest='pids',
                                metavar='PID[,PID...]', default='',
                                help='Pid(s) to include in the graph')
+parser_show_graph.add_argument('-D', '--depend', dest='depend',
+                               action='store_true', default=False,
+                               help='Show happaned-before dependencies')
+parser_show_graph.add_argument('--pdf', dest='pdf',
+                               action='store_true',
+                               help='Output graph in PDF format')
 
 parser_show_syscalls = subparsers.add_parser(
     'show-syscalls', parents=[parser_io])
