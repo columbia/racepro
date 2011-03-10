@@ -60,13 +60,13 @@ def show_graph(args):
 
         pids = dict(map(convert, [s.split('=') for s in args.pids.split(',')]))
 
-        for s, t in graph.edges():
+        for s, t in graph.edges_iter():
             ps, ns = map(int, s.split(':'))
             pt, nt = map(int, t.split(':'))
             if (ps not in pids or ns < pids[ps][0] or ns > pids[ps][1] or
                 pt not in pids or nt < pids[pt][0] or nt > pids[pt][1]):
                 graph.remove_edge(s, t)
-        for n in graph.nodes():
+        for n in graph.nodes_iter():
             pn, nn = map(int, n.split(':'))
             if pn not in pids or nn < pids[pn][0] or nn > pids[pn][1]:
                 graph.remove_node(n)
