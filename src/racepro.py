@@ -942,8 +942,6 @@ class Session:
         cut = dict([(int(p), -int(c)) for p, c in
                     [n.split(':') for n in anchors]])
 
-        print(cut)
-
         for proc in self.process_list:
             if proc.pid in cut:
                 continue
@@ -952,7 +950,6 @@ class Session:
             pid = proc.pid
             c = vc.get(pid)
 
-            print("pid=%d, local clock=%d" % (pid, c))
             logging.debug("pid=%d, local clock=%d" % (pid, c))
 
             if (proc, c + 1) in ticks:
@@ -963,7 +960,6 @@ class Session:
                 assert (c > 0), 'Invalid syscall count %d' % c
                 syscnt = 0
 
-            print('pid %d -> cnt %d'% (pid, syscnt))
             cut[pid] = syscnt
 
             # Exception: for a process that was stopped on syscall 1
@@ -976,7 +972,6 @@ class Session:
             if syscnt == -1:
                 for p, c in [ self.split_node(n) for n in anchors]:
                     if vclocks[(p, c)].before(vclocks[(proc, 1)]):
-                        print('forked child %d later than %d:%d' % (pid,p.pid,c))
                         del cut[pid]
                         break
 
