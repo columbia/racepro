@@ -1005,13 +1005,13 @@ class Session:
             logging.debug('parent %d, child %d, clone@%d, cut@%d' 
                           % (prvproc.pid, pid, prvcnt, cut[prvproc.pid]))
 
-            if cut[prvproc.pid] < prvcnt: # clone() not in cut
+            if cut[prvproc.pid] <= prvcnt: # clone() not in cut
                 logging.debug('exclude child not yet cloned')
             else: # clone() in cut
                 logging.debug("include child already cloned")
                 marks[pid] = -1 # -1 to include clone ret in bookmarks
 
-        logging.debug('found cut: %s' % cut)
+        logging.debug('found cut: %s' % marks)
         return marks
 
 
