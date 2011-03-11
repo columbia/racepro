@@ -176,10 +176,6 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
         sys.stdout.write('p%d @ %s:' % (proc2.pid, vclocks[(proc2, cnt2)]))
         session.parse_syscall(index2)
 
-    # YJF: TODO: sort races.  races on stdout or stderr not
-    # interesting, mostly.  races on file data more interesting than
-    # stat v.s. write race
-
     bookmark1 = session.crosscut_graph(graph, vclocks, [node1, node2])
     if not bookmark1:
         print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %

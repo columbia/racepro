@@ -971,6 +971,9 @@ class Session:
             cut[pid] = syscnt
 
         # convert cut to bookmarks understandable by save_events()
+        # we use two passes (first cut, then marks) because when checking
+        # if a child process has been cloned or not, we must make sure
+        # that we have computed the cut
         marks = dict()
         for pid, cnt in cut.iteritems():
             if cnt == sys.maxint:
