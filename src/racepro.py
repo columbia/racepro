@@ -902,31 +902,38 @@ class Session:
 
         # @ticks will map from a <proc, clock> tuple to the first
         # syscall (syscnt) by which proc that value of local clock.
+        #
+        # We deliberately include in the map syscnt=0 which doesn't really
+        # map to a real system call, because it doesn't help special case
+        # it here: we have to deal with clone() and clone() returns anyway
         ticks = dict()
         for (proc, syscnt), vc in vclocks.iteritems():
-            if syscnt == 0:  # corresponds to a pseudo "fork" node
-                continue
             c = vc.get(proc.pid)
             if (proc, c) in ticks:  # use earlier ones
                 ticks[(proc, c)] = min(syscnt, ticks[(proc, c)])
             else:
                 ticks[(proc, c)] = syscnt
 
-        # given n1 with vc1 and n2 with vc2, find n in each process,
-        # s.t. each pair of nodes are concurrent.
+        # given @anchors with clock @vcs, find a set nof nodes N in each
+        # process, s.t. each pair of nodes in N are concurrent.
         #
         # algorithm: for process i
-        #    find local clock ci s.t. ci = max(vc1[i], vc2[i])
+        #    find local clock ci s.t. ci = max(vc[i] for vc in vcs)
         #    find the first node n with vc such that vc[i] = ci+1
-        #    take edge from prev node -> n
+        #    take the edge from previous node -> n
 
         # proof that this cut does not violate causality:
-        #    obviously each n taken || n1 and n || n2
-        #    suppose ni > nj, and ni is not taken, but nj is.
-        #         ni[i] >= nj[j] ==> ni hb nj
-        #         nj[j] >= max(vc1[j], vc2[j] ==> nj hb n1 or n2
-        #         ==> ni >= n1 or n2.  contradictory !
-
+        #    suppose ni --> nj, and ni is not taken, but nj is.
+        #         
+        #         ni not taken ==> ni[i] > ci
+        #         ni --> nj ==> ni[j] <= nj[j]
+        #
+        #         nj[j] has a clock <= cj
+        #             ==> ni --> last node with cj in process j
+        #         last node with cj in process j is a fork 
+        #             ==> this node --> all anchors  
+        #             ==> ni --> all anchors so ni[i] must <= ci
+                
         logging.debug('finding cut for nodes %s' % (", ".join(anchors)))
 
         vc = VectorClock()  # vector clocks for anchors
@@ -939,7 +946,8 @@ class Session:
 
         logging.debug('merged clocks %s' % vc.clocks)
 
-        cut = dict([(int(p), -int(c)) for p, c in
+        # syscnt before which we cut
+        cut = dict([(int(p), int(c)) for p, c in
                     [n.split(':') for n in anchors]])
 
         for proc in self.process_list:
@@ -954,29 +962,55 @@ class Session:
 
             if (proc, c + 1) in ticks:
                 # normal case: stop before the syscall
-                syscnt = -ticks[(proc, c + 1)]
+                syscnt = ticks[(proc, c + 1)]
             else:
                 # special case: process already exited
                 assert (c > 0), 'Invalid syscall count %d' % c
-                syscnt = 0
+                syscnt = sys.maxint # use maxint to represent exited process
 
             cut[pid] = syscnt
 
-            # Exception: for a process that was stopped on syscall 1
+        # convert cut to bookmarks understandable by save_events()
+        marks = dict()
+        for pid, cnt in cut.iteritems():
+            if cnt == sys.maxint:
+                marks[pid] = 0 # include everything for already exited process
+                continue
+            if cnt > 0:
+                marks[pid] = -cnt # normal case: negate to indicate cut before
+                continue
+
+            # Exception: for a process that was stopped on syscall 0
             # means that our vector-clock didn't know about the
             # process. This could be either if the process was not
             # forked yet, but also if the process was __just_ forked
-            # but not communicate to us.  The former case does not
-            # consistute a valid crosscut, so we prune it here:
+            # but not communicate to us.  
+            #
+            # We need the extra hack for the second case because the way
+            # we log clone() is awkward: if a clone() call is logged, both
+            # returns from clone() in the parent and the child processes
+            # must be in the log
 
-            if syscnt == -1:
-                for p, c in [ self.split_node(n) for n in anchors]:
-                    if vclocks[(p, c)].before(vclocks[(proc, 1)]):
-                        del cut[pid]
-                        break
+            assert cnt == 0, 'invalid syscnt!'
+            n = self.make_node(pid, 0)
+            pred = graph.predecessors(n)
+            assert pred, "only the first process %d? can't have race!" % pid
+            assert len(pred)>0, 'More than one parent for %d !' % pid
+
+            prvproc, prvcnt = self.split_node(pred[0])
+
+            logging.debug('parent %d, child %d, clone@%d, cut@%d' 
+                          % (prvproc.pid, pid, prvcnt, cut[prvproc.pid]))
+
+            if cut[prvproc.pid] < prvcnt: # clone() not in cut
+                logging.debug('exclude child not yet cloned')
+            else: # clone() in cut
+                logging.debug("include child already cloned")
+                marks[pid] = -1 # -1 to include clone ret in bookmarks
 
         logging.debug('found cut: %s' % cut)
-        return cut
+        return marks
+
 
     def __races_accesses(self, access):
         """Given vclocks of a resource per process (non-decreasing
