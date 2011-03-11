@@ -1059,6 +1059,23 @@ class Session:
 
         return races
 
+    # YJF: dumb version of race detection; but seems to detect more races
+    # than the optimized version, such as the mv race
+    def __races_accesses_yjf(self, access):
+        races = list()
+
+        for k1, k2 in combinations(access, 2):
+            q1, q2 = access[k1], access[k2]
+            for (vc1, r_ev1) in q1:
+                for (vc2, r_ev2) in q2:
+                    if vc1.before(vc2) or vc2.before(vc1):
+                        continue
+                    if (r_ev1.event.write_access == 0 and
+                        r_ev2.event.write_access == 0):
+                        continue
+                    races.append((vc1, r_ev1, vc2, r_ev2))
+        return races
+
     def races_resources(self, vclocks):
         """Given vclocks of all syscalls, find resources races:
         For each resource, iterate through its events and accumulate
@@ -1081,7 +1098,7 @@ class Session:
                 vc = vclocks[(proc, p_ev.syscnt)]
                 access[proc.pid].append((vc, r_ev))
 
-            races.extend(self.__races_accesses(access))
+            races.extend(self.__races_accesses_yjf(access))
 
         return [(vc1, r_ev1.index, vc2, r_ev2.index) for
                 vc1, r_ev1, vc2, r_ev2 in races]
