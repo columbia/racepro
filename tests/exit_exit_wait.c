@@ -41,6 +41,7 @@ main()
 
         if(ret == 0) {
                 close(fd);
+                usleep(10);
                 exit(0);
         }
 
