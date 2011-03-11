@@ -1,6 +1,6 @@
 
 PROGS = hello_world fork_one_file fork_two_file fork_two_proc read_write_write \
-	no_race no_race_pipe unlink_stat euid exit-exit-wait
+	no_race no_race_pipe unlink_stat euid exit_exit_wait
 
 all: $(PROGS)
 
@@ -18,6 +18,6 @@ read_write_write: read_write_write.o
 no_race: no_race.o
 no_race_pipe: no_race_pipe.o
 unlink_stat: unlink_stat.o
-exit-exit-wait: exit-exit-wait.o
+exit_exit_wait: exit_exit_wait.o
 euid: euid.o
 	gcc -o $@ $< -lpthread
