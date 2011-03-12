@@ -482,9 +482,11 @@ class Session:
                     continue
 
             if noregs[pid] and \
-                    (isinstance(event, scribe.EventResourceLockExtra) or \
-                    isinstance(event, scribe.EventResourceLockIntr) or \
-                    isinstance(event, scribe.EventResourceUnlock)):
+                    (isinstance(event, scribe.EventResourceLockExtra) or
+                     isinstance(event, scribe.EventResourceLockIntr) or
+                     isinstance(event, scribe.EventResourceUnlock) or
+                     isinstance(event, scribe.EventDataExtra) or
+                     isinstance(event, scribe.EventData)):
                 continue
 
             if isinstance(event, scribe.EventQueueEof):
