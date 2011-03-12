@@ -187,7 +187,9 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
     bookmarks = [bookmark1, bookmark2]
 
     action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                               scribe.SCRIBE_PS_ENABLE_RET_CHECK |
+                               scribe.SCRIBE_PS_ENABLE_DATA)
     injects = dict()
     injects[proc1.pid] = dict({-cnt1 : action})
 
@@ -258,10 +260,14 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
 
     injects = dict()
     action1 = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                               scribe.SCRIBE_PS_ENABLE_RET_CHECK |
+                               scribe.SCRIBE_PS_ENABLE_DATA)
     injects[proc1.pid] = dict({-cnt1 : action1})
     action2 = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                               scribe.SCRIBE_PS_ENABLE_RET_CHECK |
+                               scribe.SCRIBE_PS_ENABLE_DATA)
     injects[proc3.pid] = dict({-cnt3 : action2})
 
     cutoff = dict(bookmark3)

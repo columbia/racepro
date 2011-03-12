@@ -585,7 +585,9 @@ class Session:
             bookmarks.append(dict(alive))
             if p not in injects:
                 action = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                                0, scribe.SCRIBE_PS_ENABLE_RESOURCE)
+                                0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                                   scribe.SCRIBE_PS_ENABLE_RET_CHECK |
+                                   scribe.SCRIBE_PS_ENABLE_DATA)
                 injects[p] = dict({-alive[p] : action})
 
         for pid, pindex in syscalls:
