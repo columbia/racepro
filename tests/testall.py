@@ -12,7 +12,13 @@ def do_exec(cmd):
     return subprocess.call(cmd.split())
 
 def do_one_test(args, t_name, t_exec):
-    e_record = 'sudo record -f sScrdgp'
+    if not args.logmask and not args.logflags:
+        args.logflags = 'sScrdgp'
+
+    e_record = 'sudo record'
+    if args.logmask: e_record += ' -l %d' % args.logmask
+    if args.logflags: e_record += ' -f %s' % args.logflags
+
     e_replay = 'sudo replay -l 15'
     e_racepro = '../src/racepro'
 
@@ -95,8 +101,15 @@ parser.add_argument('-v', '--verbose', dest='verbose',
                     help='Increase vebosity level')
 parser.add_argument('-a', '--all', dest='all',
                     action='store_true', default=True)
-parser.add_argument('-o', '--outdir', dest='outdir',
-                    default='/tmp')
+parser.add_argument('-o', '--outdir', dest='outdir', default='/tmp',
+                    help='Location where to store the testingd')
+parser.add_argument('-z', '--noisy', dest='noisy',
+                    action='store_true', default=False,
+                    help='If set, maintain stdout/err on screen')
+parser.add_argument('-l', '--log-level', dest='logmask', default=None,
+                    help='Log mask argument, see arguments.')
+parser.add_argument('-f', '--log-flags', dest='logflags', default=None,
+                    help='Log mask argument, see record(1) arguments.')
 parser.add_argument('tests', metavar='TEST', nargs='*')
 
 args = parser.parse_args()
