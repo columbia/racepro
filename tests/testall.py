@@ -8,8 +8,10 @@ import argparse
 import subprocess
 import pdb
 
-def do_exec(cmd):
-    return subprocess.call(cmd.split())
+def do_exec(cmd, redirect):
+    return subprocess.call(cmd.split(),
+                           stdout=redirect,
+                           stderr=subprocess.STDOUT)
 
 def do_one_test(args, t_name, t_exec):
     if not args.logmask and not args.logflags:
@@ -47,12 +49,18 @@ def do_one_test(args, t_name, t_exec):
         shutil.rmtree(pdir)
     os.mkdir(pdir)
 
+    if not args.noisy:
+        redirect = open(path + '.out', 'w')
+    else:
+        redirect = None
+
     logging.info('  recording original exceution (twice)')
     if t_pre:
         logging.info('    clean-up before recording...')
         logging.error(t_pre + ' %s' % (path + '.log'))
     logging.info('    1st recording ...')
-    ret = do_exec(e_record + ' -o %s ./%s' % (path + '.log', t_exec))
+    cmd = e_record + ' -o %s ./%s' % (path + '.log', t_exec)
+    ret = do_exec(cmd, redirect)
     if ret != 0:
         logging.error('failed 1st recording')
         return False
@@ -60,7 +68,8 @@ def do_one_test(args, t_name, t_exec):
         logging.info('    clean-up before recording...')
         do_exec(t_pre + ' %s' % (path + '.log'))
     logging.info('    2nd recording ...')
-    ret = do_exec(e_record + ' -o %s ./%s' % (path + '.log', t_exec))
+    cmd = e_record + ' -o %s ./%s' % (path + '.log', t_exec)
+    ret = do_exec(cmd, redirect)
     if ret != 0:
         logging.error('failed 2nd recording')
         return False
@@ -68,23 +77,28 @@ def do_one_test(args, t_name, t_exec):
     logging.info('  replaying original execution')
     if t_pre:
         logging.info('    clean-up before replaying...')
-        do_exec(t_pre + ' %s' % (path + '.log'))
+        cmd = t_pre + ' %s' % (path + '.log')
+        do_exec(cmd, redirect)
     logging.info('    replaying ...')
-    ret = do_exec(e_replay + ' %s' % (path + '.log'))
+    cmd = e_replay + ' %s' % (path + '.log')
+    ret = do_exec(cmd, redirect)
     if ret != 0:
         logging.error('failed original replay')
         return False
 
     logging.info('  generating the races')
-    ret = do_exec(e_racepro + ' %s show-races -i %s -o %s' %
-                  (opts1, path + '.log', path))
+    cmd = e_racepro + '%s show-races -D -i %s -o %s' % \
+        (opts1, path + '.log', path)
+    ret = do_exec(cmd, None)
     if ret != 0:
         logging.error('failed to generate races')
         return False
 
     logging.info('  testing the races')
-    ret = do_exec(e_racepro + ' %s test-races -i %s -o %s %s --exit-on-failed-replay' %
-                  (opts1, path + '.log', path, opts2))
+    cmd = e_racepro + \
+        ' %s test-races -i %s -o %s %s --exit-on-failed-replay' % \
+        (opts1, path + '.log', path, opts2)
+    ret = do_exec(cmd, None)
     if ret != 0:
         logging.error('failed to test the races %d' % ret)
         return False
