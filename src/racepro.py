@@ -370,7 +370,7 @@ class Session:
                     bookmarks = None,
                     injects = None,
                     cutoff = None,
-                    events = None):
+                    replace = None):
         """Iterator that returns the (perhaps modified) scribe log.
 
         Write out the scribe log while potentially modifying it. Two
@@ -381,7 +381,7 @@ class Session:
         @bookmarks: array of bookmarks [{ pid: cnt1 }]
         @injects: actions to inject { pid : {cnt1:act1},{cnt2:act2}, ...] }
         @cutoff: where to cutoff queues { pid : cnt }
-        @events: (ordered) events to substitutee [(old1,new1),(old2,new2)..]
+        @replace: (ordered) events to substitutee [(old1,new1),(old2,new2)..]
 
         The 'cnt' value above specifies a system call:
         cnt > 0: effect occurs post-syscall (before return to userspace)
@@ -409,10 +409,10 @@ class Session:
         if bookmarks is None: bookmarks = dict()
         if injects is None: injects = dict()
         if cutoff is None: cutoff = dict()
-        if events is None: events = list()
+        if replace is None: replace = list()
 
         try:
-            event_old, event_new = events.pop(0)
+            event_old, event_new = replace.pop(0)
         except IndexError:
             event_old, event_new = None, None
 
@@ -490,9 +490,11 @@ class Session:
             if event == event_old:
                 event = event_new
                 try:
-                    event_old, event_new = events.pop(0)
+                    event_old, event_new = replace.pop(0)
                 except IndexError:
                     event_old, event_new = None, None
+                if not event:
+                    continue
 
             yield event
 
@@ -831,7 +833,6 @@ class Session:
 
         return vclocks
 
-
     def score_race(self, graph, race):
         # TODO: priority may change?
         # file data > path > exit > signal > file metadata > stdout
@@ -866,7 +867,6 @@ class Session:
         return score - distance;
 
     def syscall_events(self, proc, pindex):
-
         assert isinstance(proc.events[pindex].event, scribe.EventSyscallExtra)
 
         events = list()
