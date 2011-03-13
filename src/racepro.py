@@ -151,25 +151,25 @@ class Session:
         sysind = self.events[index].regind
         return self.events[sysind].event
 
-    def get_syscall_events(self, index, event_class):
+    def get_syscall_events(self, index, which=None):
         """Given an event, find the owning syscall, and return all the
-        events of of a certain type (event_class) that belong the that
-        syscall. If @event_class == None, return all syscall events.
+        events of of a certain type (which) that belong the that syscall.
+        If @which == None, return all of them.
         """
+        events = list()
+
         sysind = self.events[index].sysind
         proc = self.events[sysind].proc
         pindex = self.events[sysind].pindex
 
-        event_list = list()
-
         event = proc.events[pindex].event
         while not isinstance(event, scribe.EventSyscallEnd):
-            if isinstance(event, event_class):
-                event_list.append((event, proc.events[pindex].index))
+            if not which or isinstance(event, which):
+                events.append((event, proc.events[pindex].index))
             pindex += 1
             event = proc.events[pindex].event
 
-        return event_list
+        return events
 
     ##########################################################################
 
