@@ -12,8 +12,8 @@ def do_exec(cmd):
     return subprocess.call(cmd.split())
 
 def do_one_test(args, t_name, t_exec):
-    e_record = 'sudo record'
-    e_replay = 'sudo replay'
+    e_record = 'sudo record -f sScrdgp'
+    e_replay = 'sudo replay -l 15'
     e_racepro = '../src/racepro'
 
     logging.info('Processing test: %s' % (t_name))
@@ -46,7 +46,7 @@ def do_one_test(args, t_name, t_exec):
         logging.info('    clean-up before recording...')
         logging.error(t_pre + ' %s' % (path + '.log'))
     logging.info('    1st recording ...')
-    ret = do_exec(e_record + ' -l 15 -o %s ./%s' % (path + '.log', t_exec))
+    ret = do_exec(e_record + ' -o %s ./%s' % (path + '.log', t_exec))
     if ret != 0:
         logging.error('failed 1st recording')
         return False
@@ -54,7 +54,7 @@ def do_one_test(args, t_name, t_exec):
         logging.info('    clean-up before recording...')
         do_exec(t_pre + ' %s' % (path + '.log'))
     logging.info('    2nd recording ...')
-    ret = do_exec(e_record + ' -l 15 -o %s ./%s' % (path + '.log', t_exec))
+    ret = do_exec(e_record + ' -o %s ./%s' % (path + '.log', t_exec))
     if ret != 0:
         logging.error('failed 2nd recording')
         return False
@@ -114,5 +114,6 @@ with open('tests.list', 'r') as file:
 req_tests = args.tests if args.tests else [n for n ,t in all_tests_l]
 
 for t in req_tests:
+    print('TEST: %s' % t)
     if not do_one_test(args, t, all_tests_d[t]):
         break
