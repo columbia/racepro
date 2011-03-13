@@ -133,6 +133,30 @@ def show_profile(args):
 
 ##############################################################################
 
+def filter_syscall(session, proc, index):
+    event = session.events[index].event
+
+    print('pid %d nr %d' % (proc.pid, event.nr))
+    # getdents(): drop data* events to tolerate missing/unexpected
+    # pids in /proc, and mark SCRIBE_PS_ENABLE_DATA to be unset
+    if event.nr == unistd.Syscalls.NR_getdents:
+        replace = list()
+        mask = (scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                scribe.SCRIBE_PS_ENABLE_RET_CHECK |
+                scribe.SCRIBE_PS_ENABLE_DATA)
+        for e in session.get_syscall_events(index, None):
+            if (isinstance(e, scribe.EventData) or
+                isinstance(e, scribe.EventDataExtra)):
+                replace.append((e, None))
+
+    # otherwise: do nothing and use default flags to be unset
+    else:
+        replace = None
+        mask = (scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                scribe.SCRIBE_PS_ENABLE_RET_CHECK)
+
+    return replace, mask
+
 def find_pairwise_races(session, vclocks):
     """Find all pairwise races and return in a list"""
     all_races = session.races_resources(vclocks)
@@ -205,10 +229,12 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
     bookmark2[proc1.pid] = -bookmark2[proc1.pid]
     bookmarks = [bookmark1, bookmark2]
 
-    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                               scribe.SCRIBE_PS_ENABLE_RET_CHECK |
-                               scribe.SCRIBE_PS_ENABLE_DATA)
+    # for some syscalls replayed after a bookmark/inject we need to
+    # filter some events, mainly data, dataextra and fence.
+    replace, mask = filter_syscall(session, proc1, index1)
+
+    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS, 0, mask)
+
     injects = dict()
     injects[proc1.pid] = dict({-cnt1 : action})
 
@@ -226,7 +252,7 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
     logging.debug('      injects: %s' % (injects))
     logging.debug('       cutoff: %s' % (cutoff))
 
-    return bookmarks, injects, cutoff, None
+    return bookmarks, injects, cutoff, None  # replace
 
 def find_exitwait_races(session, vclocks):
     """Find all exit-wait races and return in a list"""
@@ -278,15 +304,16 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
     bookmarks = [bookmark1, bookmark2, bookmark3]
 
     injects = dict()
+
+    # we don't need scribe.SCRIBE_PS_ENABLE_DATA, because we know
+    # our syscalls are wait() and exit()
     action1 = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
                             0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                               scribe.SCRIBE_PS_ENABLE_RET_CHECK |
-                               scribe.SCRIBE_PS_ENABLE_DATA)
+                               scribe.SCRIBE_PS_ENABLE_RET_CHECK)
     injects[proc1.pid] = dict({-cnt1 : action1})
     action2 = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
                             0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                               scribe.SCRIBE_PS_ENABLE_RET_CHECK |
-                               scribe.SCRIBE_PS_ENABLE_DATA)
+                               scribe.SCRIBE_PS_ENABLE_RET_CHECK)
     injects[proc3.pid] = dict({-cnt3 : action2})
 
     cutoff = dict(bookmark3)
@@ -305,7 +332,7 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
     data_new.data = struct.pack('i', proc1.pid)
     data_new.user_ptr = 0
 
-    events = list([(syscall_old, syscall_new), (data_old, data_new)])
+    replace = list([(syscall_old, syscall_new), (data_old, data_new)])
 
     print('RACE %2d:  ' % (n_race + 1) +
           'pid %d syscnt %d [sys(%d)=%d]' %
@@ -321,15 +348,15 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
     logging.info('   boobkmark3: %s' % (bookmark3))
     logging.info('      injects: %s' % (injects))
     logging.info('       cutoff: %s' % (cutoff))
-    logging.info('       events: %s' % (events))
+    logging.info('      replace: %s' % (replace))
 
-    return (bookmarks, injects, cutoff, events)
+    return bookmarks, injects, cutoff, replace
 
-def save_modify_log(session, bookmarks, injects, cutoff, events, output):
+def save_modify_log(session, bookmarks, injects, cutoff, replace, output):
     """Generate and save a modified scribe log for a race"""
 
     # write the new logfile out
-    event_iter = session.save_events(bookmarks, injects, cutoff, events)
+    event_iter = session.save_events(bookmarks, injects, cutoff, replace)
     save_session(output, event_iter)
 
     # YJF: condense event serial and rewrite log
@@ -392,9 +419,9 @@ def show_races(args):
             continue
         n_race += 1
 
-        (bookmarks, injects, cutoff, events) = ret
+        (bookmarks, injects, cutoff, replace) = ret
         output = args.outfile + '.' + str(n_race) + '.log'
-        save_modify_log(session, bookmarks, injects, cutoff, events, output)
+        save_modify_log(session, bookmarks, injects, cutoff, replace, output)
 
         if n_race == args.count:
             break;
@@ -426,9 +453,9 @@ def show_races(args):
             continue
         n_race += 1
 
-        (bookmarks, injects, cutoff, events) = ret
+        (bookmarks, injects, cutoff, replace) = ret
         output = args.outfile + '.' + str(n_race) + '.log'
-        save_modify_log(session, bookmarks, injects, cutoff, events, output)
+        save_modify_log(session, bookmarks, injects, cutoff, replace, output)
 
         if n_race == args.count:
             break

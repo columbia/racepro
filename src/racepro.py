@@ -136,6 +136,13 @@ class Session:
 
     # helpers
 
+    def s_ev_to_proc(self, s_ev, syscnt=False):
+        if syscnt:
+            index = s_ev.proc.events[s_ev.pindex].syscnt
+        else:
+            index = s_ev.pindex
+        return s_ev.proc, index
+
     def r_ev_to_proc(self, r_ev, sysind=False):
         if sysind:
             s_ev = self.events[r_ev.sysind]
@@ -468,10 +475,8 @@ class Session:
                 for e in self.__check_inject(pid, -syscall[pid], injects):
                     if e.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
                         if e.arg2 & scribe.SCRIBE_PS_ENABLE_RESOURCE:
-                            print('pid %d relaxed resource' % pid)
                             relaxed[pid]['resource'] = True
                         if e.arg2 & scribe.SCRIBE_PS_ENABLE_DATA:
-                            print('pid %d relaxed data resource' % pid)
                             relaxed[pid]['data'] = True
                     yield e
                 # pid cutoff ?
@@ -731,8 +736,8 @@ class Session:
             else:
                 add_resource_edges()
 
-    def __dependency_graph(self, graph):
-        """Add HB dependencies due to resources to an execution graph"""
+    def __dependency_pipe(self, graph):
+        """Add HB dependencies due to pipes and sockets"""
         for pipe in self.pipe_e.values():
             pipe_buf = 0
             ri = 0  # current read event
@@ -773,6 +778,48 @@ class Session:
                         writes.popleft()
 
                 ri += 1
+
+    def __dependency_reparent(self, graph):
+        """Add HB dependencies due to reparenting of orphans to init"""
+        for index in self.exit_e:
+
+            # for each exit() syscall, get all the events that belong
+            # to this syscall, and filter only the EventResource that
+            # refer to ppid resources: the event.desc field of these
+            # indicated the current children that will be reparented.
+
+            procs = list()
+
+            for e, i in self.get_syscall_events(index):
+                if isinstance(e, scribe.EventResourceLockExtra):
+                    if e.type != scribe.SCRIBE_RES_TYPE_PPID:
+                        if e.desc != 'none':
+                            procs.append(int(e.desc))
+
+            # now that we know the children that are being reparented,
+            # we add HB edges to the graph from a this syscall to
+            # their own exit syscall.
+            # FIXME1: to be precise, the edge needs to go to the next
+            # access to the reaprent child's ppid, but this should be
+            # close enough.
+            # FIXME2: we assume that reparenting occurs to init; but
+            # children of threads will first be reparented to another
+            # thread if exists; this will need to be fixed.
+
+            p1, cnt1 = self.s_ev_to_proc(self.events[index], syscnt=True)
+            node1 = self.make_node(p1.pid, cnt1)
+
+            for pid in procs:
+                p2 = self.process_map[pid]
+                i2 = p2.sysind               # points to last syscall: exit
+                cnt2 = p2.events[self.events[i2].pindex].syscnt
+                node2 = self.make_node(p2.pid, cnt2)
+                graph.add_edge(node1, node2, reparent='1', label='reparent')
+
+    def __dependency_graph(self, graph):
+        """Add HB dependencies due to resources to an execution graph"""
+        self.__dependency_pipe(graph)
+        self.__dependency_reparent(graph)
 
     def make_graph(self, full=False, dependency=True, resources=False):
         """Build the execution DAG from the execution log.
