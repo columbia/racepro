@@ -436,7 +436,7 @@ class Session:
                 active[pid] = True
                 syscall[pid] = 0
                 endofq[pid] = False
-                relaxed[pid] = False
+                relaxed[pid] = dict({'resource':False, 'data':False})
                 if pid not in cutoff:
                     cutoff[pid] = 0
                 if pid not in injects:
@@ -467,19 +467,28 @@ class Session:
                 # pid inject ?
                 for e in self.__check_inject(pid, -syscall[pid], injects):
                     if e.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
-                        relaxed[pid] = True
+                        if e.arg2 & scribe.SCRIBE_PS_ENABLE_RESOURCE:
+                            print('pid %d relaxed resource' % pid)
+                            relaxed[pid]['resource'] = True
+                        if e.arg2 & scribe.SCRIBE_PS_ENABLE_DATA:
+                            print('pid %d relaxed data resource' % pid)
+                            relaxed[pid]['data'] = True
                     yield e
                 # pid cutoff ?
                 if self.__check_cutoff(pid, -syscall[pid], cutoff):
                     active[pid] = False
                     continue
 
-            if relaxed[pid] and \
-                    (isinstance(event, scribe.EventResourceLockExtra) or
-                     isinstance(event, scribe.EventResourceLockIntr) or
-                     isinstance(event, scribe.EventResourceUnlock) or
-                     isinstance(event, scribe.EventDataExtra) or
-                     isinstance(event, scribe.EventData)):
+            # skip 'restource' events ?
+            if relaxed[pid]['resource'] and \
+                    (isinstance(event, scribe.EventResourceLockExtra) or \
+                     isinstance(event, scribe.EventResourceLockIntr) or \
+                     isinstance(event, scribe.EventResourceUnlock)):
+                continue
+            # skip 'data' events ?
+            if relaxed[pid]['data'] and \
+                    (isinstance(event, scribe.EventData) or \
+                     isinstance(event, scribe.EventDataExtra)):
                 continue
 
             if isinstance(event, scribe.EventQueueEof):
