@@ -2,6 +2,7 @@
 
 import os
 import sys
+import mmap
 import pdb
 import random
 import struct
@@ -17,17 +18,35 @@ import racepro
 import unistd
 
 def load_session(logfile):
+    """Load a scribe log from logfile"""
     try:
-        file = open(logfile, 'r')
+        f = open(logfile, 'r')
     except:
         print('Cannot open log file')
         exit(1)
 
+    m = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
+    e = list(scribe.EventsFromBuffer(m, remove_annotations=False))
+    m.close()
+    f.close()
+
     session = racepro.Session()
-    session.load_events(file)
-    file.close()
+    session.load_events(e)
 
     return session
+
+def save_session(logfile, events):
+    """Save modified scribe log to logfile"""
+    try:
+        f = open(logfile, 'w')
+    except:
+        print('Cannot open log file')
+        exit(1)
+
+    for e in events:
+        f.write(e.encode())
+
+    f.close()
 
 def do_exec(cmd):
     return subprocess.call(cmd.split())
@@ -308,21 +327,18 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
 
 def save_modify_log(session, bookmarks, injects, cutoff, events, output):
     """Generate and save a modified scribe log for a race"""
-    with open(output, 'w') as file:
-        session.save_events(file,
-                            bookmarks=bookmarks,
-                            injects=injects,
-                            cutoff=cutoff,
-                            events=events)
+
+    # write the new logfile out
+    event_iter = session.save_events(bookmarks, injects, cutoff, events)
+    save_session(output, event_iter)
 
     # YJF: condense event serial and rewrite log
-    # create a newsession so it's easier for me to traverse the log
-    with open(output, 'r') as file:
-        newsession = racepro.Session()
-        newsession.load_events(file)
-        newsession.condense_events()
-    with open(output, 'w') as file:
-        newsession.save_events(file)
+    # read log into @tmp and rewrite - simpler logic
+    tmp = load_session(output)
+    tmp.condense_events()
+
+    event_iter = tmp.save_events()
+    save_session(output, event_iter)
 
 def show_races(args):
     session = load_session(args.logfile)

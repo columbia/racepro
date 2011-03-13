@@ -1,6 +1,5 @@
 import sys
 import pdb
-import mmap
 import logging
 import networkx
 from itertools import *
@@ -237,12 +236,8 @@ class Session:
                    "  " * p_ev.info.res_depth,
                    p_ev.event))
 
-    def load_events(self, logfile):
-        """Parse the scribe log from @logfile"""
-
-        m = mmap.mmap(logfile.fileno(), 0, prot=mmap.PROT_READ)
-        e = list(scribe.EventsFromBuffer(m, remove_annotations=False))
-        m.close()
+    def load_events(self, event_iter):
+        """Parse the scribe log from @event_iter"""
 
         # we also collect for further processing:
         # - wait/exit
@@ -259,7 +254,7 @@ class Session:
         ind = -1
 
         # parse events
-        for (info, event) in e:
+        for (info, event) in event_iter:
             ind += 1
 
             if isinstance(event, scribe.EventPid):
@@ -345,28 +340,24 @@ class Session:
                     elif sc.nr in unistd.Syscalls.SYS_read:
                         self.pipe_e[desc][0].append((r_ev, sc.ret))
 
-    def __check_bookmarks(self, pid, syscall, bookmarks, logfile):
+    def __check_bookmarks(self, pid, syscall, bookmarks):
         for n, bmark in enumerate(bookmarks):
             if pid in bmark and syscall == bmark[pid]:
                 e = scribe.EventBookmark()
                 e.id = n
                 e.npr = len([b for b in bmark.values() if b != 0])
-                logfile.write(e.encode())
                 logging.debug('[%d] bookmark at syscall %d' % (pid, syscall))
+                yield e
 
-    def __check_inject(self, pid, syscall, injects, logfile):
-        noregs = False
+    def __check_inject(self, pid, syscall, injects):
         if syscall in injects[pid]:
             for a in injects[pid].itervalues():
                 e = scribe.EventInjectAction()
                 e.action = a.action
                 e.arg1 = a.arg1
                 e.arg2 = a.arg2
-                logfile.write(e.encode())
                 logging.debug('[%d] inject at syscall %d' % (pid, syscall))
-                if a.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
-                    noregs = True
-        return noregs
+                yield e
 
     def __check_cutoff(self, pid, syscall, cutoff):
         if syscall == cutoff[pid]:
@@ -375,19 +366,18 @@ class Session:
         else:
             return 
 
-    def save_events(self, logfile,
+    def save_events(self,
                     bookmarks = None,
                     injects = None,
                     cutoff = None,
                     events = None):
-        """Write the (perhaps modified) scribe log to @logfile
+        """Iterator that returns the (perhaps modified) scribe log.
 
         Write out the scribe log while potentially modifying it. Two
         types of modifications exist: "inject", to inject new events
         (per process) into the log , and "cutoff", which specifies
         locations (per process) to cut remaining log.
 
-        @logfile: output file object (opened for binary write)
         @bookmarks: array of bookmarks [{ pid: cnt1 }]
         @injects: actions to inject { pid : {cnt1:act1},{cnt2:act2}, ...] }
         @cutoff: where to cutoff queues { pid : cnt }
@@ -402,7 +392,7 @@ class Session:
 
         active = dict()
         syscall = dict()
-        noregs = dict()
+        relaxed = dict()
         endofq = dict({0:False})
 
         # include all pids that belong to any bookmark; pid's not here
@@ -433,7 +423,7 @@ class Session:
 
             # pid==0 is a special event
             if pid == 0:
-                logfile.write(event.encode())
+                yield event
                 continue
 
             # pid's not in @include are ignored (not created yet)
@@ -446,7 +436,7 @@ class Session:
                 active[pid] = True
                 syscall[pid] = 0
                 endofq[pid] = False
-                noregs[pid] = False
+                relaxed[pid] = False
                 if pid not in cutoff:
                     cutoff[pid] = 0
                 if pid not in injects:
@@ -472,16 +462,19 @@ class Session:
                 syscall[pid] += 1
 
                 # pid bookmark ?
-                self.__check_bookmarks(pid, -syscall[pid], bookmarks, logfile)
+                for e in self.__check_bookmarks(pid, -syscall[pid], bookmarks):
+                    yield e
                 # pid inject ?
-                if self.__check_inject(pid, -syscall[pid], injects, logfile):
-                    noregs[pid] = True
+                for e in self.__check_inject(pid, -syscall[pid], injects):
+                    if e.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
+                        relaxed[pid] = True
+                    yield e
                 # pid cutoff ?
                 if self.__check_cutoff(pid, -syscall[pid], cutoff):
                     active[pid] = False
                     continue
 
-            if noregs[pid] and \
+            if relaxed[pid] and \
                     (isinstance(event, scribe.EventResourceLockExtra) or
                      isinstance(event, scribe.EventResourceLockIntr) or
                      isinstance(event, scribe.EventResourceUnlock) or
@@ -501,14 +494,17 @@ class Session:
                 except IndexError:
                     event_old, event_new = None, None
 
-            logfile.write(event.encode())
+            yield event
 
             if isinstance(event, scribe.EventSyscallEnd):
                 # pid bookmark ?
-                self.__check_bookmarks(pid, syscall[pid], bookmarks, logfile)
+                for e in self.__check_bookmarks(pid, syscall[pid], bookmarks):
+                    yield e
                 # pid inject ?
-                if self.__check_inject(pid, syscall[pid], injects, logfile):
-                    noregs[pid] = True
+                for e in self.__check_inject(pid, syscall[pid], injects):
+                    if e.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
+                        relaxed[pid] = True
+                    yield e
                 # pid cutoff ?
                 if self.__check_cutoff(pid, syscall[pid], cutoff):
                     active[pid] = False
@@ -519,9 +515,9 @@ class Session:
             if not endofq[pid]:
                 e = scribe.EventPid()
                 e.pid = pid
-                logfile.write(e.encode())
+                yield e
                 e = scribe.EventQueueEof()
-                logfile.write(e.encode())
+                yield e
 
     # YJF: remove holes in serial number sequence.
     # FIXME: this should really be in py-scribe because we essentially
