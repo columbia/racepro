@@ -10,10 +10,16 @@ import pdb
 __dummy = open('/dev/null', 'r')
 
 def do_exec(cmd, redirect):
-    return subprocess.call(cmd.split(),
-                           stdin=__dummy,
-                           stdout=redirect,
-                           stderr=subprocess.STDOUT)
+    p1 = subprocess.Popen(cmd.split(),
+                          stdin=__dummy,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT)
+    p2 = subprocess.Popen(['/bin/cat'],
+                          stdin=p1.stdout,
+                          stdout=redirect,
+                          stderr=subprocess.STDOUT)
+    p1.stdout.close()
+    return p1.wait()
 
 def do_one_test(args, t_name, t_exec):
     if not args.logmask and not args.logflags:
@@ -51,7 +57,7 @@ def do_one_test(args, t_name, t_exec):
         shutil.rmtree(pdir)
     os.mkdir(pdir)
 
-    if not args.noisy:
+    if args.quiet:
         redirect = open(path + '.out', 'w')
     else:
         redirect = None
@@ -103,9 +109,9 @@ def do_one_test(args, t_name, t_exec):
     cmd = e_racepro + \
         ' %s test-races -i %s -o %s %s %s' % \
         (opts1, path + '.log', path, opts2, exitiffail)
-    ret = do_exec(cmd, None)
+    ret = do_exec(cmd, redirect)
     if ret != 0:
-        logging.error('failed to test the races %d' % ret)
+        logging.error('failed to test the races (exit %d)' % ret)
         if not args.keepgoing: return False
 
     return True
@@ -122,9 +128,9 @@ parser.add_argument('-a', '--all', dest='all',
                     action='store_true', default=True)
 parser.add_argument('-o', '--outdir', dest='outdir', default='/tmp',
                     help='Location where to store the testingd')
-parser.add_argument('-z', '--noisy', dest='noisy',
+parser.add_argument('-q', '--quiet', dest='quiet',
                     action='store_true', default=False,
-                    help='If set, maintain stdout/err on screen')
+                    help='If set, redirect stdout/err to a file')
 parser.add_argument('-l', '--log-level', dest='logmask', default=None,
                     help='Log mask argument, see arguments.')
 parser.add_argument('-f', '--log-flags', dest='logflags', default=None,
