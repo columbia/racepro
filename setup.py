@@ -9,5 +9,5 @@ setup(
     author_email = 'orenl@cs.columbia.edu',
     package_dir={'': 'src'},
     packages=[''],
-    scripts=['src/racepro']
+    scripts=['src/racepro', 'src/racetest']
 )

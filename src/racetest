@@ -6,7 +6,7 @@ import argparse
 
 import racetest 
 
-desc = 'Run through Racepro tests'
+desc = 'Automate Racepro race detection'
 parser = argparse.ArgumentParser(description=desc)
 parser.add_argument('-d', '--debug', dest='debug',
                     action='store_true', default=False,
@@ -28,10 +28,8 @@ parser.add_argument('-f', '--log-flags', dest='logflags', default=None,
 parser.add_argument('-k', '--keep-going', dest='keepgoing', 
                     action='store_true', default=False, 
                     help='Keep going with other logs on divergence of one log')
-parser.add_argument('-e', '--exec', dest='program',
-                    default=False, action='store_true',
-                    help='Execute TEST program(s) (and TEST.{pre,post,test})')
-parser.add_argument('tests', metavar='TEST', nargs='*')
+parser.add_argument('tests', metavar='TEST[:PREFIX]', nargs='+',
+                    help='TEST program to run, and optional PREFIX for output')
 
 args = parser.parse_args()
 
@@ -40,18 +38,11 @@ if args.verbose: log = logging.INFO
 if args.debug: log = logging.DEBUG
 logging.basicConfig(level=log, stream=sys.stdout)
 
-all_tests = list()
-with open('tests.list', 'r') as file:
-    all_tests_l = [ l.split() for l in file if l.strip() and l[0] != '#' ]
-    all_tests_d = dict(all_tests_l)
+tests = list()
 
-req_tests = args.tests if args.tests else [n for n ,t in all_tests_l]
+for t in args.tests:
+    s = t.split(':')
+    tt = t if len(s) == 1 else tt[1]
+    tests.append((t, tt))
 
-if args.program:
-    for t in req_tests:
-        if t not in all_tests_d:
-            all_tests_l.append([t, t])
-            all_tests_d[t] = t
-
-tests = [ (t, all_tests_d[t]) for t in req_tests ]
 racetest.do_all_tests(args, tests)
