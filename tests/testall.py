@@ -26,7 +26,7 @@ def do_one_test(args, t_name, t_exec):
         args.logflags = 'sScrdgp'
 
     e_record = 'sudo record'
-    if args.logmask: e_record += ' -l %d' % args.logmask
+    if args.logmask: e_record += ' -l %s' % args.logmask
     if args.logflags: e_record += ' -f %s' % args.logflags
 
     e_replay = 'sudo replay -l 15'
