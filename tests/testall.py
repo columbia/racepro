@@ -95,7 +95,7 @@ def do_one_test(args, t_name, t_exec):
         if not args.keepgoing: return False
 
     logging.info('  generating the races')
-    cmd = e_racepro + '%s show-races -D -i %s -o %s' % \
+    cmd = e_racepro + '%s show-races -i %s -o %s' % \
         (opts1, path + '.log', path)
     ret = do_exec(cmd, None)
     if ret != 0:
