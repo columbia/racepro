@@ -139,7 +139,9 @@ def filter_syscall(session, proc, index):
     print('pid %d nr %d' % (proc.pid, event.nr))
     # getdents(): drop data* events to tolerate missing/unexpected
     # pids in /proc, and mark SCRIBE_PS_ENABLE_DATA to be unset
-    if event.nr == unistd.Syscalls.NR_getdents:
+
+    if event.nr not in unistd.Syscalls.SYS_wait:
+#   if event.nr == unistd.Syscalls.NR_getdents:
         replace = list()
         mask = (scribe.SCRIBE_PS_ENABLE_RESOURCE |
                 scribe.SCRIBE_PS_ENABLE_RET_CHECK |
@@ -353,18 +355,25 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
     # both run their respective exit calls before hitting, both, the
     # second bookmark. and then let A collect C first, and all go live.
 
-    if proc3.pid == 1 and \
-            (session.parent_pid(p_ev2.index) == proc1.pid or
-             session.parent_pid(p_ev1.index) == proc2.pid):
+    print('pid %d(%d) pid2 %d(%d) %s' %
+          (proc1.pid, proc1.ppid, proc2.pid, proc2.ppid, cutoff))
+    if proc3.pid == 1 and proc1.ppid != 1:
+        if ((proc1.ppid in cutoff and cutoff[proc1.ppid] == 0) or
+            (proc1.ppid == proc2.pid)):
 
-        # discard the 3rd bookmark, allow proc2 to also exit, and
-        # finally extend the cut to occur after proc3's wait
+            # discard the 3rd bookmark, allow proc2 to also exit, and
+            # finally extend the cut to occur after proc3's wait
 
-        bookmark2[proc2.pid] = -bookmark2[proc2.pid]
-        bookmark3[proc2.pid] = -bookmark3[proc2.pid]
-        bookmarks = [bookmark1, bookmark2]
-        cutoff = dict(bookmark2)
-        cutoff[proc3.pid] = -cutoff[proc3.pid]
+            bookmark2[proc2.pid] = -bookmark2[proc2.pid]
+            bookmark3 = dict()
+            bookmarks = [bookmark1, bookmark2]
+            cutoff = dict(bookmark2)
+            cutoff[proc3.pid] = -cutoff[proc3.pid]
+        else:
+            print('exit-exit-wait race would deadlock .... ' +
+                  'pid %d(%d) and pid %d(%d)' %
+                  (proc1.pid, cnt1, proc2.pid, cnt2))
+            return None
 
     print('RACE %2d:  ' % (n_race + 1) +
           'pid %d syscnt %d [sys(%d)=%d]' %
