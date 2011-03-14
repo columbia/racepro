@@ -779,6 +779,13 @@ class Session:
 
                 ri += 1
 
+    def parent_pid(self, index):
+        for e, i in self.get_syscall_events(index):
+            if isinstance(e, scribe.EventResourceLockExtra):
+                if e.resource_type & 0x7f == scribe.SCRIBE_RES_TYPE_PPID:
+                    return int(e.desc)
+        return None
+
     def __dependency_reparent(self, graph):
         """Add HB dependencies due to reparenting of orphans to init"""
         for index in self.exit_e:
@@ -786,15 +793,10 @@ class Session:
             # for each exit() syscall, get all the events that belong
             # to this syscall, and filter only the EventResource that
             # refer to ppid resources: the event.desc field of these
-            # indicated the current children that will be reparented.
+            # indicates the current children that will be reparented.
 
-            procs = list()
-
-            for e, i in self.get_syscall_events(index):
-                if isinstance(e, scribe.EventResourceLockExtra):
-                    if e.type != scribe.SCRIBE_RES_TYPE_PPID:
-                        if e.desc != 'none':
-                            procs.append(int(e.desc))
+            ppid = self.parent_pid(index)
+            if not ppid: continue
 
             # now that we know the children that are being reparented,
             # we add HB edges to the graph from a this syscall to
@@ -809,17 +811,16 @@ class Session:
             p1, cnt1 = self.s_ev_to_proc(self.events[index], syscnt=True)
             node1 = self.make_node(p1.pid, cnt1)
 
-            for pid in procs:
-                p2 = self.process_map[pid]
-                i2 = p2.sysind               # points to last syscall: exit
-                cnt2 = p2.events[self.events[i2].pindex].syscnt
-                node2 = self.make_node(p2.pid, cnt2)
-                graph.add_edge(node1, node2, reparent='1', label='reparent')
+            p2 = self.process_map[ppid]
+            i2 = p2.sysind               # points to last syscall: exit
+            cnt2 = p2.events[self.events[i2].pindex].syscnt
+            node2 = self.make_node(p2.pid, cnt2)
+            graph.add_edge(node1, node2, reparent='1', label='reparent')
 
     def __dependency_graph(self, graph):
         """Add HB dependencies due to resources to an execution graph"""
         self.__dependency_pipe(graph)
-        self.__dependency_reparent(graph)
+        ## self.__dependency_reparent(graph)
 
     def make_graph(self, full=False, dependency=True, resources=False):
         """Build the execution DAG from the execution log.
