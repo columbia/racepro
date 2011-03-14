@@ -355,8 +355,6 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
     # both run their respective exit calls before hitting, both, the
     # second bookmark. and then let A collect C first, and all go live.
 
-    print('pid %d(%d) pid2 %d(%d) %s' %
-          (proc1.pid, proc1.ppid, proc2.pid, proc2.ppid, cutoff))
     if proc3.pid == 1 and proc1.ppid != 1:
         if ((proc1.ppid in cutoff and cutoff[proc1.ppid] == 0) or
             (proc1.ppid == proc2.pid)):

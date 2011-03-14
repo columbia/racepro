@@ -620,7 +620,6 @@ class Session:
             p_ev = self.process_map[pid].events[pindex]
             event = p_ev.event
             pcnt = p_ev.syscnt
-            print('pcnt %d' % (pcnt))
 
             if spid == -1:
                 spid = pid
