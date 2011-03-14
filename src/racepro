@@ -561,7 +561,7 @@ def test_races(args):
 
         if args.script_post:
             r = do_exec('sudo ' + args.script_post + cmd_suffix)
-            if ret > 0:
+            if r > 0:
                 print('RACE %d: nad exit code %d from post-script' % (n, r))
 
     return 0
