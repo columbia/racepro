@@ -855,7 +855,6 @@ class Session:
         assert networkx.algorithms.dag.is_directed_acyclic_graph(graph), 'graph is not a DAG'
 
         for node in networkx.algorithms.dag.topological_sort(graph):
-            print "iterating..."
             proc, index = self.split_node(node)
             vc = vclocks[(proc, index)]
             tick = False
