@@ -63,7 +63,7 @@ def do_one_test(args, t_name, t_exec):
     ret = do_exec(cmd, redirect)
     if ret != 0:
         logging.error('failed 1st recording')
-        return False
+        if not args.keepgoing: return False 
     if t_pre:
         logging.info('    clean-up before recording...')
         do_exec(t_pre + ' %s' % (path + '.log'))
@@ -72,7 +72,7 @@ def do_one_test(args, t_name, t_exec):
     ret = do_exec(cmd, redirect)
     if ret != 0:
         logging.error('failed 2nd recording')
-        return False
+        if not args.keepgoing: return False 
 
     logging.info('  replaying original execution')
     if t_pre:
@@ -84,7 +84,7 @@ def do_one_test(args, t_name, t_exec):
     ret = do_exec(cmd, redirect)
     if ret != 0:
         logging.error('failed original replay')
-        return False
+        if not args.keepgoing: return False
 
     logging.info('  generating the races')
     cmd = e_racepro + '%s show-races -D -i %s -o %s' % \
@@ -92,16 +92,19 @@ def do_one_test(args, t_name, t_exec):
     ret = do_exec(cmd, None)
     if ret != 0:
         logging.error('failed to generate races')
-        return False
+        if not args.keepgoing: return False
 
     logging.info('  testing the races')
+    exitiffail = '--exit-on-failed-replay'
+    if(args.keepgoing):
+        exitiffail = ''
     cmd = e_racepro + \
-        ' %s test-races -i %s -o %s %s --exit-on-failed-replay' % \
-        (opts1, path + '.log', path, opts2)
+        ' %s test-races -i %s -o %s %s %s' % \
+        (opts1, path + '.log', path, opts2, exitiffail)
     ret = do_exec(cmd, None)
     if ret != 0:
         logging.error('failed to test the races %d' % ret)
-        return False
+        if not args.keepgoing: return False
 
     return True
 
@@ -124,6 +127,9 @@ parser.add_argument('-l', '--log-level', dest='logmask', default=None,
                     help='Log mask argument, see arguments.')
 parser.add_argument('-f', '--log-flags', dest='logflags', default=None,
                     help='Log mask argument, see record(1) arguments.')
+parser.add_argument('-k', '--keep-going', dest='keepgoing', 
+                    action='store_true', default=False, 
+                    help='Keep going with other logs on divergence of one log')
 parser.add_argument('tests', metavar='TEST', nargs='*')
 
 args = parser.parse_args()

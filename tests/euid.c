@@ -32,4 +32,5 @@ main()
         }
         pthread_join(t1, NULL);
         pthread_join(t2, NULL);
+        printf("t0: euid=%d\n", geteuid());
 }

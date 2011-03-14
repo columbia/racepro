@@ -5,7 +5,7 @@ read_write_write read_write_write
 bashsimple.sh   bashsimple.sh
 no_race         no_race
 unlink_stat     unlink_stat
-#euid           euid
-#no_race_pipe   no_race_pipe
-#bashrace	bashrace.sh
-#ps_grep        ps_grep.sh
+euid           euid
+no_race_pipe   no_race_pipe
+bashrace	bashrace.sh
+ps_grep        ps_grep.sh

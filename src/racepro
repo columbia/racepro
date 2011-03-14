@@ -412,7 +412,7 @@ def show_races(args):
     session = load_session(args.logfile)
 
     graph = session.make_graph(full=True,
-                               resources=True,
+                               resources=False,
                                dependency=args.depend)
     logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
 
@@ -472,7 +472,10 @@ def show_races(args):
     # generate a (bookmarks, injects, cutoff) tuple. Finally, use
     # those to write out a modified log.
 
-    exit_races = session.races_exitwait(vclocks)
+    if(args.no_exit_races):
+        exit_races = list()
+    else:
+        exit_races = session.races_exitwait(vclocks)
 
     print('-' * 75)
     print('EXIT-WAIT RACES')
@@ -622,6 +625,9 @@ parser_show_profile.set_defaults(func=show_profile)
 parser_show_races = subparsers.add_parser(
     'show-races', parents=[parser_io, parser_races])
 parser_show_races.set_defaults(func=show_races)
+parser_show_races.add_argument('--no-exit-races', dest='no_exit_races',
+                               action='store_true', default=False,
+                               help='Do not detect exit-exit-wait race')
 
 parser_test_races = subparsers.add_parser(
     'test-races', parents=[parser_io, parser_races])
