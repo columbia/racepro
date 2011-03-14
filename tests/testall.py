@@ -7,9 +7,11 @@ import logging
 import argparse
 import subprocess
 import pdb
+__dummy = open('/dev/null', 'r')
 
 def do_exec(cmd, redirect):
     return subprocess.call(cmd.split(),
+                           stdin=__dummy,
                            stdout=redirect,
                            stderr=subprocess.STDOUT)
 
@@ -130,6 +132,9 @@ parser.add_argument('-f', '--log-flags', dest='logflags', default=None,
 parser.add_argument('-k', '--keep-going', dest='keepgoing', 
                     action='store_true', default=False, 
                     help='Keep going with other logs on divergence of one log')
+parser.add_argument('--exec-shell', dest='exec_shell',
+                    default=False, action='store_true',
+                    help='Execute TEST like shell script (suffix .sh)')
 parser.add_argument('tests', metavar='TEST', nargs='*')
 
 args = parser.parse_args()
@@ -145,6 +150,12 @@ with open('tests.list', 'r') as file:
     all_tests_d = dict(all_tests_l)
 
 req_tests = args.tests if args.tests else [n for n ,t in all_tests_l]
+
+if args.exec_shell:
+    for t in req_tests:
+        if t not in all_tests_d:
+            all_tests_l.append([t, t + '.sh'])
+            all_tests_d[t] = t + '.sh'
 
 for t in req_tests:
     print('TEST: %s' % t)
