@@ -27,12 +27,13 @@ class ProcessEvent:
 class Process:
     """Describe execution log of a single process.
     @pid: pid of the process
+    @ppid: pid of the parent
     @name: name of the program
     @events: (ordered) list of events performed by this process
     @sysind: track current (last) syscall event (temporary)
     @regind: track current (last) regs events (temporary)
     """
-    __slots__ = ('pid', 'name', 'events', 'syscnt', 'sysind', 'regind')
+    __slots__ = ('pid', 'ppid', 'name', 'events', 'syscnt', 'sysind', 'regind')
 
     def next_syscall(self, index):
         """Find the next syscall in a process events log"""
@@ -44,6 +45,7 @@ class Process:
 
     def __init__(self, pid):
         self.pid = pid
+        self.ppid = None
         self.name = None
         self.events = list()
         self.syscnt = 0
@@ -129,6 +131,7 @@ class Session:
     @resource_map: map a unique identifier to the coresponding Resource
     @resource_list: list of all Resource instances
     @events: list of all events (pointers to Process/Resources)
+    @clone_e: list of all clone() events
     @wait_e: list of all wait() events
     @exit_e: list of all exit() events
     @pipe_e: all pipe/socket read/write events (keyed by pipe/socket)
@@ -250,6 +253,7 @@ class Session:
         # - wait/exit
         # - pipe/socket read/write
         # TODO: also add kill/signal
+        self.clone_e = list()
         self.wait_e = list()
         self.exit_e = list()
         self.pipe_e = dict()
@@ -294,6 +298,8 @@ class Session:
                     self.exit_e.append(ind)
                 elif event.nr in unistd.Syscalls.SYS_wait:
                     self.wait_e.append(ind)
+                elif event.nr in unistd.Syscalls.SYS_fork:
+                    self.clone_e.append(ind)
 
             elif isinstance(event, scribe.EventSyscallEnd):
                 proc.regind = -1
@@ -317,6 +323,12 @@ class Session:
 
             if isinstance(event, scribe.EventQueueEof):
                 proc = None
+
+        # find the ppid of each process
+        for ind in self.clone_e:
+            event = self.events[ind].event
+            if event.ret > 0:
+                self.process_map[event.ret].ppid = self.events[ind].proc.pid
 
         # sort events per resource
         for resource in self.resource_list:
@@ -780,6 +792,9 @@ class Session:
                 ri += 1
 
     def parent_pid(self, index):
+        return self.events[index].proc.ppid
+
+    def reaper_pid(self, index):
         for e, i in self.get_syscall_events(index):
             if isinstance(e, scribe.EventResourceLockExtra):
                 if e.resource_type & 0x7f == scribe.SCRIBE_RES_TYPE_PPID:
@@ -1172,7 +1187,7 @@ class Session:
         exit_events = dict([ (k, list()) for k in self.process_map ])
         exit_to_wait = dict()
 
-        # create mapping:  pid --> parent
+        # create mapping:  pid --> reaper
         for i in self.wait_e:
             s_ev = self.events[i]
             proc, event = s_ev.proc, s_ev.event
@@ -1180,16 +1195,16 @@ class Session:
             if event.ret > 0:
                 exit_to_wait[event.ret] = (proc, s_ev.pindex)
 
-        # collect exit calls per parent
+        # collect exit calls per reaper
         for i in self.exit_e:
             s_ev = self.events[i]
             proc = s_ev.proc
             try:
-                parent, z = exit_to_wait[proc.pid]
+                reaper, z = exit_to_wait[proc.pid]
             except:
                 pass
             else:
-                exit_events[parent.pid].append((proc, s_ev.pindex))
+                exit_events[reaper.pid].append((proc, s_ev.pindex))
 
         def vclock_cmp(exit_e1, exit_e2):
             p1, i1 = exit_e1
