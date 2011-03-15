@@ -7,6 +7,7 @@ def _sudo(cmd, no_fail=True):
     ret = subprocess.call(['sudo'] + cmd)
     if ret and no_fail:
         raise RuntimeError('%s failed with %d' % (' '.join(cmd), ret))
+    return ret
 
 class Isolate:
     def execute(self, command, chroot=True):
