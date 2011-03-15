@@ -13,7 +13,7 @@ class Isolate:
     def execute(self, command, chroot=True):
         assert(self.mounted)
         if not chroot:
-            ret = _sudo(command.split(), no_fail = True)
+            ret = _sudo(command.split(), no_fail = False)
         else:
             ret = _sudo(['chroot', self.mount, '/bin/sh', '-c',
                          'cd %s; exec %s' % (os.getcwd(), ' '.join(command))],
