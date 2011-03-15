@@ -3,21 +3,39 @@ import sys
 import tempfile
 import subprocess
 
-def _sudo(cmd, no_fail=True):
-    ret = subprocess.call(['sudo'] + cmd)
-    if ret and no_fail:
+def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
+    if notty:
+        p1 = subprocess.Popen(cmd, stdin=stdin, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT)
+        p2 = subprocess.Popen(['/bin/cat'], stdin=p1.stdout, stdout=stdout,
+                              stderr=subprocess.STDOUT)
+        p1.stdout.close()
+    else:
+        p1 = subprocess.Popen(cmd, stdin=stdin, stdout=stdout, stderr=stderr)
+    return p1.wait()
+
+def _sudo(cmd, stdin=None, stdout=None, stderr=None, notty=False, nofail=True):
+    ret = _popen(['sudo'] + cmd, notty=notty,
+                 stdin=stdin, stdout=stdout, stderr=stderr)
+    if ret and nofail:
         raise RuntimeError('%s failed with %d' % (' '.join(cmd), ret))
     return ret
 
 class Isolate:
-    def execute(self, command, chroot=True):
+    def execute(self, command,
+                stdin=None, stdout=None, stderr=None,
+                chroot=True, notty=False):
         assert(self.mounted)
+
         if not chroot:
-            ret = _sudo(command.split(), no_fail = False)
+            ret = _sudo(command.split(),
+                        stdin = stdin, stdout = stdout, stderr = stderr,
+                        notty = notty, nofail = False)
         else:
             ret = _sudo(['chroot', self.mount, '/bin/sh', '-c',
                          'cd %s; exec %s' % (os.getcwd(), ' '.join(command))],
-                         no_fail = False)
+                        stdin = stdin, stdout = stdout, stderr = stderr,
+                        notty = notty, nofail = False)
         return ret
 
     def bind(self, dir):
@@ -52,7 +70,7 @@ class Isolate:
         for dir in self._binded_dirs:
             _sudo('sudo umount -l'.split() + [self.mount + dir])
 
-        _sudo('fusermount -u'.split() + [self.mount])
+        _sudo('fusermount -z -u'.split() + [self.mount])
 
         for dir in self._rmdirs:
             _sudo(['rm', '-rf', dir])
