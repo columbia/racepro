@@ -2,7 +2,6 @@
 
 import sys
 import isolate
-import subprocess
 
 if len(sys.argv) < 2:
     print('Usage: ioslate CMD [ARGS...]')
