@@ -12,7 +12,7 @@ import isolate
 
 _dummy = open('/dev/null', 'r')
 
-def do_exec(cmd, redirect):
+def do_exec(cmd, redirect=None):
     p1 = subprocess.Popen(cmd.split(),
                           stdin=_dummy,
                           stdout=subprocess.PIPE,
@@ -25,7 +25,10 @@ def do_exec(cmd, redirect):
     return p1.wait()
 
 def _do_record(args):
-    with isolate.open(args.root, args.mount, args.scratch) as isolated:
+    with isolate.open(root=args.root,
+                      mount=args.mount,
+                      scratch=args.scratch,
+                      persist=args.outdir) as isolated:
         if 'pre' in args and args.pre:
             logging.info('    clean-up before recording...')
             cmd = args.pre
@@ -54,7 +57,10 @@ def _do_record(args):
         return True
 
 def _do_replay(args):
-    with isolate.open(args.root, args.mount, args.scratch) as isolated:
+    with isolate.open(root=args.root,
+                      mount=args.mount,
+                      scratch=args.scratch,
+                      persist=args.outdir) as isolated:
         if 'pre' in args and args.pre:
             logging.info('    clean-up before replaying...')
             cmd = args.pre + ' %s' % (args.path + '.log')
@@ -85,14 +91,18 @@ def _do_replay(args):
 def _do_findraces(args, opts):
     cmd = args.racepro + '%s show-races -i %s -o %s' % \
         (opts, args.path + '.log', args.path)
-    ret = do_exec(cmd, None)
+    print('find_trace: cmd %s' % cmd)
+    ret = do_exec(cmd)
     if ret != 0:
         logging.error('failed to generate races')
         return False
     return True
 
 def _do_testraces(args, opts1, opts2):
-    with isolate.open(args.root, args.mount, args.scratch) as isolated:
+    with isolate.open(root=args.root,
+                      mount=args.mount,
+                      scratch=args.scratch,
+                      persist=args.outdir) as isolated:
         exitiffail = '' if args.keepgoing else '--exit-on-failed-replay'
         cmd = args.racepro + \
             ' %s test-races -i %s -o %s %s %s' % \
@@ -107,24 +117,27 @@ def _do_testraces(args, opts1, opts2):
         return True
 
 def do_one_test(args, t_name, t_exec):
+    if args.mount and not os.access(args.mount, os.R_OK | os.X_OK):
+        os.mkdir(args.mount)
+
+    if args.scratch and os.access(args.scratch, os.F_OK):
+        ret = do_exec('sudo rm -rf %s' % args.scratch)
+        os.mkdir(args.scratch)
+
     if not args.logmask and not args.logflags:
         args.logflags = 'sScrdgp'
-
-    args.root = '/'
-    args.scratch = 'scratch'
-    args.mount = 'mnt'
 
     args.record = 'sudo record'
     if args.logmask: args.record += ' -l %s' % args.logmask
     if args.logflags: args.record += ' -f %s' % args.logflags
-    if args.chroot: args.record += ' -r %s' % args.chroot
+    if args.root: args.record += ' -r %s' % args.root
     if args.initproc in args: args.record += ' -i'
 
     args.replay = 'sudo replay -l 15'
-    if args.chroot in args: args.replay += ' -r %s' % args.chroot
+    if args.root in args: args.replay += ' -r %s' % args.root
     if args.initproc in args: args.replay += ' -i'
 
-    args.racepro = '../src/racepro'
+    args.racepro = 'racepro'
 
     logging.info('Processing test: %s' % (t_name))
 
@@ -156,8 +169,8 @@ def do_one_test(args, t_name, t_exec):
 
     logging.info('  output in directory %s' % (pdir))
     if os.access(pdir, os.R_OK):
-        shutil.rmtree(pdir)
-    os.mkdir(pdir)
+        do_exec('sudo rm -rf %s' % pdir)
+    do_exec('sudo mkdir -p %s' % pdir)
 
     if args.quiet:
         args.redirect = open(path + '.out', 'w')
@@ -184,7 +197,18 @@ def do_one_test(args, t_name, t_exec):
 
     return True
 
+def uninitialized(args):
+    if 'initproc' not in args: args.initproc = False
+    if 'path' not in args: args.path = None
+    if 'root' not in args: args.root = None
+    if 'mount' not in args: args.mount = None
+    if 'scratch' not in args: args.scratch = None
+    if 'outdir' not in args: args.outdir = None
+    if 'redirect' not in args: args.redirect = None
+    if 'save' not in args: args.save = None
+
 def do_all_tests(args, tests):
+    uninitialized(args)
     for t, n in tests:
         print('=== TEST: %s' % t)
         if not do_one_test(args, t, n):
