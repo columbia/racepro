@@ -1,0 +1,14 @@
+#!/usr/bin/python
+
+import sys
+import isolate
+import subprocess
+
+if len(sys.argv) < 2:
+    print('Usage: ioslate CMD [ARGS...]')
+    exit(1)
+
+with isolate.open() as isolated:
+    isolated.execute(sys.argv[1:])
+
+    
