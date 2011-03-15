@@ -10,6 +10,7 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
         p2 = subprocess.Popen(['/bin/cat'], stdin=p1.stdout, stdout=stdout,
                               stderr=subprocess.STDOUT)
         p1.stdout.close()
+        p2.wait()
     else:
         p1 = subprocess.Popen(cmd, stdin=stdin, stdout=stdout, stderr=stderr)
     return p1.wait()
@@ -46,6 +47,8 @@ class Isolate:
     def open(self):
         assert(not self.mounted)
 
+        if not self.root:
+            self.root = '/'
         if not self.scratch:
             self.scratch = tempfile.mkdtemp(prefix='isolate-temp-')
             self._rmdirs.append(self.scratch)
@@ -53,9 +56,12 @@ class Isolate:
             self.mount = tempfile.mkdtemp(prefix='isolate-temp-')
             self._rmdirs.append(self.mount)
 
+        mount_dirs = '%s=rw:%s=ro' % \
+            (os.path.abspath(self.scratch), os.path.abspath(self.root))
+        mount_point = os.path.abspath(self.mount)
+
         _sudo(['unionfs-fuse', '-o', 'cow,allow_other,use_ino,suid,' + \
-                                     'dev,nonempty,max_files=32768',
-               '%s=rw:%s=ro' % (self.scratch, self.root), self.mount])
+                   'dev,nonempty,max_files=32768', mount_dirs, mount_point])
 
         self.bind('/proc')
         self.bind('/dev')
