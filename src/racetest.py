@@ -140,11 +140,11 @@ def do_one_test(args, t_name, t_exec):
         args.test = '%s.test' % t_name
     if 'pre' not in args:
         args.pre = '%s.pre' % t_name
-    if not os.access(args.pre, os.R_OK | os.X_OK):
+    if args.pre and not os.access(args.pre, os.R_OK | os.X_OK):
         args.pre = None
     if 'post' not in args:
         args.post = '%s.post' % t_name
-    if not os.access(args.post, os.R_OK | os.X_OK):
+    if args.post and not os.access(args.post, os.R_OK | os.X_OK):
         args.post = None
 
     opts1 = ''
