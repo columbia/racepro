@@ -3,19 +3,21 @@ import sys
 import tempfile
 import subprocess
 
-def _sudo(cmd):
+def _sudo(cmd, no_fail=True):
     ret = subprocess.call(['sudo'] + cmd)
-    if ret:
+    if ret and no_fail:
         raise RuntimeError('%s failed with %d' % (' '.join(cmd), ret))
 
 class Isolate:
     def execute(self, command, chroot=True):
         assert(self.mounted)
         if not chroot:
-            _sudo(command.split())
+            ret = _sudo(command.split(), no_fail = True)
         else:
-            _sudo(['chroot', self.mount, '/bin/sh', '-c',
-                   'cd %s; exec %s' % (os.getcwd(), ' '.join(command))])
+            ret = _sudo(['chroot', self.mount, '/bin/sh', '-c',
+                         'cd %s; exec %s' % (os.getcwd(), ' '.join(command))],
+                         no_fail = False)
+        return ret
 
     def bind(self, dir):
         assert(dir[0] == '/')
@@ -35,6 +37,7 @@ class Isolate:
         _sudo(['unionfs-fuse', '-o', 'cow,allow_other,use_ino,suid,' + \
                                      'dev,nonempty,max_files=32768',
                '%s=rw:%s=ro' % (self.scratch, self.root), self.mount])
+
         self.bind('/proc')
         self.bind('/dev')
         if self.persist:
