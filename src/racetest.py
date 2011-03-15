@@ -8,7 +8,7 @@ import argparse
 import subprocess
 import pdb
 
-import isolate
+import execute
 
 _dummy = open('/dev/null', 'r')
 
@@ -24,97 +24,86 @@ def do_exec(cmd, redirect=None):
     p1.stdout.close()
     return p1.wait()
 
-def _do_record(args):
-    with isolate.open(root=args.root,
-                      mount=args.mount,
-                      scratch=args.scratch,
-                      persist=args.outdir) as isolated:
+def _record(args):
+    with execute.open(root=args.root, jailed=args.jailed,
+                      chroot=args.chroot, mount=args.mount,
+                      scratch=args.scratch, persist=args.outdir) as exe:
         if 'pre' in args and args.pre:
             logging.info('    clean-up before recording...')
-            cmd = args.pre
-            isolated.execute(cmd.split(),
-                            stdin=_dummy,
-                            stdout=args.redirect,
-                            notty=True)
+            cmd = args.pre if os.path.isabs(args.pre) else './' + args.pre
+            ret = exe.execute(cmd.split(), notty=True,
+                              stdin=_dummy, stdout=args.redirect,)
 
         logging.info('    recording ...')
-        cmd = args.record + ' -o %s ./%s' % (args.path + '.log', args.run)
-        ret = isolated.execute(cmd.split(),
-                              stdin=_dummy,
-                              stdout=args.redirect,
-                              notty=True)
+        cmd = args.run if os.path.isabs(args.run) else './' + args.run
+        cmd = args.record + ' -o %s %s' % (args.path + '.log', cmd)
+        ret = exe.execute(cmd.split(), notty=True,
+                          stdin=_dummy, stdout=args.redirect)
 
         if 'post' in args and args.post:
             logging.info('    clean-up after recording...')
-            cmd = args.post
-            ret = isolate.execute(cmd.split(),
-                                  stdin=_dummy,
-                                  stdout=args.redirect,
-                                  notty=True)
+            cmd = args.post if os.path.isabs(args.post) else './' + args.post
+            ret = exe.execute(cmd.split(), notty=True,
+                              stdin=_dummy, stdout=args.redirect)
+
         if ret != 0:
             logging.error('failed 1st recording')
             return False
+
         return True
 
-def _do_replay(args):
-    with isolate.open(root=args.root,
-                      mount=args.mount,
-                      scratch=args.scratch,
-                      persist=args.outdir) as isolated:
+def _replay(args):
+    with execute.open(root=args.root, jailed=args.jailed,
+                      chroot=args.chroot, mount=args.mount,
+                      scratch=args.scratch, persist=args.outdir) as exe:
         if 'pre' in args and args.pre:
             logging.info('    clean-up before replaying...')
-            cmd = args.pre + ' %s' % (args.path + '.log')
-            ret = isolated.execute(cmd.split(),
-                                  stdin=_dummy,
-                                  stdout=args.redirect,
-                                  notty=True)
+            cmd = args.pre if os.path.isabs(args.pre) else './' + args.pre
+            ret = exe.execute(cmd.split(), notty=True,
+                              stdin=_dummy, stdout=args.redirect)
 
         logging.info('    replaying ...')
         cmd = args.replay + ' %s' % (args.path + '.log')
-        ret = isolated.execute(cmd.split(),
-                              stdin=_dummy,
-                              stdout=args.redirect,
-                              notty=True)
+        ret = exe.execute(cmd.split(), notty=True,
+                          stdin=_dummy, stdout=args.redirect)
 
         if 'post' in args and args.post:
             logging.info('    clean-up after replaying...')
-            cmd = args.post + ' %s' % (args.path + '.log')
-            ret = isolated.execute(cmd.split(),
-                                  stdin=_dummy,
-                                  stdout=args.redirect,
-                                  notty=True)
-        if ret != 0:
-            logging.error('failed original replay')
-            return False
+            cmd = args.post if os.path.isabs(args.post) else './' + args.post
+            ret = exe.execute(cmd.split(), notty=True,
+                              stdin=_dummy, stdout=args.redirect)
+
+            if ret != 0:
+                logging.error('failed original replay')
+                return False
+
         return True
 
-def _do_findraces(args, opts):
+def _findraces(args, opts):
     cmd = args.racepro + '%s show-races -i %s -o %s' % \
         (opts, args.path + '.log', args.path)
-    print('find_trace: cmd %s' % cmd)
-    ret = do_exec(cmd)
+    print('findrace: %s' % cmd)
+    ret = do_exec('sudo ' + cmd)
     if ret != 0:
         logging.error('failed to generate races')
         return False
     return True
 
-def _do_testraces(args, opts1, opts2):
-    with isolate.open(root=args.root,
-                      mount=args.mount,
-                      scratch=args.scratch,
-                      persist=args.outdir) as isolated:
+def _testraces(args, opts1, opts2):
+    with execute.open(root=args.root, jailed=args.jailed,
+                      chroot=args.chroot, mount=args.mount,
+                      scratch=args.scratch, persist=args.outdir) as exe:
         exitiffail = '' if args.keepgoing else '--exit-on-failed-replay'
-        cmd = args.racepro + \
-            ' %s test-races -i %s -o %s %s %s' % \
+        cmd = args.racepro + ' %s test-races -i %s -o %s %s %s' % \
             (opts1, args.path + '.log', args.path, opts2, exitiffail)
-        ret = isolated.execute(cmd.split(),
-                              stdin=_dummy,
-                              stdout=args.redirect,
-                              notty=True)
-        if ret != 0:
-            logging.error('failed to test the races (exit %d)' % ret)
-            return False
-        return True
+
+        ret = exe.execute(cmd.split(), notty=True,
+                           stdin=_dummy, stdout=args.redirect)
+    if ret != 0:
+        logging.error('failed to test the races (exit %d)' % ret)
+        return False
+
+    return True
 
 def do_one_test(args, t_name, t_exec):
     if args.mount and not os.access(args.mount, os.R_OK | os.X_OK):
@@ -127,13 +116,13 @@ def do_one_test(args, t_name, t_exec):
     if not args.logmask and not args.logflags:
         args.logflags = 'sScrdgp'
 
-    args.record = 'sudo record'
+    args.record = 'record'
     if args.logmask: args.record += ' -l %s' % args.logmask
     if args.logflags: args.record += ' -f %s' % args.logflags
     if args.root: args.record += ' -r %s' % args.root
     if args.initproc in args: args.record += ' -i'
 
-    args.replay = 'sudo replay -l 15'
+    args.replay = 'replay -l 15'
     if args.root in args: args.replay += ' -r %s' % args.root
     if args.initproc in args: args.replay += ' -i'
 
@@ -178,31 +167,33 @@ def do_one_test(args, t_name, t_exec):
         args.redirect = None
 
     logging.info('  recording original exceution (twice)')
-    if not _do_record(args):
+    if not _record(args):
         return True if args.keepgoing else False
-    if not _do_record(args):
+    if not _record(args):
         return True if args.keepgoing else False
 
     logging.info('  replaying original execution')
-    if not _do_replay(args):
+    if not _replay(args):
         return True if args.keepgoing else False
 
     logging.info('  generating the races')
-    if not _do_findraces(args, opts1):
+    if not _findraces(args, opts1):
         return True if args.keepgoing else False
 
     logging.info('  testing the races')
-    if not _do_testraces(args, opts1, opts2):
+    if not _testraces(args, opts1, opts2):
         return True if args.keepgoing else False
 
     return True
 
 def uninitialized(args):
+    if 'jail' not in args: args.jail = False
     if 'initproc' not in args: args.initproc = False
     if 'path' not in args: args.path = None
     if 'root' not in args: args.root = None
     if 'mount' not in args: args.mount = None
     if 'scratch' not in args: args.scratch = None
+    if 'chroot' not in args: args.chroot = None
     if 'outdir' not in args: args.outdir = None
     if 'redirect' not in args: args.redirect = None
     if 'save' not in args: args.save = None

@@ -16,11 +16,14 @@ parser.add_argument('-v', '--verbose', dest='verbose',
                     help='Increase vebosity level')
 parser.add_argument('-a', '--all', dest='all',
                     action='store_true', default=True)
-parser.add_argument('-o', '--outdir', dest='outdir', default='/tmp',
+parser.add_argument('-o', '--outdir', dest='outdir', default=None,
                     help='Location where to store the testingd')
 parser.add_argument('-q', '--quiet', dest='quiet',
                     action='store_true', default=False,
                     help='If set, redirect stdout/err to a file')
+parser.add_argument('-j', '--jailed', dest='jailed',
+                    action='store_true', default=False,
+                    help='Run the test in a jailed environment')
 parser.add_argument('-l', '--log-level', dest='logmask', default=None,
                     help='Log mask argument, see arguments.')
 parser.add_argument('-f', '--log-flags', dest='logflags', default=None,
@@ -52,6 +55,9 @@ if args.program:
         if t not in all_tests_d:
             all_tests_l.append([t, t])
             all_tests_d[t] = t
+
+if not args.outdir:
+    args.outdir = '/persist'
 
 tests = [ (t, all_tests_d[t]) for t in req_tests ]
 racetest.do_all_tests(args, tests)

@@ -22,7 +22,7 @@ def load_session(logfile):
     try:
         f = open(logfile, 'r')
     except:
-        print('Cannot open log file')
+        print('Cannot open log file %s' % logfile)
         exit(1)
 
     m = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
@@ -40,7 +40,7 @@ def save_session(logfile, events):
     try:
         f = open(logfile, 'w')
     except:
-        print('Cannot open log file')
+        print('Cannot open log file %s' % logfile)
         exit(1)
 
     for e in events:
@@ -48,8 +48,10 @@ def save_session(logfile, events):
 
     f.close()
 
-def do_exec(cmd):
-    return subprocess.call(cmd.split())
+def _sudo(cmd):
+    cmd = cmd.split() if os.geteuid() == 0 else ['sudo'] + cmd.split()
+    print('racepro sudo: %s' % cmd)
+    return subprocess.call(cmd)
 
 ##############################################################################
 
@@ -515,7 +517,7 @@ def show_races(args):
 ##############################################################################
 
 def test_races(args):
-    cmd_replay = 'sudo replay -l 5 -c %d' % int(args.timeout)
+    cmd_replay = 'replay -l 5 -c %d' % int(args.timeout)
     cmd_suffix = ' > /dev/null 2>&1' if args.silent else ''
 
     if args.detect:
@@ -533,12 +535,12 @@ def test_races(args):
             break
 
         if args.script_pre:
-            r = do_exec('sudo ' + args.script_pre + cmd_suffix)
+            r = _sudo(args.script_pre + cmd_suffix)
             if r > 0:
                 print('RACE %d: bad exit code %d from pre-script' % (n, r))
                 continue
 
-        r = do_exec('%s %s %s' % (cmd_replay, logfile, cmd_suffix))
+        r = _sudo('%s %s %s' % (cmd_replay, logfile, cmd_suffix))
         if r == 35:
             print('REPLAY %2d: deadlock (exit %d)' % (n, r))
         if r > 0:
@@ -549,7 +551,7 @@ def test_races(args):
             print('REPLAY %2d: completed' % n)
 
         if r == 0 and args.script_test:
-            r = do_exec('sudo ' + args.script_test + cmd_suffix)
+            r = _sudo(args.script_test + cmd_suffix)
             if r == 2:
                 print('    BUG PRODUCED')
             elif r > 0:
@@ -560,7 +562,7 @@ def test_races(args):
             print('    BUG only replayed')
 
         if args.script_post:
-            r = do_exec('sudo ' + args.script_post + cmd_suffix)
+            r = _sudo(args.script_post + cmd_suffix)
             if r > 0:
                 print('RACE %d: nad exit code %d from post-script' % (n, r))
 

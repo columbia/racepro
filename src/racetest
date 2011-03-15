@@ -102,16 +102,9 @@ args.root = '/'
 args.scratch = 'scratch'
 args.mount = 'mnt'
 
+args.jailed = True
+
 if not args.outdir:
     args.outdir = '/persist'
-
-if args.run and args.run[0] != '/':
-    args.run = './' + args.run
-if args.pre and args.pre[0] != '/':
-    args.pre = './' + args.pre
-if args.post and args.post[0] != '/':
-    args.post = './' + args.post
-if args.test and args.test[0] != '/':
-    args.test = './' + args.test
 
 racetest.do_all_tests(args, tests)
