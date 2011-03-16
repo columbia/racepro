@@ -27,6 +27,9 @@ parser.add_argument('-r', '--root', dest='chroot',
 parser.add_argument('-i', '--initproc', dest='initproc',
                     action='store_true', default=False,
                     help='Record/replay using a designated init-process')
+parser.add_argument('-t', '--timeout', dest='timeout',
+                    metavar='SECONDS', default=1,
+                    help='Timeout for deadlock detection')
 parser.add_argument('-c', '--conf', dest='config',
                     default=None, metavar='CONF',
                     help='Use a racepro config file')
