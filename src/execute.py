@@ -15,30 +15,34 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
         p1 = subprocess.Popen(cmd, stdin=stdin, stdout=stdout, stderr=stderr)
     return p1
 
-def _sudo(cmd, **kwargs):
+def _sudo_raw(cmd, **kwargs):
     if os.geteuid() != 0:
         cmd = ['sudo'] + cmd
         p = _popen(cmd, **kwargs)
     return p
 
+def _sudo(cmd, **kwargs):
+    if os.geteuid() != 0:
+        cmd = ['sudo'] + cmd
+        p = _popen(cmd, **kwargs)
+    return p.wait()
+
 #############################################################################
 
 class Execute:
-    def execute(self, cmd, chroot=False, **kwargs):
+    def execute(self, cmd, chroot=True, **kwargs):
         if chroot:
             assert self.chroot
             cmd = ['chroot', self.chroot, '/bin/sh', '-c',
                    'cd %s; exec %s' % (os.getcwd(), ' '.join(cmd))]
-        p = _sudo(cmd, **kwargs)
-        return p.wait()
+        return _sudo(cmd, **kwargs)
 
-    def execute_raw(self, cmd, chroot=False, **kwargs):
+    def execute_raw(self, cmd, chroot=True, **kwargs):
         if chroot:
             assert self.chroot
             cmd = ['chroot', self.chroot, '/bin/sh', '-c',
                    'cd %s; exec %s' % (os.getcwd(), ' '.join(cmd))]
-        p = _sudo(cmd, **kwargs)
-        return p
+        return _sudo_raw(cmd, **kwargs)
 
     def __exit__(self, type, value, tb):
         pass
@@ -85,6 +89,9 @@ class ExecuteJail(Execute):
             self.chroot = tempfile.mkdtemp(prefix='isolate-temp-')
             os.chmod(self.chroot, 0777)
             self._rmdirs.append(self.chroot)
+
+        # mark our scratch area as jailed ..
+        _sudo(['touch', os.path.join(self.scratch, '.JAILED')])
 
         mount_dirs = '%s=rw:%s=ro' % \
             (os.path.abspath(self.scratch), os.path.abspath(self.root))
@@ -136,5 +143,5 @@ def open(jailed=False, **kwargs):
     if not jailed:
         return Execute(kwargs['chroot'])
     else:
-        return ExecuteJail(**kwargs)
+        return ExecuteJail(kwargs['chroot'],**kwargs)
 
