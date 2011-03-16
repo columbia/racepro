@@ -20,7 +20,7 @@ parser.add_argument('-q', '--quiet', dest='quiet',
                     help='If set, redirect stdout/err to a file')
 parser.add_argument('-j', '--jailed', dest='jailed',
                     action='store_true', default=False,
-                    help='If set, redirect stdout/err to a file')
+                    help='If set, run in jailed envrionment')
 parser.add_argument('-k', '--keep-going', dest='keepgoing', 
                     action='store_true', default=False, 
                     help='Keep going with other logs on divergence of one log')
@@ -79,14 +79,18 @@ if args.config:
 
             print('k=%s v=%s' % (k,v))
 
-            if k == 'newpid': args.initproc = True
-            elif k == 'mount': args.mount = v
+            if k == 'jailed': args.initproc = True
+            elif k == 'initproc': args.initproc = True
+            elif k == 'root': args.root = v
             elif k == 'scratch': args.scratch = v
-            elif k == 'script-run': args.run = v
-            elif k == 'script-pre': args.pre = v
-            elif k == 'script-post': args.post = v
-            elif k == 'script-test': args.test = v
-            elif k == 'save': args.save = True if v == 'True' else False
+            elif k == 'chroot': args.chroot = v
+            elif k == 'outdir': args.outdir = v
+            elif k == 'redirect': args.redirect = True
+            elif k == 'timeout': args.timeout = v
+            elif k == 'script-run': args._run = v
+            elif k == 'script-pre': args._pre = v
+            elif k == 'script-post': args._post = v
+            elif k == 'script-test': args._test = v
             else:
                 print('Unknown key in racepro.conf: %s' % k)
                 exit(1)
