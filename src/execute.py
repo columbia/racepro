@@ -18,7 +18,6 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
 def _sudo(cmd, stdin=None, stdout=None, stderr=None, notty=False, nofail=True):
     if os.geteuid() != 0:
         cmd = ['sudo'] + cmd
-    print('execute: %s' % cmd)
     ret = _popen(cmd, notty=notty, stdin=stdin, stdout=stdout, stderr=stderr)
     if ret and nofail:
         raise RuntimeError('%s failed with %d' % (' '.join(cmd), ret))
