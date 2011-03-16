@@ -8,6 +8,8 @@ import argparse
 import subprocess
 import pdb
 
+from itertools import *
+
 import execute
 
 _dummy = open('/dev/null', 'r')
@@ -29,7 +31,9 @@ def _sudo(cmd, redirect=None):
         cmd = 'sudo ' + cmd
     return _exec(cmd, redirect)
 
-def _record(args):
+def _record(args, logfile=None, opts=''):
+    if not logfile:
+        logfile = args.path + '.log'
     with execute.open(root=args.root, jailed=args.jailed,
                       chroot=args.chroot, scratch=args.scratch,
                       persist=args.pdir) as exe:
@@ -41,7 +45,7 @@ def _record(args):
 
         logging.info('    recording ...')
         cmd = args.run if os.path.isabs(args.run) else './' + args.run
-        cmd = args.record + ' -o %s %s' % (args.path + '.log', cmd)
+        cmd = args.record + ' -o %s %s %s' % (opts, logfile, cmd)
         ret = exe.execute(cmd.split(), notty=True,
                           stdin=_dummy, stdout=args.redirect)
 
@@ -57,32 +61,92 @@ def _record(args):
 
         return True
 
-def _replay(args):
+def _replay(args, logfile=None, opts=''):
+    if not logfile:
+        logfile = args.path + '.log'
     with execute.open(root=args.root, jailed=args.jailed,
                       chroot=args.chroot, scratch=args.scratch,
                       persist=args.pdir) as exe:
         if 'pre' in args and args.pre:
             logging.info('    clean-up before replaying...')
             cmd = args.pre if os.path.isabs(args.pre) else './' + args.pre
-            ret = exe.execute(cmd.split(), notty=True,
-                              stdin=_dummy, stdout=args.redirect)
+            r = exe.execute(cmd.split(), notty=True,
+                            stdin=_dummy, stdout=args.redirect)
+            if r != 0:
+                logging.error('failed pre-script (exit %d)' % r)
+                return False
 
         logging.info('    replaying ...')
-        cmd = args.replay + ' %s' % (args.path + '.log')
+        cmd = args.replay + ' %s %s' % (opts, logfile)
         ret = exe.execute(cmd.split(), notty=True,
                           stdin=_dummy, stdout=args.redirect)
+        if ret != 0:
+            logging.error('failed original replay (exit %d)' % ret)
 
         if 'post' in args and args.post:
             logging.info('    clean-up after replaying...')
             cmd = args.post if os.path.isabs(args.post) else './' + args.post
-            ret = exe.execute(cmd.split(), notty=True,
-                              stdin=_dummy, stdout=args.redirect)
+            r = exe.execute(cmd.split(), notty=True,
+                            stdin=_dummy, stdout=args.redirect)
+            if r != 0:
+                logging.error('failed post-script (exut %d)' % r)
 
-            if ret != 0:
-                logging.error('failed original replay')
+        return True if ret == 0 else False
+
+def _replay2(args, logfile, verbose, opts=''):
+    if not logfile:
+        logfile = args.path + '.log'
+    with execute.open(root=args.root, jailed=args.jailed,
+                      chroot=args.chroot, scratch=args.scratch,
+                      persist=args.pdir) as exe:
+        if 'pre' in args and args.pre:
+            logging.info('    clean-up before replaying...')
+            cmd = args.pre if os.path.isabs(args.pre) else './' + args.pre
+            r = exe.execute(cmd.split(), notty=True,
+                            stdin=_dummy, stdout=args.redirect)
+            if r > 0:
+                logging.error('failed pre-script (exit %d)' % r)
+                print(verbose + 'bad exit code from pre-script: %d' % r)
                 return False
 
-        return True
+        logging.info('    replaying ...')
+        cmd = args.replay + ' %s %s' % (opts, logfile)
+        ret = exe.execute(cmd.split(), notty=True,
+                          stdin=_dummy, stdout=args.redirect)
+        if ret == 35:
+            print(verbose + 'replay deadlock')
+        elif ret > 0:
+            print(vserbose + 'replay failure (exit %d)' % ret)
+        else:
+            print(verbose + 'replay completed')
+
+        if ret == 0 and args.test:
+            logging.info('    running test script...')
+            cmd = args.test if os.path.isabs(args.test) else './' + args.test
+            r = exe.execute(cmd.split(), notty=True,
+                            stdin=_dummy, stdout=args.redirect)
+            if r == 2:
+                print(verbose + 'BUG REPRODUCED')
+                ret = 0
+            elif r != 0:
+                print(verbose + 'bad exit code from test-script: %d' % r)
+                ret = r
+            else:
+                print(verbose + 'BUG not triggered')
+                ret = 0
+        elif r == 0:
+            print(verbose + 'BUG replayed but not tested')
+
+        if 'post' in args and args.post:
+            logging.info('    clean-up after replaying...')
+            cmd = args.post if os.path.isabs(args.post) else './' + args.post
+            r = exe.execute(cmd.split(), notty=True,
+                            stdin=_dummy, stdout=args.redirect)
+            if r > 0:
+                logging.error('failed post-script (exit %d)' % r)
+                print(verbose + 'bad exit code from post-script: %d' % r)
+
+    return True if ret == 0 else False
 
 def _findraces(args, opts):
     cmd = args.racepro + '%s show-races -i %s -o %s' % \
@@ -93,20 +157,17 @@ def _findraces(args, opts):
         return False
     return True
 
-def _testraces(args, opts1, opts2):
-    with execute.open(root=args.root, jailed=args.jailed,
-                      chroot=args.chroot, scratch=args.scratch,
-                      persist=args.pdir) as exe:
-        exitiffail = '' if args.keepgoing else '--exit-on-failed-replay'
-        cmd = args.racepro + ' %s test-races -i %s -o %s %s %s' % \
-            (opts1, args.path + '.log', args.path, opts2, exitiffail)
+def _testraces(args):
 
-        ret = exe.execute(cmd.split(), notty=True,
-                           stdin=_dummy, stdout=args.redirect)
-    if ret != 0:
-        logging.error('failed to test the races (exit %d)' % ret)
-        return False
-
+    for n in count(1):
+        logfile = '%s.%d.log' % (args.path, n)
+        if not os.access(logfile, os.R_OK):
+            break
+        v = 'RACE %d: ' % n
+        o = '-c %d' % args.timeout
+        ret = _replay2(args, logfile, v, opts=o)
+        if ret != 0 and not args.keepgoing:
+            return False
     return True
 
 def do_one_test(args, t_name, t_exec):
@@ -148,14 +209,9 @@ def do_one_test(args, t_name, t_exec):
     if args.post and not os.access(args.post, os.R_OK | os.X_OK):
         args.post = None
 
-    opts1 = ''
-    if args.debug: opts1 += ' -d'
-    if args.verbose: opts1 += ' -v'
-
-    opts2 = ''
-    if args.pre: opts2 += ' --script-pre=./%s' % args.pre
-    if args.test: opts2 = ' --script-test=./%s' % args.test
-    if args.post: opts2 = ' --script-post=./%s' % args.post
+    opts = ''
+    if args.debug: opts += ' -d'
+    if args.verbose: opts += ' -v'
 
     logging.info('  output in directory %s' % args.pdir)
     if os.access(args.pdir, os.R_OK):
@@ -178,11 +234,11 @@ def do_one_test(args, t_name, t_exec):
         return True if args.keepgoing else False
 
     logging.info('  generating the races')
-    if not _findraces(args, opts1):
+    if not _findraces(args, opts):
         return True if args.keepgoing else False
 
     logging.info('  testing the races')
-    if not _testraces(args, opts1, opts2):
+    if not _testraces(args):
         return True if args.keepgoing else False
 
     return True
@@ -195,7 +251,7 @@ def uninitialized(args):
     if 'chroot' not in args: args.chroot = None
     if 'outdir' not in args: args.outdir = None
     if 'redirect' not in args: args.redirect = None
-    if 'save' not in args: args.save = None
+    if 'timeout' not in args: args.timeout = 1
 
 def do_all_tests(args, tests):
     uninitialized(args)
