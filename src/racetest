@@ -110,10 +110,6 @@ if len(tests) == 0:
         print('No tests specified .. existing')
         exit(1)
 
-args.root = '/'
-args.scratch = 'scratch'
-args.mount = 'mnt'
-
 if not args.outdir:
     args.outdir = '/persist'
 
