@@ -37,21 +37,25 @@ def _record(args, logfile=None, opts=''):
     with execute.open(root=args.root, jailed=args.jailed,
                       chroot=args.chroot, scratch=args.scratch,
                       persist=args.pdir) as exe:
-        if 'pre' in args and args.pre:
+        if args._pre:
             logging.info('    clean-up before recording...')
-            cmd = args.pre if os.path.isabs(args.pre) else './' + args.pre
+            cmd = args._pre \
+                if os.path.isabs(args._pre) \
+                else './' + args._pre
             ret = exe.execute(cmd.split(), notty=True,
                               stdin=_dummy, stdout=args.redirect,)
 
         logging.info('    recording ...')
-        cmd = args.run if os.path.isabs(args.run) else './' + args.run
+        cmd = args._run if os.path.isabs(args._run) else './' + args._run
         cmd = args.record + ' -o %s %s %s' % (opts, logfile, cmd)
         ret = exe.execute(cmd.split(), notty=True,
                           stdin=_dummy, stdout=args.redirect)
 
-        if 'post' in args and args.post:
+        if args._post:
             logging.info('    clean-up after recording...')
-            cmd = args.post if os.path.isabs(args.post) else './' + args.post
+            cmd = args._post \
+                if os.path.isabs(args._post) \
+                else './' + args._post
             ret = exe.execute(cmd.split(), notty=True,
                               stdin=_dummy, stdout=args.redirect)
 
@@ -67,9 +71,11 @@ def _replay(args, logfile=None, opts=''):
     with execute.open(root=args.root, jailed=args.jailed,
                       chroot=args.chroot, scratch=args.scratch,
                       persist=args.pdir) as exe:
-        if 'pre' in args and args.pre:
+        if args._pre:
             logging.info('    clean-up before replaying...')
-            cmd = args.pre if os.path.isabs(args.pre) else './' + args.pre
+            cmd = args._pre \
+                if os.path.isabs(args._pre) \
+                else './' + args._pre
             r = exe.execute(cmd.split(), notty=True,
                             stdin=_dummy, stdout=args.redirect)
             if r != 0:
@@ -83,9 +89,11 @@ def _replay(args, logfile=None, opts=''):
         if ret != 0:
             logging.error('failed original replay (exit %d)' % ret)
 
-        if 'post' in args and args.post:
+        if args._post:
             logging.info('    clean-up after replaying...')
-            cmd = args.post if os.path.isabs(args.post) else './' + args.post
+            cmd = args._post \
+                if os.path.isabs(args._post) \
+                else './' + args._post
             r = exe.execute(cmd.split(), notty=True,
                             stdin=_dummy, stdout=args.redirect)
             if r != 0:
@@ -99,9 +107,11 @@ def _replay2(args, logfile, verbose, opts=''):
     with execute.open(root=args.root, jailed=args.jailed,
                       chroot=args.chroot, scratch=args.scratch,
                       persist=args.pdir) as exe:
-        if 'pre' in args and args.pre:
+        if args._pre:
             logging.info('    clean-up before replaying...')
-            cmd = args.pre if os.path.isabs(args.pre) else './' + args.pre
+            cmd = args._pre \
+                if os.path.isabs(args._pre) \
+                else './' + args._pre
             r = exe.execute(cmd.split(), notty=True,
                             stdin=_dummy, stdout=args.redirect)
             if r > 0:
@@ -120,9 +130,11 @@ def _replay2(args, logfile, verbose, opts=''):
         else:
             print(verbose + 'replay completed')
 
-        if ret == 0 and args.test:
+        if ret == 0 and args._test:
             logging.info('    running test script...')
-            cmd = args.test if os.path.isabs(args.test) else './' + args.test
+            cmd = args._test \
+                if os.path.isabs(args._test) \
+                else './' + args._test
             r = exe.execute(cmd.split(), notty=True,
                             stdin=_dummy, stdout=args.redirect)
             if r == 2:
@@ -137,9 +149,11 @@ def _replay2(args, logfile, verbose, opts=''):
         elif r == 0:
             print(verbose + 'BUG replayed but not tested')
 
-        if 'post' in args and args.post:
+        if args._post:
             logging.info('    clean-up after replaying...')
-            cmd = args.post if os.path.isabs(args.post) else './' + args.post
+            cmd = args._post \
+                if os.path.isabs(args._post) \
+                else './' + args._post
             r = exe.execute(cmd.split(), notty=True,
                             stdin=_dummy, stdout=args.redirect)
             if r > 0:
@@ -197,17 +211,17 @@ def do_one_test(args, t_name, t_exec):
     args.path = args.outdir + '/' + t_name + '/out'
 
     if 'run' not in args:
-        args.run = '%s' % t_exec
+        args._run = '%s' % t_exec
     if 'test' not in args:
-        args.test = '%s.test' % t_name
+        args._test = '%s.test' % t_name
     if 'pre' not in args:
-        args.pre = '%s.pre' % t_name
-    if args.pre and not os.access(args.pre, os.R_OK | os.X_OK):
-        args.pre = None
+        args._pre = '%s.pre' % t_name
+    if args._pre and not os.access(args._pre, os.R_OK | os.X_OK):
+        args._pre = None
     if 'post' not in args:
-        args.post = '%s.post' % t_name
-    if args.post and not os.access(args.post, os.R_OK | os.X_OK):
-        args.post = None
+        args._post = '%s.post' % t_name
+    if args._post and not os.access(args._post, os.R_OK | os.X_OK):
+        args._post = None
 
     opts = ''
     if args.debug: opts += ' -d'
