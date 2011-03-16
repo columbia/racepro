@@ -13,33 +13,32 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
         p2.wait()
     else:
         p1 = subprocess.Popen(cmd, stdin=stdin, stdout=stdout, stderr=stderr)
-    return p1.wait()
+    return p1
 
-def _sudo(cmd, stdin=None, stdout=None, stderr=None, notty=False, nofail=True):
+def _sudo(cmd, **kwargs):
     if os.geteuid() != 0:
         cmd = ['sudo'] + cmd
-    ret = _popen(cmd, notty=notty, stdin=stdin, stdout=stdout, stderr=stderr)
-    if ret and nofail:
-        raise RuntimeError('%s failed with %d' % (' '.join(cmd), ret))
-    return ret
+        p = _popen(cmd, **kwargs)
+    return p
 
 #############################################################################
 
 class Execute:
-    def execute(self, cmd,
-                stdin=None, stdout=None, stderr=None,
-                chroot=False, notty=False):
-        if not chroot:
-            ret = _sudo(cmd,
-                        stdin=stdin, stdout=stdout, stderr=stderr,
-                        notty=notty, nofail=False)
-        else:
+    def execute(self, cmd, chroot=False, **kwargs):
+        if chroot:
             assert self.chroot
-            ret = _sudo(['chroot', self.chroot, '/bin/sh', '-c',
-                         'cd %s; exec %s' % (os.getcwd(), ' '.join(cmd))],
-                        stdin=stdin, stdout=stdout, stderr=stderr,
-                        notty=notty, nofail=False)
-        return ret
+            cmd = ['chroot', self.chroot, '/bin/sh', '-c',
+                   'cd %s; exec %s' % (os.getcwd(), ' '.join(cmd))]
+        p = _sudo(cmd, **kwargs)
+        return p.wait()
+
+    def execute_raw(self, cmd, chroot=False, **kwargs):
+        if chroot:
+            assert self.chroot
+            cmd = ['chroot', self.chroot, '/bin/sh', '-c',
+                   'cd %s; exec %s' % (os.getcwd(), ' '.join(cmd))]
+        p = _sudo(cmd, **kwargs)
+        return p
 
     def __exit__(self, type, value, tb):
         pass
@@ -53,12 +52,13 @@ class Execute:
 #############################################################################
 
 class ExecuteJail(Execute):
-    def execute(self, command,
-                stdin=None, stdout=None, stderr=None,
-                chroot=True, notty=False):
+    def execute(self, command, **kwargs):
         assert self.mounted
-        return Execute.execute(self, command,
-                               stdin, stdout, stderr, chroot, notty)
+        return Execute.execute(self, command, **kwargs)
+
+    def execute_raw(self, command, **kwargs):
+        assert self.mounted
+        return Execute.execute_raw(self, command, **kwargs)
 
     def bind(self, d):
         assert d[0] == '/'

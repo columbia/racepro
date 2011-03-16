@@ -30,6 +30,9 @@ parser.add_argument('-i', '--initproc', dest='initproc',
 parser.add_argument('-t', '--timeout', dest='timeout',
                     metavar='S', default=1,
                     help='Timeout for deadlock detection')
+parser.add_argument('-p', '--parallel', dest='parallel',
+                    metavar='S', default=None,
+                    help='Timeout for deadlock detection')
 #parser.add_argument('-s', '--save', dest='save',
 #                    action='store_true', default=False,
 #                    help='Save scratch directories')
@@ -59,17 +62,12 @@ if args.debug: log = logging.DEBUG
 logging.basicConfig(level=log, stream=sys.stdout)
 
 if args.config:
-    args.jailed = False
-    args.initproc = False
-    args.root = None
-    args.scratch = None
-    args.chroot = None
-    args._run = None
-    args._pre = None
-    args._post = None
-    args._test = None
+
+    def bool_val(s):
+        return True if s.lower() == 'true' else False
 
     with open(args.config, 'r') as file:
+        print('reading config file %s' % args.config)
         for l in file:
             l.strip()
             if l[0] in set(['#', '\n']):
@@ -77,20 +75,25 @@ if args.config:
             k, v = [ s.strip() for s in l.split('=') ]
             v = v.replace('%PWD', os.getcwd())
 
-            print('k=%s v=%s' % (k,v))
+            print('%s = %s' % (k, v))
 
-            if k == 'jailed': args.initproc = True
-            elif k == 'initproc': args.initproc = True
-            elif k == 'root': args.root = v
-            elif k == 'scratch': args.scratch = v
-            elif k == 'chroot': args.chroot = v
-            elif k == 'outdir': args.outdir = v
-            elif k == 'redirect': args.redirect = True
-            elif k == 'timeout': args.timeout = v
+            if k == 'timeout': args.timeout = v
             elif k == 'script-run': args._run = v
             elif k == 'script-pre': args._pre = v
             elif k == 'script-post': args._post = v
             elif k == 'script-test': args._test = v
+            elif k == 'jailed': args.initproc = bool_val(v)
+
+            elif k == 'initproc': args.initproc = bool_val(v)
+            elif k == 'parallel': args.parallel = v
+
+            elif k == 'outdir': args.outdir = v
+            elif k == 'redirect': args.redirect = bool_val(v)
+
+            elif k == 'root': args.root = v
+            elif k == 'scratch': args.scratch = v
+            elif k == 'chroot': args.chroot = v
+
             else:
                 print('Unknown key in racepro.conf: %s' % k)
                 exit(1)

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 import shutil
 import logging
 import argparse
@@ -121,16 +122,25 @@ def _replay2(args, logfile, verbose, opts=''):
 
         logging.info('    replaying ...')
         cmd = args.replay + ' %s %s' % (opts, logfile)
-        ret = exe.execute(cmd.split(), notty=True,
-                          stdin=_dummy, stdout=args.redirect)
-        if ret == 35:
-            print(verbose + 'replay deadlock')
-        elif ret > 0:
-            print(vserbose + 'replay failure (exit %d)' % ret)
-        else:
-            print(verbose + 'replay completed')
+        p = exe.execute_raw(cmd.split(), notty=True,
+                            stdin=_dummy, stdout=args.redirect)
 
-        if ret == 0 and args._test:
+        if args.parallel:
+            time.sleep(float(args.parallel))
+            ret = p.poll()
+        else:
+            ret = p.wait()
+
+        if ret is not None:
+            if ret == 35:
+                print(verbose + 'replay deadlock')
+            elif ret > 0:
+                print(vserbose + 'replay failure (exit %d)' % ret)
+            else:
+                print(verbose + 'replay completed')
+
+        # if non-parallel and ret==0, or parallel and ret==None:
+        if args._test and (ret == 0 or (args.parallel and ret == None)):
             logging.info('    running test script...')
             cmd = args._test \
                 if os.path.isabs(args._test) \
@@ -148,6 +158,15 @@ def _replay2(args, logfile, verbose, opts=''):
                 ret = 0
         elif r == 0:
             print(verbose + 'BUG replayed but not tested')
+
+        # if parallel, then terminate the replay init
+        if args.parallel:
+            # process may be gone by now ?
+            try:
+                p.kill()
+            except OSError:
+                pass
+            p.wait()
 
         if args._post:
             logging.info('    clean-up after replaying...')
@@ -258,14 +277,15 @@ def do_one_test(args, t_name, t_exec):
     return True
 
 def uninitialized(args):
+    if 'timeout' not in args: args.timeout = 1
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
+    if 'parallel' not in args: args.parallel = None
+    if 'outdir' not in args: args.outdir = None
+    if 'redirect' not in args: args.redirect = None
     if 'root' not in args: args.root = None
     if 'scratch' not in args: args.scratch = None
     if 'chroot' not in args: args.chroot = None
-    if 'outdir' not in args: args.outdir = None
-    if 'redirect' not in args: args.redirect = None
-    if 'timeout' not in args: args.timeout = 1
 
 def do_all_tests(args, tests):
     uninitialized(args)
