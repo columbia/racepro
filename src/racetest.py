@@ -258,7 +258,7 @@ def do_one_test(args, t_name, t_exec):
     return True
 
 def uninitialized(args):
-    if 'jail' not in args: args.jail = False
+    if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
     if 'root' not in args: args.root = None
     if 'scratch' not in args: args.scratch = None
