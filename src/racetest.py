@@ -31,8 +31,8 @@ def _sudo(cmd, redirect=None):
 
 def _record(args):
     with execute.open(root=args.root, jailed=args.jailed,
-                      chroot=args.chroot, mount=args.mount,
-                      scratch=args.scratch, persist=args.outdir) as exe:
+                      chroot=args.chroot, scratch=args.scratch,
+                      persist=args.pdir) as exe:
         if 'pre' in args and args.pre:
             logging.info('    clean-up before recording...')
             cmd = args.pre if os.path.isabs(args.pre) else './' + args.pre
@@ -59,8 +59,8 @@ def _record(args):
 
 def _replay(args):
     with execute.open(root=args.root, jailed=args.jailed,
-                      chroot=args.chroot, mount=args.mount,
-                      scratch=args.scratch, persist=args.outdir) as exe:
+                      chroot=args.chroot, scratch=args.scratch,
+                      persist=args.pdir) as exe:
         if 'pre' in args and args.pre:
             logging.info('    clean-up before replaying...')
             cmd = args.pre if os.path.isabs(args.pre) else './' + args.pre
@@ -95,8 +95,8 @@ def _findraces(args, opts):
 
 def _testraces(args, opts1, opts2):
     with execute.open(root=args.root, jailed=args.jailed,
-                      chroot=args.chroot, mount=args.mount,
-                      scratch=args.scratch, persist=args.outdir) as exe:
+                      chroot=args.chroot, scratch=args.scratch,
+                      persist=args.pdir) as exe:
         exitiffail = '' if args.keepgoing else '--exit-on-failed-replay'
         cmd = args.racepro + ' %s test-races -i %s -o %s %s %s' % \
             (opts1, args.path + '.log', args.path, opts2, exitiffail)
@@ -110,8 +110,8 @@ def _testraces(args, opts1, opts2):
     return True
 
 def do_one_test(args, t_name, t_exec):
-    if args.mount and not os.access(args.mount, os.R_OK | os.X_OK):
-        os.mkdir(args.mount)
+    if args.chroot and not os.access(args.chroot, os.R_OK | os.X_OK):
+        os.mkdir(args.chroot)
 
     if args.scratch and os.access(args.scratch, os.F_OK):
         ret = _sudo('rm -rf %s' % args.scratch)
@@ -132,9 +132,8 @@ def do_one_test(args, t_name, t_exec):
 
     logging.info('Processing test: %s' % (t_name))
 
-    pdir = args.outdir + '/' + t_name
-    path = args.outdir + '/' + t_name + '/out'
-    args.path = path
+    args.pdir = args.outdir + '/' + t_name
+    args.path = args.outdir + '/' + t_name + '/out'
 
     if 'run' not in args:
         args.run = '%s' % t_exec
@@ -158,13 +157,13 @@ def do_one_test(args, t_name, t_exec):
     if args.test: opts2 = ' --script-test=./%s' % args.test
     if args.post: opts2 = ' --script-post=./%s' % args.post
 
-    logging.info('  output in directory %s' % (pdir))
-    if os.access(pdir, os.R_OK):
-        _sudo('rm -rf %s' % pdir)
-    _sudo('mkdir -p %s' % pdir)
+    logging.info('  output in directory %s' % args.pdir)
+    if os.access(args.pdir, os.R_OK):
+        _sudo('rm -rf %s' % args.pdir)
+    _sudo('mkdir -p %s' % args.pdir)
 
     if args.quiet:
-        args.redirect = open(path + '.out', 'w')
+        args.redirect = open(args.path + '.out', 'w')
     else:
         args.redirect = None
 
@@ -191,9 +190,7 @@ def do_one_test(args, t_name, t_exec):
 def uninitialized(args):
     if 'jail' not in args: args.jail = False
     if 'initproc' not in args: args.initproc = False
-    if 'path' not in args: args.path = None
     if 'root' not in args: args.root = None
-    if 'mount' not in args: args.mount = None
     if 'scratch' not in args: args.scratch = None
     if 'chroot' not in args: args.chroot = None
     if 'outdir' not in args: args.outdir = None

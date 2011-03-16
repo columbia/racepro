@@ -18,6 +18,7 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
 def _sudo(cmd, stdin=None, stdout=None, stderr=None, notty=False, nofail=True):
     if os.geteuid() != 0:
         cmd = ['sudo'] + cmd
+    print('execute: %s' % cmd)
     ret = _popen(cmd, notty=notty, stdin=stdin, stdout=stdout, stderr=stderr)
     if ret and nofail:
         raise RuntimeError('%s failed with %d' % (' '.join(cmd), ret))
@@ -120,9 +121,9 @@ class ExecuteJail(Execute):
         self.open()
         return self
 
-    def __init__(self, root='/', mount=None, scratch=None, persist=None):
+    def __init__(self, root='/', chroot=None, scratch=None, persist=None):
         self.root = root
-        self.chroot = mount
+        self.chroot = chroot
         self.scratch = scratch
         self.persist = persist
 
@@ -132,10 +133,9 @@ class ExecuteJail(Execute):
 
 #############################################################################
 
-def open(root='/', jailed=False,
-         chroot=None, mount=None, scratch=None, persist=None):
+def open(jailed=False, **kwargs):
     if not jailed:
-        return Execute(chroot=mount)
+        return Execute(kwargs['chroot'])
     else:
-        return ExecuteJail(root=root, mount=None, scratch=None, persist=None)
+        return ExecuteJail(**kwargs)
 
