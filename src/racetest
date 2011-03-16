@@ -28,7 +28,7 @@ parser.add_argument('-i', '--initproc', dest='initproc',
                     action='store_true', default=False,
                     help='Record/replay using a designated init-process')
 parser.add_argument('-c', '--conf', dest='config',
-                    default=None, metavar='CONF_FILE',
+                    default=None, metavar='CONF',
                     help='Use a racepro config file')
 parser.add_argument('-s', '--save', dest='save',
                     action='store_true', default=False,
@@ -42,8 +42,8 @@ parser.add_argument('-l', '--log-level', dest='logmask',
 parser.add_argument('-f', '--log-flags', dest='logflags',
                     default=None, metavar='MASK',
                     help='Log mask argument, see record arguments.')
-parser.add_argument('tests', metavar='TEST[:PREFIX]', nargs='*',
-                    help='TEST program to run, and optional PREFIX for output')
+parser.add_argument('tests', metavar='TEST[:SCRIPT]', nargs='*',
+                    help='TEST program to run, and optional SCRIPT to run')
 
 args = parser.parse_args()
 
@@ -88,8 +88,9 @@ tests = list()
 
 for t in args.tests:
     s = t.split(':')
-    tt = t if len(s) == 1 else tt[1]
-    tests.append((t, tt))
+    if len(s) == 1:
+        s.append(s[0])
+    tests.append((s[0], s[1]))
 
 if len(tests) == 0:
     if args.run:

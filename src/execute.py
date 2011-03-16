@@ -60,10 +60,17 @@ class ExecuteJail(Execute):
         return Execute.execute(self, command,
                                stdin, stdout, stderr, chroot, notty)
 
-    def _bind(self, dir):
-        assert(dir[0] == '/')
-        _sudo(['mount', '-o', 'bind', dir, os.path.join(self.chroot, dir)])
-        self._binded_dirs.append(dir)
+    def bind(self, d):
+        assert d[0] == '/'
+        m = os.path.join(self.chroot, d[1:])
+        _sudo(['mount', '-o', 'bind', d, m])
+        self._binded_dirs.append(d)
+
+    def unbind(self, d):
+        assert d[0] == '/'
+        m = os.path.join(self.chroot, d[1:])
+        _sudo(['umount', '-l', m])
+        self._binded_dirs.remove(d)
 
     def open(self):
         assert(not self.mounted)
@@ -84,23 +91,23 @@ class ExecuteJail(Execute):
         _sudo(['unionfs-fuse', '-o', 'cow,allow_other,use_ino,suid,' + \
                    'dev,nonempty,max_files=32768', mount_dirs, mount_point])
 
-        self._bind('/proc')
-        self._bind('/dev')
+        self.bind('/proc')
+        self.bind('/dev')
         if self.persist:
-            self._bind(self.persist)
+            self.bind(self.persist)
 
         self.mounted = True
 
     def close(self):
         assert(self.mounted)
 
-        for dir in self._binded_dirs:
-            _sudo('umount -l'.split() + [os.path.join(self.chroot, dir)])
+        for d in list(self._binded_dirs):
+            self.unbind(d)
 
         _sudo('fusermount -z -u'.split() + [self.chroot])
 
-        for dir in self._rmdirs:
-            _sudo(['rm', '-rf', dir])
+        for d in self._rmdirs:
+            _sudo(['rm', '-rf', d])
 
         self.mounted = False
 

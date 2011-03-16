@@ -50,7 +50,6 @@ def save_session(logfile, events):
 
 def _sudo(cmd):
     cmd = cmd.split() if os.geteuid() == 0 else ['sudo'] + cmd.split()
-    print('racepro sudo: %s' % cmd)
     return subprocess.call(cmd)
 
 ##############################################################################

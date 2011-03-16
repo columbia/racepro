@@ -12,7 +12,7 @@ import execute
 
 _dummy = open('/dev/null', 'r')
 
-def do_exec(cmd, redirect=None):
+def _exec(cmd, redirect=None):
     p1 = subprocess.Popen(cmd.split(),
                           stdin=_dummy,
                           stdout=subprocess.PIPE,
@@ -23,6 +23,11 @@ def do_exec(cmd, redirect=None):
                           stderr=subprocess.STDOUT)
     p1.stdout.close()
     return p1.wait()
+
+def _sudo(cmd, redirect=None):
+    if os.geteuid() != 0:
+        cmd = 'sudo ' + cmd
+    return _exec(cmd, redirect)
 
 def _record(args):
     with execute.open(root=args.root, jailed=args.jailed,
@@ -82,8 +87,7 @@ def _replay(args):
 def _findraces(args, opts):
     cmd = args.racepro + '%s show-races -i %s -o %s' % \
         (opts, args.path + '.log', args.path)
-    print('findrace: %s' % cmd)
-    ret = do_exec('sudo ' + cmd)
+    ret = _sudo(cmd)
     if ret != 0:
         logging.error('failed to generate races')
         return False
@@ -110,7 +114,7 @@ def do_one_test(args, t_name, t_exec):
         os.mkdir(args.mount)
 
     if args.scratch and os.access(args.scratch, os.F_OK):
-        ret = do_exec('sudo rm -rf %s' % args.scratch)
+        ret = _sudo('rm -rf %s' % args.scratch)
         os.mkdir(args.scratch)
 
     if not args.logmask and not args.logflags:
@@ -158,8 +162,8 @@ def do_one_test(args, t_name, t_exec):
 
     logging.info('  output in directory %s' % (pdir))
     if os.access(pdir, os.R_OK):
-        do_exec('sudo rm -rf %s' % pdir)
-    do_exec('sudo mkdir -p %s' % pdir)
+        _sudo('rm -rf %s' % pdir)
+    _sudo('mkdir -p %s' % pdir)
 
     if args.quiet:
         args.redirect = open(path + '.out', 'w')
