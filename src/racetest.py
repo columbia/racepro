@@ -123,11 +123,9 @@ def do_one_test(args, t_name, t_exec):
     args.record = 'record'
     if args.logmask: args.record += ' -l %s' % args.logmask
     if args.logflags: args.record += ' -f %s' % args.logflags
-    if args.root: args.record += ' -r %s' % args.root
     if args.initproc in args: args.record += ' -i'
 
     args.replay = 'replay -l 15'
-    if args.root in args: args.replay += ' -r %s' % args.root
     if args.initproc in args: args.replay += ' -i'
 
     args.racepro = 'racepro'
@@ -139,7 +137,7 @@ def do_one_test(args, t_name, t_exec):
     args.path = path
 
     if 'run' not in args:
-        args.run = '%s' % t_name
+        args.run = '%s' % t_exec
     if 'test' not in args:
         args.test = '%s.test' % t_name
     if 'pre' not in args:

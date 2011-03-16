@@ -42,8 +42,8 @@ parser.add_argument('-l', '--log-level', dest='logmask',
 parser.add_argument('-f', '--log-flags', dest='logflags',
                     default=None, metavar='MASK',
                     help='Log mask argument, see record arguments.')
-parser.add_argument('tests', metavar='TEST[:SCRIPT]', nargs='*',
-                    help='TEST program to run, and optional SCRIPT to run')
+parser.add_argument('tests', metavar='TEST[:PREFIX]', nargs='*',
+                    help='TEST program to run (optional PREFIX for output)')
 
 args = parser.parse_args()
 
@@ -90,7 +90,7 @@ for t in args.tests:
     s = t.split(':')
     if len(s) == 1:
         s.append(s[0])
-    tests.append((s[0], s[1]))
+    tests.append((s[1], s[0]))
 
 if len(tests) == 0:
     if args.run:
