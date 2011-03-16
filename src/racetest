@@ -77,12 +77,13 @@ if args.config:
 
             print('%s = %s' % (k, v))
 
-            if k == 'timeout': args.timeout = v
+            if k == 'name': args.name = v
+            elif k == 'timeotu': args.timeout = v
             elif k == 'script-run': args._run = v
             elif k == 'script-pre': args._pre = v
             elif k == 'script-post': args._post = v
             elif k == 'script-test': args._test = v
-            elif k == 'jailed': args.initproc = bool_val(v)
+            elif k == 'jailed': args.jailed = bool_val(v)
 
             elif k == 'initproc': args.initproc = bool_val(v)
             elif k == 'parallel': args.parallel = v
@@ -107,8 +108,8 @@ for t in args.tests:
     tests.append((s[1], s[0]))
 
 if len(tests) == 0:
-    if args.run:
-        tests = [(args.run, args.run)]
+    if args._run:
+        tests = [(args.name, args._run)]
     else:
         print('No tests specified .. existing')
         exit(1)

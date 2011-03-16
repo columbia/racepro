@@ -24,7 +24,7 @@ def _sudo_raw(cmd, **kwargs):
 def _sudo(cmd, **kwargs):
     if os.geteuid() != 0:
         cmd = ['sudo'] + cmd
-        p = _popen(cmd, **kwargs)
+    p = _popen(cmd, **kwargs)
     return p.wait()
 
 #############################################################################
@@ -127,7 +127,7 @@ class ExecuteJail(Execute):
         self.open()
         return self
 
-    def __init__(self, root='/', chroot=None, scratch=None, persist=None):
+    def __init__(self, chroot=None, root='/', scratch=None, persist=None):
         self.root = root
         self.chroot = chroot
         self.scratch = scratch
@@ -139,9 +139,9 @@ class ExecuteJail(Execute):
 
 #############################################################################
 
-def open(jailed=False, **kwargs):
+def open(jailed=False, chroot=None, **kwargs):
     if not jailed:
-        return Execute(kwargs['chroot'])
+        return Execute(chroot, **kwargs)
     else:
-        return ExecuteJail(kwargs['chroot'],**kwargs)
+        return ExecuteJail(chroot, **kwargs)
 

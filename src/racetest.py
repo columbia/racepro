@@ -115,7 +115,7 @@ def _replay2(args, logfile, verbose, opts=''):
                 else './' + args._pre
             r = exe.execute(cmd.split(), notty=True,
                             stdin=_dummy, stdout=args.redirect)
-            if r > 0:
+            if r != 0:
                 logging.error('failed pre-script (exit %d)' % r)
                 print(verbose + 'bad exit code from pre-script: %d' % r)
                 return False
@@ -175,7 +175,7 @@ def _replay2(args, logfile, verbose, opts=''):
                 else './' + args._post
             r = exe.execute(cmd.split(), notty=True,
                             stdin=_dummy, stdout=args.redirect)
-            if r > 0:
+            if r != 0:
                 logging.error('failed post-script (exit %d)' % r)
                 print(verbose + 'bad exit code from post-script: %d' % r)
 
@@ -229,15 +229,15 @@ def do_one_test(args, t_name, t_exec):
     args.pdir = args.outdir + '/' + t_name
     args.path = args.outdir + '/' + t_name + '/out'
 
-    if 'run' not in args:
+    if '_run' not in args:
         args._run = '%s' % t_exec
-    if 'test' not in args:
+    if '_test' not in args:
         args._test = '%s.test' % t_name
-    if 'pre' not in args:
+    if '_pre' not in args:
         args._pre = '%s.pre' % t_name
     if args._pre and not os.access(args._pre, os.R_OK | os.X_OK):
         args._pre = None
-    if 'post' not in args:
+    if '_post' not in args:
         args._post = '%s.post' % t_name
     if args._post and not os.access(args._post, os.R_OK | os.X_OK):
         args._post = None
@@ -289,7 +289,7 @@ def uninitialized(args):
 
 def do_all_tests(args, tests):
     uninitialized(args)
-    for t, n in tests:
-        print('=== TEST: %s' % t)
-        if not do_one_test(args, t, n):
+    for t_name, t_exec in tests:
+        print('=== TEST: %s' % t_name)
+        if not do_one_test(args, t_name, t_exec):
             break
