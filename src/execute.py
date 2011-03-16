@@ -79,9 +79,11 @@ class ExecuteJail(Execute):
             self.root = '/'
         if not self.scratch:
             self.scratch = tempfile.mkdtemp(prefix='isolate-temp-')
+            os.chmod(self.scratch, 0777)
             self._rmdirs.append(self.scratch)
         if not self.chroot:
             self.chroot = tempfile.mkdtemp(prefix='isolate-temp-')
+            os.chmod(self.chroot, 0777)
             self._rmdirs.append(self.chroot)
 
         mount_dirs = '%s=rw:%s=ro' % \
