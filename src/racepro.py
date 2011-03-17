@@ -349,36 +349,37 @@ class Session:
 
         # extended read/write set - good for pipes and sockets
         SYS_read_ext = unistd.Syscalls.SYS_read.union(
-            set([NR_send, NR_sendto, NR_sendmsg]))
-        SYS_write_ext = unistd.Syscalls.SYS_write.union(
             set([NR_recv, NR_recvfrom, NR_recvmsg]))
+        SYS_write_ext = unistd.Syscalls.SYS_write.union(
+            set([NR_send, NR_sendto, NR_sendmsg]))
 
         # collect pipes/sockest dependencies
         for resource in self.resource_list:
             event = resource.events[0].event
-            desc = resource.desc = event.desc
+            desc1 = desc2 = resource.desc = event.desc
             if event.resource_type != scribe.SCRIBE_RES_TYPE_FILE:
                 continue
-            if not 'pipe:' in desc and not 'socket:' in desc:
+            if not 'pipe:' in desc1 and not 'socket:' in desc1:
                 continue
+            # sockets have inodes: R of one matches W of the other and
+            # vice versa. @desc is "inode1 inode2" or vice versa. by
+            # reversing only one side (e.g. writing) we matcn them :)
+            if 'socket:' in desc1:
+                desc1, desc2 = (desc1.split() + [None])[0:2]
+                if not desc2:
+                    continue
             for r_ev in resource.events:
                 si = self.events[r_ev.index].sysind
                 sc = self.get_syscall(si)
                 if sc.ret >= 0:
-                    if desc not in self.pipe_e:
-                        self.pipe_e[desc] = (list(), list())  # R, W
+                    if desc1 not in self.pipe_e:
+                        self.pipe_e[desc1] = (list(), list())  # R, W
+                    if desc2 and desc2 not in self.pipe_e:
+                        self.pipe_e[desc2] = (list(), list())  # R, W
                     if sc.nr in SYS_write_ext:
-                        # sockets have inodes: R of one matches W of
-                        # the other and vice versa. @desc is either
-                        # "inode1 inode2" or vice versa. by reversing
-                        # only one side (e.g. writing) we matcn them :)
-                        if 'socket:' in desc:
-                            desc = " ".join(list(reversed(desc.split())))
-                        self.pipe_e[desc][1].append((r_ev, sc.ret))
-                        print('socket %s nr %d W' % (desc, sc.ret))
+                        self.pipe_e[desc2][1].append((r_ev, sc.ret))
                     elif sc.nr in SYS_read_ext:
-                        self.pipe_e[desc][0].append((r_ev, sc.ret))
-                        print('socket %s nr %d R' % (desc, sc.ret))
+                        self.pipe_e[desc1][0].append((r_ev, sc.ret))
 
     def __check_bookmarks(self, pid, syscall, bookmarks):
         for n, bmark in enumerate(bookmarks):
