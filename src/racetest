@@ -109,6 +109,9 @@ for t in args.tests:
 
 if len(tests) == 0:
     if args._run:
+        if 'name' not in args:
+            print('Config file is missing "name = NAME" line')
+            exit(1)
         tests = [(args.name, args._run)]
     else:
         print('No tests specified .. existing')
