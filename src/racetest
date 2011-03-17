@@ -32,10 +32,10 @@ parser.add_argument('-t', '--timeout', dest='timeout', type=int,
                     help='Timeout for deadlock detection')
 parser.add_argument('-p', '--parallel', dest='parallel', type=int,
                     metavar='S', default=None,
-                    help='Timeout for deadlock detection')
-#parser.add_argument('-s', '--save', dest='save',
-#                    action='store_true', default=False,
-#                    help='Save scratch directories')
+                    help='Timeout for forced session termination')
+parser.add_argument('-a', '--archive', dest='archive',
+                    action='store_true', default=False,
+                    help='Save scratch directories for late inspection')
 parser.add_argument('-o', '--outdir', dest='outdir',
                     default=None, metavar='DIR',
                     help='Location for output files (default: /presist/TEST')
@@ -87,6 +87,7 @@ if args.config:
 
             elif k == 'initproc': args.initproc = bool_val(v)
             elif k == 'parallel': args.parallel = v
+            elif k == 'archive': args.archive = bool_val(v)
 
             elif k == 'outdir': args.outdir = v
             elif k == 'redirect': args.redirect = bool_val(v)

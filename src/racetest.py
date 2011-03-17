@@ -114,11 +114,14 @@ def _replay(args, logfile=None, opts=''):
             if r != 0:
                 logging.error('failed post-script (exut %d)' % r)
 
+        if args.jail and args.archive:
+            logdir = args.path + '.rw'
+            _sudo('rm -rf %s' % logdir)
+            _sudo('cp -ax %s %s' % (exe.scratch, logdir))
+
         return True if ret == 0 else False
 
 def _replay2(args, logfile, verbose, opts=''):
-    if not logfile:
-        logfile = args.path + '.log'
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
         if args._pre:
@@ -148,7 +151,7 @@ def _replay2(args, logfile, verbose, opts=''):
             if ret == 35:
                 print(verbose + 'replay deadlock')
             elif ret > 0:
-                print(vserbose + 'replay failure (exit %d)' % ret)
+                print(verbose + 'replay failure (exit %d)' % ret)
             else:
                 print(verbose + 'replay completed')
 
@@ -191,6 +194,11 @@ def _replay2(args, logfile, verbose, opts=''):
             if r != 0:
                 logging.error('failed post-script (exit %d)' % r)
                 print(verbose + 'bad exit code from post-script: %d' % r)
+
+        if args.jailed and args.archive:
+            logdir = logfile.replace('.log', '.rw')
+            _sudo('rm -rf %s' % logdir)
+            _sudo('cp -ax %s %s' % (exe.scratch, logdir))
 
     return True if ret == 0 else False
 
@@ -292,6 +300,7 @@ def uninitialized(args):
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
     if 'parallel' not in args: args.parallel = None
+    if 'archive' not in args: args.archive = False
     if 'outdir' not in args: args.outdir = None
     if 'redirect' not in args: args.redirect = None
     if 'root' not in args: args.root = None
