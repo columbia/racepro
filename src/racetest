@@ -78,7 +78,7 @@ if args.config:
             print('%s = %s' % (k, v))
 
             if k == 'name': args.name = v
-            elif k == 'timeotu': args.timeout = v
+            elif k == 'timeout': args.timeout = v
             elif k == 'script-run': args._run = v
             elif k == 'script-pre': args._pre = v
             elif k == 'script-post': args._post = v
