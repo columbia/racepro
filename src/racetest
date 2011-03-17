@@ -27,10 +27,10 @@ parser.add_argument('-k', '--keep-going', dest='keepgoing',
 parser.add_argument('-i', '--initproc', dest='initproc',
                     action='store_true', default=False,
                     help='Record/replay using a designated init-process')
-parser.add_argument('-t', '--timeout', dest='timeout',
+parser.add_argument('-t', '--timeout', dest='timeout', type=int,
                     metavar='S', default=1,
                     help='Timeout for deadlock detection')
-parser.add_argument('-p', '--parallel', dest='parallel',
+parser.add_argument('-p', '--parallel', dest='parallel', type=int,
                     metavar='S', default=None,
                     help='Timeout for deadlock detection')
 #parser.add_argument('-s', '--save', dest='save',
