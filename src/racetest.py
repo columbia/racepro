@@ -39,7 +39,7 @@ def _wait(p, timeout=None):
     else:
         time.sleep(float(timeout))
         r = p.poll()
-        if r != None:
+        if r == None:
             try:
                 _sudo('kill -TERM %d' % p.pid)
             except OSError:

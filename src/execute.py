@@ -10,7 +10,7 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
         p2 = subprocess.Popen(['/bin/cat'], stdin=p1.stdout, stdout=stdout,
                               stderr=subprocess.STDOUT)
         p1.stdout.close()
-        p2.wait()
+        # p2 is somehow magically collected by python ... miracle
     else:
         p1 = subprocess.Popen(cmd, stdin=stdin, stdout=stdout, stderr=stderr)
     return p1
