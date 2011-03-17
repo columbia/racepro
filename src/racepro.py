@@ -1002,13 +1002,18 @@ class Session:
         # We deliberately include in the map syscnt=0 which doesn't really
         # map to a real system call, because it doesn't help special case
         # it here: we have to deal with clone() and clone() returns anyway
-        ticks = dict()
-        for (proc, syscnt), vc in vclocks.iteritems():
-            c = vc.get(proc.pid)
-            if (proc, c) in ticks:  # use earlier ones
-                ticks[(proc, c)] = min(syscnt, ticks[(proc, c)])
-            else:
-                ticks[(proc, c)] = syscnt
+        #
+        # Only compute once and cache it inside vclock['ticks']...
+        if 'ticks' in vclocks:
+            ticks = vclocks['ticks']
+        else:
+            ticks = dict()
+            for (proc, syscnt), vc in vclocks.iteritems():
+                c = vc.get(proc.pid)
+                if (proc, c) in ticks:  # use earlier ones
+                    ticks[(proc, c)] = min(syscnt, ticks[(proc, c)])
+                else:
+                    ticks[(proc, c)] = syscnt
 
         # given @anchors with clock @vcs, find a set nof nodes N in each
         # process, s.t. each pair of nodes in N are concurrent.
