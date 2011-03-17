@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import shutil
+import signal
 import logging
 import argparse
 import subprocess
@@ -32,12 +33,25 @@ def _sudo(cmd, redirect=None):
         cmd = 'sudo ' + cmd
     return _exec(cmd, redirect)
 
+def _wait(p, timeout=None):
+    if not timeout:
+        r = p.wait()
+    else:
+        time.sleep(float(timeout))
+        r = p.poll()
+        if r != None:
+            try:
+                _sudo('kill -TERM %d' % p.pid)
+            except OSError:
+                pass
+        p.wait()
+    return r if r else 0
+
 def _record(args, logfile=None, opts=''):
     if not logfile:
         logfile = args.path + '.log'
-    with execute.open(root=args.root, jailed=args.jailed,
-                      chroot=args.chroot, scratch=args.scratch,
-                      persist=args.pdir) as exe:
+    with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
+                      scratch=args.scratch, persist=args.pdir) as exe:
         if args._pre:
             logging.info('    clean-up before recording...')
             cmd = args._pre \
@@ -49,8 +63,9 @@ def _record(args, logfile=None, opts=''):
         logging.info('    recording ...')
         cmd = args._run if os.path.isabs(args._run) else './' + args._run
         cmd = args.record + ' -o %s %s %s' % (opts, logfile, cmd)
-        ret = exe.execute(cmd.split(), notty=True,
-                          stdin=_dummy, stdout=args.redirect)
+        p = exe.execute_raw(cmd.split(), notty=True,
+                            stdin=_dummy, stdout=args.redirect)
+        ret = _wait(p, args.parallel)
 
         if args._post:
             logging.info('    clean-up after recording...')
@@ -69,9 +84,8 @@ def _record(args, logfile=None, opts=''):
 def _replay(args, logfile=None, opts=''):
     if not logfile:
         logfile = args.path + '.log'
-    with execute.open(root=args.root, jailed=args.jailed,
-                      chroot=args.chroot, scratch=args.scratch,
-                      persist=args.pdir) as exe:
+    with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
+                      scratch=args.scratch, persist=args.pdir) as exe:
         if args._pre:
             logging.info('    clean-up before replaying...')
             cmd = args._pre \
@@ -86,7 +100,7 @@ def _replay(args, logfile=None, opts=''):
         logging.info('    replaying ...')
         cmd = args.replay + ' %s %s' % (opts, logfile)
         ret = exe.execute(cmd.split(), notty=True,
-                          stdin=_dummy, stdout=args.redirect)
+                        stdin=_dummy, stdout=args.redirect)
         if ret != 0:
             logging.error('failed original replay (exit %d)' % ret)
 
@@ -105,9 +119,8 @@ def _replay(args, logfile=None, opts=''):
 def _replay2(args, logfile, verbose, opts=''):
     if not logfile:
         logfile = args.path + '.log'
-    with execute.open(root=args.root, jailed=args.jailed,
-                      chroot=args.chroot, scratch=args.scratch,
-                      persist=args.pdir) as exe:
+    with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
+                      scratch=args.scratch, persist=args.pdir) as exe:
         if args._pre:
             logging.info('    clean-up before replaying...')
             cmd = args._pre \

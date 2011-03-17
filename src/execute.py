@@ -18,7 +18,7 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
 def _sudo_raw(cmd, **kwargs):
     if os.geteuid() != 0:
         cmd = ['sudo'] + cmd
-        p = _popen(cmd, **kwargs)
+    p = _popen(cmd, **kwargs)
     return p
 
 def _sudo(cmd, **kwargs):
@@ -30,16 +30,14 @@ def _sudo(cmd, **kwargs):
 #############################################################################
 
 class Execute:
-    def execute(self, cmd, chroot=True, **kwargs):
-        if chroot:
-            assert self.chroot
+    def execute(self, cmd, **kwargs):
+        if self.chroot:
             cmd = ['chroot', self.chroot, '/bin/sh', '-c',
                    'cd %s; exec %s' % (os.getcwd(), ' '.join(cmd))]
         return _sudo(cmd, **kwargs)
 
-    def execute_raw(self, cmd, chroot=True, **kwargs):
-        if chroot:
-            assert self.chroot
+    def execute_raw(self, cmd, **kwargs):
+        if self.chroot:
             cmd = ['chroot', self.chroot, '/bin/sh', '-c',
                    'cd %s; exec %s' % (os.getcwd(), ' '.join(cmd))]
         return _sudo_raw(cmd, **kwargs)
@@ -141,7 +139,7 @@ class ExecuteJail(Execute):
 
 def open(jailed=False, chroot=None, **kwargs):
     if not jailed:
-        return Execute(chroot, **kwargs)
+        return Execute(chroot)
     else:
         return ExecuteJail(chroot, **kwargs)
 

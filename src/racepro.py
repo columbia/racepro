@@ -796,7 +796,8 @@ class Session:
     def reaper_pid(self, index):
         for e, i in self.get_syscall_events(index):
             if isinstance(e, scribe.EventResourceLockExtra):
-                if e.resource_type & 0x7f == scribe.SCRIBE_RES_TYPE_PPID:
+                if e.resource_type & scribe.SCRIBE_RES_TYPE_MASK == \
+                        scribe.SCRIBE_RES_TYPE_PPID:
                     return int(e.desc)
         return None
 
