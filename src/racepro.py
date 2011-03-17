@@ -9,6 +9,13 @@ import scribe
 import unistd
 from vectorclock import VectorClock
 
+NR_send = scribe.__NR_send
+NR_sendto = scribe.__NR_sendto
+NR_sendmsg = scribe.__NR_sendmsg
+NR_recv = scribe.__NR_recv
+NR_recvfrom = scribe.__NR_recvfrom
+NR_recvmsg = scribe.__NR_recvmsg
+
 class ProcessEvent:
     """An event from the point of view of a process:
     @info: pointer to scribe's info
@@ -340,6 +347,12 @@ class Session:
                 s_ev.rindex = ind
                 ind += 1
 
+        # extended read/write set - good for pipes and sockets
+        SYS_read_ext = unistd.Syscalls.SYS_read.union(
+            set([NR_send, NR_sendto, NR_sendmsg]))
+        SYS_write_ext = unistd.Syscalls.SYS_write.union(
+            set([NR_recv, NR_recvfrom, NR_recvmsg]))
+
         # collect pipes/sockest dependencies
         for resource in self.resource_list:
             event = resource.events[0].event
@@ -354,10 +367,18 @@ class Session:
                 if sc.ret >= 0:
                     if desc not in self.pipe_e:
                         self.pipe_e[desc] = (list(), list())  # R, W
-                    if sc.nr in unistd.Syscalls.SYS_write:
+                    if sc.nr in SYS_write_ext:
+                        # sockets have inodes: R of one matches W of
+                        # the other and vice versa. @desc is either
+                        # "inode1 inode2" or vice versa. by reversing
+                        # only one side (e.g. writing) we matcn them :)
+                        if 'socket:' in desc:
+                            desc = " ".join(list(reversed(desc.split())))
                         self.pipe_e[desc][1].append((r_ev, sc.ret))
-                    elif sc.nr in unistd.Syscalls.SYS_read:
+                        print('socket %s nr %d W' % (desc, sc.ret))
+                    elif sc.nr in SYS_read_ext:
                         self.pipe_e[desc][0].append((r_ev, sc.ret))
+                        print('socket %s nr %d R' % (desc, sc.ret))
 
     def __check_bookmarks(self, pid, syscall, bookmarks):
         for n, bmark in enumerate(bookmarks):
