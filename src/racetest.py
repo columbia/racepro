@@ -114,7 +114,7 @@ def _replay(args, logfile=None, opts=''):
             if r != 0:
                 logging.error('failed post-script (exut %d)' % r)
 
-        if args.jail and args.archive:
+        if args.jailed and args.archive:
             logdir = args.path + '.rw'
             _sudo('rm -rf %s' % logdir)
             _sudo('cp -ax %s %s' % (exe.scratch, logdir))
