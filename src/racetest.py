@@ -76,7 +76,7 @@ def _record(args, logfile=None, opts=''):
                               stdin=_dummy, stdout=args.redirect)
 
         if ret != 0:
-            logging.error('failed 1st recording')
+            logging.error('failed recording')
             return False
 
         return True
@@ -230,11 +230,9 @@ def do_one_test(args, t_name, t_exec):
     args.record = 'record'
     if args.logmask: args.record += ' -l %s' % args.logmask
     if args.logflags: args.record += ' -f %s' % args.logflags
-    if args.initproc in args: args.record += ' -i'
+    if args.initproc: args.record += ' -i'
 
     args.replay = 'replay -l 15'
-    if args.initproc in args: args.replay += ' -i'
-
     args.racepro = 'racepro'
 
     logging.info('Processing test: %s' % (t_name))
