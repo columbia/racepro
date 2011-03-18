@@ -142,6 +142,7 @@ class Session:
     @wait_e: list of all wait() events
     @exit_e: list of all exit() events
     @pipe_e: all pipe/socket read/write events (keyed by pipe/socket)
+    @pipe_d: dictionary mapping pipe/socket peers
     """
 
     # helpers
@@ -394,6 +395,7 @@ class Session:
                     elif sc.nr in SYS_read_ext:
                         if 'socket' in desc and sc.ret > 0: assert desc
                         self.pipe_e[desc][0].append((r_ev, sc.ret))
+        self.pipe_d = pipe
 
     def __check_bookmarks(self, pid, syscall, bookmarks):
         for n, bmark in enumerate(bookmarks):
@@ -791,6 +793,11 @@ class Session:
             wi = 0  # current write event
             wleft = 0  # data "left" in the first write
             writes = deque()
+
+            if len(pipe[0] > 0):
+                desc = pipe[0][0][0].event.desc
+                if desc and desc not in self.pipe_d:
+                    continue
 
             while ri < len(pipe[0]):
                 read_rev, read_nr = pipe[0][ri]
