@@ -395,7 +395,7 @@ class Session:
                     elif sc.nr in SYS_read_ext:
                         if 'socket' in desc and sc.ret > 0: assert desc
                         self.pipe_e[desc][0].append((r_ev, sc.ret))
-        self.pipe_d = pipe
+        self.pipe_d = peer
 
     def __check_bookmarks(self, pid, syscall, bookmarks):
         for n, bmark in enumerate(bookmarks):
