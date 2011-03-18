@@ -794,7 +794,7 @@ class Session:
             wleft = 0  # data "left" in the first write
             writes = deque()
 
-            if len(pipe[0] > 0):
+            if len(pipe[0]) > 0:
                 desc = pipe[0][0][0].event.desc
                 if desc and desc not in self.pipe_d:
                     continue
