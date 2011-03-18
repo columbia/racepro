@@ -354,32 +354,38 @@ class Session:
             set([NR_send, NR_sendto, NR_sendmsg]))
 
         # collect pipes/sockest dependencies
+        peer = dict()
         for resource in self.resource_list:
             event = resource.events[0].event
-            desc1 = desc2 = resource.desc = event.desc
             if event.resource_type != scribe.SCRIBE_RES_TYPE_FILE:
                 continue
-            if not 'pipe:' in desc1 and not 'socket:' in desc1:
+            if not 'pipe:' in event.desc and not 'socket:' in event.desc:
                 continue
+            if 'pipe' in event.desc:
+                peer[event.desc] = event.desc
+
             # sockets have inodes: R of one matches W of the other and
             # vice versa. @desc is "inode1 inode2" or vice versa. by
             # reversing only one side (e.g. writing) we matcn them :)
-            if 'socket:' in desc1:
-                desc1, desc2 = (desc1.split() + [None])[0:2]
-                if not desc2:
-                    continue
             for r_ev in resource.events:
+                desc = r_ev.event.desc
+                if 'socket:' in desc:
+                    desc, other = (desc.split() + [None])[0:2]
+                    if other:
+                        peer[desc] = other
+                        peer[other] = desc
                 si = self.events[r_ev.index].sysind
                 sc = self.get_syscall(si)
                 if sc.ret >= 0:
-                    if desc1 not in self.pipe_e:
-                        self.pipe_e[desc1] = (list(), list())  # R, W
-                    if desc2 and desc2 not in self.pipe_e:
-                        self.pipe_e[desc2] = (list(), list())  # R, W
-                    if sc.nr in SYS_write_ext:
-                        self.pipe_e[desc2][1].append((r_ev, sc.ret))
+                    if desc not in self.pipe_e:
+                        self.pipe_e[desc] = (list(), list())  # R, W
+                    if desc in peer and peer[desc] not in self.pipe_e:
+                        self.pipe_e[peer[desc]] = (list(), list())  # R, W
+                    if sc.nr in SYS_write_ext and desc in peer:
+                        self.pipe_e[peer[desc]][1].append((r_ev, sc.ret))
                     elif sc.nr in SYS_read_ext:
-                        self.pipe_e[desc1][0].append((r_ev, sc.ret))
+                        if 'socket' in desc and sc.ret > 0: assert desc
+                        self.pipe_e[desc][0].append((r_ev, sc.ret))
 
     def __check_bookmarks(self, pid, syscall, bookmarks):
         for n, bmark in enumerate(bookmarks):
