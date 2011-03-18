@@ -223,7 +223,7 @@ def _testlist(args, races):
             return False
     return True
 
-def _testraces(args, races):
+def _testraces(args):
     for n in count(1):
         ret = _testlist(args, n)
         if ret != 0 and not args.keepgoing:
