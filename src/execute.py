@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import subprocess
+import errno
 
 def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
     if notty:
@@ -79,12 +80,19 @@ class ExecuteJail(Execute):
 
         if not self.root:
             self.root = '/'
+        isolate_dir = '/tmp/isolate'
+        if not self.scratch or not self.chroot:
+            try:
+                os.mkdir(isolate_dir)
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise
         if not self.scratch:
-            self.scratch = tempfile.mkdtemp(prefix='isolate-temp-')
+            self.scratch = tempfile.mkdtemp(dir=isolate_dir)
             os.chmod(self.scratch, 0777)
             self._rmdirs.append(self.scratch)
         if not self.chroot:
-            self.chroot = tempfile.mkdtemp(prefix='isolate-temp-')
+            self.chroot = tempfile.mkdtemp(dir=isolate_dir)
             os.chmod(self.chroot, 0777)
             self._rmdirs.append(self.chroot)
 
