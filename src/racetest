@@ -21,6 +21,9 @@ parser.add_argument('-q', '--quiet', dest='quiet',
 parser.add_argument('-j', '--jailed', dest='jailed',
                     action='store_true', default=False,
                     help='If set, run in jailed envrionment')
+parser.add_argument('-n', '--netns', dest='netns',
+                    action='store_true', default=False,
+                    help='Use a separate network namespace in jail')
 parser.add_argument('-k', '--keep-going', dest='keepgoing', 
                     action='store_true', default=False, 
                     help='Keep going with other logs on divergence of one log')
@@ -45,12 +48,27 @@ parser.add_argument('-r', '--root', dest='chroot',
 parser.add_argument('-c', '--conf', dest='config',
                     default=None, metavar='CONF',
                     help='Use a racepro config file')
+parser.add_argument('-x', '--race-file', dest='race_file',
+                    default=None, metavar='FILE',
+                    help='Test those races whose number is specified here')
+parser.add_argument('-X', '--race-list', dest='race_list',
+                    default=None, metavar='N[:N...]',
+                    help='Location for output files (default: /presist/TEST')
 parser.add_argument('-l', '--log-level', dest='logmask',
                     default=None, metavar='LEVEL',
                     help='Log mask argument, see record arguments.')
 parser.add_argument('-f', '--log-flags', dest='logflags',
                     default=None, metavar='MASK',
                     help='Log mask argument, see record arguments.')
+parser.add_argument('--skip-record', dest='skip_record',
+                    action='store_true', default=False,
+                    help='Skip record step - reuse existing logs')
+parser.add_argument('--skip-findrace', dest='skip_findrace',
+                    action='store_true', default=False,
+                    help='Skip find-race step - reuse existing races')
+parser.add_argument('--skip-testrace', dest='skip_testrace',
+                    action='store_true', default=False,
+                    help='Skip test-race step - do not try to replay')
 parser.add_argument('tests', metavar='TEST[:PREFIX]', nargs='*',
                     help='TEST program to run (optional PREFIX for output)')
 
@@ -88,6 +106,7 @@ if args.config:
             elif k == 'initproc': args.initproc = bool_val(v)
             elif k == 'parallel': args.parallel = v
             elif k == 'archive': args.archive = bool_val(v)
+            elif k == 'netns': args.netns = bool_val(v)
 
             elif k == 'outdir': args.outdir = v
             elif k == 'redirect': args.redirect = bool_val(v)
