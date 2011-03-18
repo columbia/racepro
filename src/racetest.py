@@ -163,7 +163,7 @@ def _replay2(args, logfile, verbose, opts=''):
                 else './' + args._test
             r = exe.execute(cmd.split(), notty=True,
                             stdin=_dummy, stdout=args.redirect)
-            if r == 2:
+            if r == 2 or r == 255:
                 print(verbose + 'BUG REPRODUCED')
                 ret = 0
             elif r != 0:
@@ -239,6 +239,7 @@ def do_one_test(args, t_name, t_exec):
     if args.logmask: args.record += ' -l %s' % args.logmask
     if args.logflags: args.record += ' -f %s' % args.logflags
     if args.initproc: args.record += ' -i'
+    if args.netns: args.record += ' -n'
 
     args.replay = 'replay -l 15'
     args.racepro = 'racepro'
