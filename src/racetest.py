@@ -211,15 +211,21 @@ def _findraces(args, opts):
         return False
     return True
 
-def _testraces(args):
-
-    for n in count(1):
+def _testlist(args, races):
+    for n in races:
         logfile = '%s.%d.log' % (args.path, n)
         if not os.access(logfile, os.R_OK):
             break
         v = 'RACE %d: ' % n
         o = '-c %d' % args.timeout
         ret = _replay2(args, logfile, v, opts=o)
+        if ret != 0 and not args.keepgoing:
+            return False
+    return True
+
+def _testraces(args, races):
+    for n in count(1):
+        ret = _testlist(args, n)
         if ret != 0 and not args.keepgoing:
             return False
     return True
@@ -267,8 +273,10 @@ def do_one_test(args, t_name, t_exec):
     if args.verbose: opts += ' -v'
 
     logging.info('  output in directory %s' % args.pdir)
-    if os.access(args.pdir, os.R_OK):
-        _sudo('rm -rf %s' % args.pdir)
+
+    if not args.skip_record:
+        if os.access(args.pdir, os.R_OK):
+            _sudo('rm -rf %s' % args.pdir)
     _sudo('mkdir -p %s' % args.pdir)
 
     if args.quiet:
@@ -276,23 +284,38 @@ def do_one_test(args, t_name, t_exec):
     else:
         args.redirect = None
 
-    logging.info('  recording original exceution (twice)')
-    if not _record(args):
-        return True if args.keepgoing else False
-    if not _record(args):
-        return True if args.keepgoing else False
+    if not args.skip_record:
+        logging.info('  recording original exceution (twice)')
+        if not _record(args):
+            return True if args.keepgoing else False
+        if not _record(args):
+            return True if args.keepgoing else False
 
-    logging.info('  replaying original execution')
-    if not _replay(args):
-        return True if args.keepgoing else False
+        logging.info('  replaying original execution')
+        if not _replay(args):
+            return True if args.keepgoing else False
 
-    logging.info('  generating the races')
-    if not _findraces(args, opts):
-        return True if args.keepgoing else False
+    if not args.skip_findrace:
+        logging.info('  generating the races')
+        if not _findraces(args, opts):
+            return True if args.keepgoing else False
 
-    logging.info('  testing the races')
-    if not _testraces(args):
-        return True if args.keepgoing else False
+    if not args.skip_testrace:
+        logging.info('  testing the races (auto)')
+        if not _testraces(args):
+            return True if args.keepgoing else False
+
+    if args.race_list:
+        logging.info('  testing the races (list)')
+        if not _testlist(args, map(int, args.race_list.split(':'))):
+            return True if args.keepgoing else False
+
+    if args.race_file:
+        logging.info('  testing the races (list)')
+        with open(args.race_file) as file:
+            for line in file:
+                if not _testlist(args, map(int, line.split(':'))):
+                    return True if args.keepgoing else False
 
     return True
 
@@ -302,11 +325,17 @@ def uninitialized(args):
     if 'initproc' not in args: args.initproc = False
     if 'parallel' not in args: args.parallel = None
     if 'archive' not in args: args.archive = False
+    if 'netns' not in args: args.netns = False
     if 'outdir' not in args: args.outdir = None
     if 'redirect' not in args: args.redirect = None
     if 'root' not in args: args.root = None
     if 'scratch' not in args: args.scratch = None
     if 'chroot' not in args: args.chroot = None
+    if 'race_file' not in args: races_file = None
+    if 'race_list' not in args: races_list = None
+    if 'skip_record' not in args: args.skip_record = None
+    if 'skip_findrace' not in args: args.kskip_findrace = None
+    if 'skip_testrace' not in args: args.kskip_testrace = None
 
 def do_all_tests(args, tests):
     uninitialized(args)
