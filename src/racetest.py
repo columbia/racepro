@@ -224,10 +224,7 @@ def _testlist(args, races):
     return True
 
 def _testraces(args):
-    for n in count(1):
-        ret = _testlist(args, n)
-        if ret != 0 and not args.keepgoing:
-            return False
+    ret = _testlist(args, count(1))
     return True
 
 def do_one_test(args, t_name, t_exec):
