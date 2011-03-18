@@ -172,7 +172,7 @@ def _replay2(args, logfile, verbose, opts=''):
             else:
                 print(verbose + 'BUG not triggered')
                 ret = 0
-        elif r == 0:
+        elif ret == 0:
             print(verbose + 'BUG replayed but not tested')
 
         # if parallel, then terminate the replay init
