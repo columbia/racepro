@@ -7,6 +7,7 @@ import shutil
 import signal
 import logging
 import argparse
+import datetime
 import subprocess
 import pdb
 
@@ -212,13 +213,19 @@ def _findraces(args, opts):
     return True
 
 def _testlist(args, races):
+
     for n in races:
+        t_start = datetime.datetime.now()
         logfile = '%s.%d.log' % (args.path, n)
         if not os.access(logfile, os.R_OK):
             break
         v = 'RACE %d: ' % n
         o = '-c %d' % args.timeout
         ret = _replay2(args, logfile, v, opts=o)
+        t_end = datetime.datetime.now()
+        dt = t_end - t_start
+        logging.info('    race %d:  %.2f' %
+                     (%n, dt.seconds + dt.microseconds / 1000000.0))
         if ret != 0 and not args.keepgoing:
             return False
     return True
@@ -281,6 +288,8 @@ def do_one_test(args, t_name, t_exec):
     else:
         args.redirect = None
 
+    t_start = datatime.datetime.now()
+
     if not args.skip_record:
         logging.info('  recording original exceution (twice)')
         if not _record(args):
@@ -288,19 +297,30 @@ def do_one_test(args, t_name, t_exec):
         if not _record(args):
             return True if args.keepgoing else False
 
+        t_replay = datatime.datetime.now()
+
         logging.info('  replaying original execution')
         if not _replay(args):
             return True if args.keepgoing else False
+
+    else:
+        t_replay = t_start
+
+    t_record = datatime.datetime.now()
 
     if not args.skip_findrace:
         logging.info('  generating the races')
         if not _findraces(args, opts):
             return True if args.keepgoing else False
 
+    t_findrace = datatime.datetime.now()
+
     if not args.skip_testrace:
         logging.info('  testing the races (auto)')
         if not _testraces(args):
             return True if args.keepgoing else False
+
+    t_stop = datatime.datetime.now()
 
     if args.race_list:
         logging.info('  testing the races (list)')
@@ -313,6 +333,22 @@ def do_one_test(args, t_name, t_exec):
             for line in file:
                 if not _testlist(args, map(int, line.split(':'))):
                     return True if args.keepgoing else False
+
+    dt_replay = t_replay - t_start
+    dt_record = t_record, t_replay
+    dt_findrace = t_findrace - t_record
+    dt_testrace = t_stop - t_findrace
+    dt_total = t_stop - t_start
+    logging.info('total time: %f' %
+                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
+    logging.info('total record: %.2f' %
+                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
+    logging.info('total replay: %.2f' %
+                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
+    logging.info('total findrace: %.2f' %
+                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
+    logging.info('total testrace: %.2f' %
+                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
 
     return True
 
