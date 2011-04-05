@@ -1190,7 +1190,9 @@ class Session:
             q1, q2 = access[k1], access[k2]
             for (vc1, r_ev1) in q1:
                 for (vc2, r_ev2) in q2:
-                    if vc1.before(vc2) or vc2.before(vc1):
+                    if vc1.before(vc2):
+                        break
+                    if vc2.before(vc1):
                         continue
                     if (r_ev1.event.write_access == 0 and
                         r_ev2.event.write_access == 0):
