@@ -13,7 +13,7 @@ main()
 	int ret;
 
 	unlink(FILE);
-	fd = open(FILE, O_RDWR | O_CREAT | O_EXCL , 0);
+	fd = open(FILE, O_RDWR | O_CREAT | O_EXCL , 0644);
 	if (fd < 0) {
 		perror("open");
 		exit(1);
