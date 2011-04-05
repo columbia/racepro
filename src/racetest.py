@@ -367,8 +367,8 @@ def uninitialized(args):
     if 'race_file' not in args: races_file = None
     if 'race_list' not in args: races_list = None
     if 'skip_record' not in args: args.skip_record = None
-    if 'skip_findrace' not in args: args.kskip_findrace = None
-    if 'skip_testrace' not in args: args.kskip_testrace = None
+    if 'skip_findrace' not in args: args.skip_findrace = None
+    if 'skip_testrace' not in args: args.skip_testrace = None
 
 def do_all_tests(args, tests):
     uninitialized(args)
