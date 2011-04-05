@@ -225,7 +225,7 @@ def _testlist(args, races):
         t_end = datetime.datetime.now()
         dt = t_end - t_start
         logging.info('    race %d:  %.2f' %
-                     (%n, dt.seconds + dt.microseconds / 1000000.0))
+                     (n, dt.seconds + dt.microseconds / 1000000.0))
         if ret != 0 and not args.keepgoing:
             return False
     return True
@@ -288,7 +288,7 @@ def do_one_test(args, t_name, t_exec):
     else:
         args.redirect = None
 
-    t_start = datatime.datetime.now()
+    t_start = datetime.datetime.now()
 
     if not args.skip_record:
         logging.info('  recording original exceution (twice)')
@@ -297,7 +297,7 @@ def do_one_test(args, t_name, t_exec):
         if not _record(args):
             return True if args.keepgoing else False
 
-        t_replay = datatime.datetime.now()
+        t_replay = datetime.datetime.now()
 
         logging.info('  replaying original execution')
         if not _replay(args):
@@ -306,21 +306,21 @@ def do_one_test(args, t_name, t_exec):
     else:
         t_replay = t_start
 
-    t_record = datatime.datetime.now()
+    t_record = datetime.datetime.now()
 
     if not args.skip_findrace:
         logging.info('  generating the races')
         if not _findraces(args, opts):
             return True if args.keepgoing else False
 
-    t_findrace = datatime.datetime.now()
+    t_findrace = datetime.datetime.now()
 
     if not args.skip_testrace:
         logging.info('  testing the races (auto)')
         if not _testraces(args):
             return True if args.keepgoing else False
 
-    t_stop = datatime.datetime.now()
+    t_stop = datetime.datetime.now()
 
     if args.race_list:
         logging.info('  testing the races (list)')
@@ -364,8 +364,8 @@ def uninitialized(args):
     if 'root' not in args: args.root = None
     if 'scratch' not in args: args.scratch = None
     if 'chroot' not in args: args.chroot = None
-    if 'race_file' not in args: races_file = None
-    if 'race_list' not in args: races_list = None
+    if 'race_file' not in args: args.race_file = None
+    if 'race_list' not in args: args.race_list = None
     if 'skip_record' not in args: args.skip_record = None
     if 'skip_findrace' not in args: args.skip_findrace = None
     if 'skip_testrace' not in args: args.skip_testrace = None
