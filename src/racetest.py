@@ -226,7 +226,7 @@ def _testlist(args, races):
         dt = t_end - t_start
         logging.info('    time:  %.2f' %
                      (dt.seconds + dt.microseconds / 1000000.0))
-        if ret != 0 and not args.keepgoing:
+        if not ret and not args.keepgoing:
             return False
     return True
 
@@ -263,11 +263,22 @@ def do_one_test(args, t_name, t_exec):
         return path if os.access(path, os.R_OK | os.X_OK) else None
 
     args._run = args.run if 'run' in args else '%s' % t_exec
-    args._test = args.test if 'test' in args else '%s.test' % t_name
+    args._test = args.test \
+        if 'test' in args else def_script_name('%s.test' % t_name)
     args._pre = args.pre \
         if 'pre' in args else def_script_name('%s.pre' % t_name)
     args._post = args.post \
         if 'post' in args else def_script_name('%s.post' % t_name)
+
+    if args._test and not os.access(args._test, os.X_OK):
+        logging.error('%s: test script request but not found' % args._test)
+        return False
+    if args._pre and not os.access(args._pre, os.X_OK):
+        logging.error('%s: pre script request but not found' % args._pre)
+        return False
+    if args._post and not os.access(args._post, os.X_OK):
+        logging.error('%s: post script request but not found' % args._post)
+        return False
 
     opts = ''
     if args.debug: opts += ' -d'
