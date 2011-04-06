@@ -263,7 +263,8 @@ def do_one_test(args, t_name, t_exec):
         return path if os.access(path, os.R_OK | os.X_OK) else None
 
     args._run = args.run if 'run' in args else '%s' % t_exec
-    args._test = args.test if 'test' in args else '%s.test' % t_name
+    args._test = args.test \
+        if 'test' in args else def_script_name('%s.test' % t_name)
     args._pre = args.pre \
         if 'pre' in args else def_script_name('%s.pre' % t_name)
     args._post = args.post \
