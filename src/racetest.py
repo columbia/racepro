@@ -259,18 +259,15 @@ def do_one_test(args, t_name, t_exec):
     args.pdir = args.outdir + '/' + t_name
     args.path = args.outdir + '/' + t_name + '/out'
 
-    if '_run' not in args:
-        args._run = '%s' % t_exec
-    if '_test' not in args:
-        args._test = '%s.test' % t_name
-    if '_pre' not in args:
-        args._pre = '%s.pre' % t_name
-    if args._pre and not os.access(args._pre, os.R_OK | os.X_OK):
-        args._pre = None
-    if '_post' not in args:
-        args._post = '%s.post' % t_name
-    if args._post and not os.access(args._post, os.R_OK | os.X_OK):
-        args._post = None
+    def def_script_name(path):
+        return path if os.access(path, os.R_OK | os.X_OK) else None
+
+    args._run = args.run if 'run' in args else '%s' % t_exec
+    args._test = args.test if 'test' in args else '%s.test' % t_name
+    args._pre = args.pre \
+        if 'pre' in args else def_script_name('%s.pre' % t_name)
+    args._post = args.post \
+        if 'post' in args else def_script_name('%s.post' % t_name)
 
     opts = ''
     if args.debug: opts += ' -d'
