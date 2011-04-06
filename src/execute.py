@@ -6,14 +6,25 @@ import errno
 
 def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
     if notty:
-        p1 = subprocess.Popen(cmd, stdin=stdin, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT)
+        try:
+            p1 = subprocess.Popen(cmd, stdin=stdin,
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT)
+        except OSError as (e, s):
+            print("%s: %s" % (cmd.join(' '), s))
+            raise
         p2 = subprocess.Popen(['/bin/cat'], stdin=p1.stdout, stdout=stdout,
                               stderr=subprocess.STDOUT)
         p1.stdout.close()
         # p2 is somehow magically collected by python ... miracle
     else:
-        p1 = subprocess.Popen(cmd, stdin=stdin, stdout=stdout, stderr=stderr)
+        try:
+            p1 = subprocess.Popen(cmd, stdin=stdin,
+                                  stdout=stdout,
+                                  stderr=stderr)
+        except OSError as (e, s):
+            print("%s: %s" % (cmd.join(' '), s))
+            raise
     return p1
 
 def _sudo_raw(cmd, **kwargs):
