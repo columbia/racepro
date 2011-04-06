@@ -226,7 +226,7 @@ def _testlist(args, races):
         dt = t_end - t_start
         logging.info('    time:  %.2f' %
                      (dt.seconds + dt.microseconds / 1000000.0))
-        if ret != 0 and not args.keepgoing:
+        if not ret and not args.keepgoing:
             return False
     return True
 
