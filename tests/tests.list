@@ -2,7 +2,7 @@ fork_one_file	fork_one_file
 fork_two_file	fork_two_file
 fork_two_proc	fork_two_proc
 read_write_write read_write_write
-bashsimple.sh   bashsimple.sh
+bashsimple   bashsimple.sh
 no_race         no_race
 unlink_stat     unlink_stat
 euid           euid

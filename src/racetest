@@ -97,10 +97,10 @@ if args.config:
 
             if k == 'name': args.name = v
             elif k == 'timeout': args.timeout = v
-            elif k == 'script-run': args._run = v
-            elif k == 'script-pre': args._pre = v
-            elif k == 'script-post': args._post = v
-            elif k == 'script-test': args._test = v
+            elif k == 'script-run': args.run = v
+            elif k == 'script-pre': args.pre = v
+            elif k == 'script-post': args.post = v
+            elif k == 'script-test': args.test = v
             elif k == 'jailed': args.jailed = bool_val(v)
 
             elif k == 'initproc': args.initproc = bool_val(v)

@@ -224,8 +224,8 @@ def _testlist(args, races):
         ret = _replay2(args, logfile, v, opts=o)
         t_end = datetime.datetime.now()
         dt = t_end - t_start
-        logging.info('    race %d:  %.2f' %
-                     (n, dt.seconds + dt.microseconds / 1000000.0))
+        logging.info('    time:  %.2f' %
+                     (dt.seconds + dt.microseconds / 1000000.0))
         if ret != 0 and not args.keepgoing:
             return False
     return True
@@ -259,18 +259,15 @@ def do_one_test(args, t_name, t_exec):
     args.pdir = args.outdir + '/' + t_name
     args.path = args.outdir + '/' + t_name + '/out'
 
-    if '_run' not in args:
-        args._run = '%s' % t_exec
-    if '_test' not in args:
-        args._test = '%s.test' % t_name
-    if '_pre' not in args:
-        args._pre = '%s.pre' % t_name
-    if args._pre and not os.access(args._pre, os.R_OK | os.X_OK):
-        args._pre = None
-    if '_post' not in args:
-        args._post = '%s.post' % t_name
-    if args._post and not os.access(args._post, os.R_OK | os.X_OK):
-        args._post = None
+    def def_script_name(path):
+        return path if os.access(path, os.R_OK | os.X_OK) else None
+
+    args._run = args.run if 'run' in args else '%s' % t_exec
+    args._test = args.test if 'test' in args else '%s.test' % t_name
+    args._pre = args.pre \
+        if 'pre' in args else def_script_name('%s.pre' % t_name)
+    args._post = args.post \
+        if 'post' in args else def_script_name('%s.post' % t_name)
 
     opts = ''
     if args.debug: opts += ' -d'
@@ -335,20 +332,20 @@ def do_one_test(args, t_name, t_exec):
                     return True if args.keepgoing else False
 
     dt_replay = t_replay - t_start
-    dt_record = t_record, t_replay
+    dt_record = t_record - t_replay
     dt_findrace = t_findrace - t_record
     dt_testrace = t_stop - t_findrace
     dt_total = t_stop - t_start
-    logging.info('total time: %f' %
-                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
-    logging.info('total record: %.2f' %
-                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
-    logging.info('total replay: %.2f' %
-                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
+    logging.info('total time:     %.2f' %
+                 (dt_total.seconds + dt_total.microseconds / 1000000.0))
+    logging.info('total record:   %.2f' %
+                 (dt_record.seconds + dt_record.microseconds / 1000000.0))
+    logging.info('total replay:   %.2f' %
+                 (dt_replay.seconds + dt_replay.microseconds / 1000000.0))
     logging.info('total findrace: %.2f' %
-                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
+                 (dt_findrace.seconds + dt_findrace.microseconds / 1000000.0))
     logging.info('total testrace: %.2f' %
-                 (dt_total.seconds + dt_total.microseconds / 0.1000000))
+                 (dt_testrace.seconds + dt_testrace.microseconds / 1000000.0))
 
     return True
 
