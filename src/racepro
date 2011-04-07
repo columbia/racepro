@@ -47,7 +47,7 @@ def condense_events(events):
     # write_access: non zero if the event is a write
     serials = dict()  
     for e in events:
-        if not isinstance(e, scribe.EventResourceLockExtra):
+        if isinstance(e, scribe.EventResourceLockExtra):
             if e.id not in serials:
                 e.serial = 0
                 serials[e.id] = (0, 0, e.write_access)
