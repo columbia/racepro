@@ -585,40 +585,6 @@ class Session:
                 e = scribe.EventQueueEof()
                 yield e
 
-    # YJF: remove holes in serial number sequence.
-    # FIXME: this should really be in py-scribe because we essentially
-    # reverse engineer the serial assignment logic here.
-    # FIXME: should use read/write access info, since we may remove writes
-    def condense_events(self):
-        """ remove holes in serial number sequences of resources """
-        for r in self.resource_list:
-            prev_serial = -1
-            for e in r.events:
-                if prev_serial == -1:
-                    ndel = e.event.serial # number of deleted events
-                    nrepeat = 1 # number of repeated occurences of a serial
-                    new_serial = 0
-                    if e.event.serial != new_serial:
-                        logging.debug("changed id=%d serial=%d to serial=0"
-                                      % (e.event.id, e.event.serial))
-                    # first event always has serial 0
-                    prev_serial = e.event.serial = new_serial
-                    continue
-                if e.event.serial == prev_serial + ndel:
-                    # same as previous serial
-                    nrepeat += 1
-                    new_serial = e.event.serial - ndel
-                else:
-                    # different than previous serial
-                    new_serial = prev_serial + nrepeat
-                    ndel = e.event.serial - new_serial
-                    nrepeat = 1
-                if e.event.serial != new_serial:
-                    logging.debug("changed id=%d serial=%d to serial=%d"
-                                  % (e.event.id, e.event.serial, new_serial))
-                prev_serial = e.event.serial = new_serial
-        return
-
     def order_syscalls(self, crosscut, syscalls):
         """Generate bookmarks, inject, and cutoff, that will produce a
         serialize (total order) execution from a given crosscut in the
@@ -1221,6 +1187,11 @@ class Session:
                 node = self.make_node(proc.pid, p_ev.syscnt)
                 vc = vclocks[(proc, p_ev.syscnt)]
                 access[proc.pid].append((vc, r_ev))
+
+            # YJF: exlude empty lists
+            for k in access.keys():
+                if len(access[k]) == 0:
+                    del access[k]
 
             races.extend(self.__races_accesses_yjf(access))
 

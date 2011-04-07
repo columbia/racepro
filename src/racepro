@@ -35,6 +35,32 @@ def load_session(logfile):
 
     return session
 
+# YJF: remove holes in serial number sequence.
+# NOTE: this method updates the event in place because we do not use event
+# serials anywhere in racepro
+# FIXME: this should really be in py-scribe because we essentially
+# reverse engineer the serial assignment logic here.
+def condense_events(events):
+    # map from resource id to the previou event's (serial, seq, write_access)
+    # serial: serial number
+    # seq: sequence number ignoring access type
+    # write_access: non zero if the event is a write
+    serials = dict()  
+    for e in events:
+        if not isinstance(e, scribe.EventResourceLockExtra):
+            if e.id not in serials:
+                e.serial = 0
+                serials[e.id] = (0, 0, e.write_access)
+            else:
+                (prev_serial, seq, prev_wr) = serials[e.id]
+                seq += 1
+                if e.write_access or prev_wr:
+                    e.serial = seq
+                else:
+                    e.serial = prev_serial
+                serials[e.id] = (e.serial, seq, e.write_access)
+        yield e
+
 def save_session(logfile, events):
     """Save modified scribe log to logfile"""
     try:
@@ -43,7 +69,7 @@ def save_session(logfile, events):
         print('Cannot open log file %s' % logfile)
         exit(1)
 
-    for e in events:
+    for e in condense_events(events):
         f.write(e.encode())
 
     f.close()
@@ -223,6 +249,7 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
         session.parse_syscall(index2)
 
     bookmark1 = session.crosscut_graph(graph, vclocks, [node1, node2])
+
     if not bookmark1:
         print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
               (proc1.pid, cnt1, proc2.pid, cnt2))
@@ -399,13 +426,6 @@ def save_modify_log(session, bookmarks, injects, cutoff, replace, output):
     event_iter = session.save_events(bookmarks, injects, cutoff, replace)
     save_session(output, event_iter)
 
-    # YJF: condense event serial and rewrite log
-    # read log into @tmp and rewrite - simpler logic
-    tmp = load_session(output)
-    tmp.condense_events()
-
-    event_iter = tmp.save_events()
-    save_session(output, event_iter)
 
 def show_races(args):
     session = load_session(args.logfile)
