@@ -18,7 +18,7 @@ main()
 {
 	char buf[128];
 	char *str;
-	int ret;
+	int i, ret;
 
 	unlink(FILE);
 	fd = open(FILE, O_RDWR | O_CREAT | O_EXCL , 0644);
@@ -34,15 +34,19 @@ main()
 	} else if (ret == 0) {
 		str = "child\n";
 		signal(SIGHUP, sighand);
-		sprintf(buf, "%s\n", "child before");
-		ret = write(fd, buf, strlen(buf));
-		ret = usleep(2000000);
-		sprintf(buf, "%s (%d)\n", "child after", ret);
-		ret = write(fd, buf, strlen(buf));
+		for (i = 0; i < 3; i++) {
+			sprintf(buf, "%s %d\n", "child before", i);
+			ret = write(fd, buf, strlen(buf));
+			ret = usleep(2000000);
+			sprintf(buf, "%s %d (%d)\n", "child after", i, ret);
+			ret = write(fd, buf, strlen(buf));
+		}
 	} else {
 		str = "parent\n";
-		sleep(1);
-		kill(ret, SIGHUP);
+		for (i = 0; i < 3; i++) {
+			sleep(1);
+			kill(ret, SIGHUP);
+		}
 	}
 
 	ret = write(fd, str, strlen(str));
@@ -51,5 +55,6 @@ main()
 		exit(1);
 	}
 
+	close(fd);
 	exit(0);
 }
