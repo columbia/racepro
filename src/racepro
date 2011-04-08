@@ -283,6 +283,75 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
 
     return bookmarks, injects, cutoff, None  # replace
 
+def find_signal_races(session, vclocks):
+    """Find all signal races and return in a list"""
+    signal_races = session.races_signals(vclocks)
+    logging.debug('total signal races %d' % (len(signal_races)))
+    return signal_races
+
+def prep_signal_race(session, graph, vclocks, signal, n_race):
+    """prepare a race by computing bookmarks, injects, and cutoff
+    If the signal interrupted the syscall, then make it not interrupt.
+    If the signal did not interrupt the syscall, then make it interrupt.
+    """
+    cnt = signal.syscnt
+    proc = session.events[signal.index].proc
+    index = session.events[signal.index].pindex
+    node = session.make_node(proc.pid, cnt)
+
+    bookmark1 = session.crosscut_graph(graph, vclocks, [node])
+    if not bookmark1:
+        print('No consistent cut: pid %d syscnt %d' % proc.pid, cnt)
+        return None
+
+    bookmark2 = dict(bookmark1)
+    bookmark2[proc.pid] = -bookmark2[proc.pid]
+    bookmarks = [bookmark1, bookmark2]
+
+    # bookmark1 is a crosscut of the graph consistent with the syscall
+    # affected by the signal. we don't need another bookmark; instead,
+    # we reverse the signal's effect by "reversing" the syscall return
+    # value (from interrupted to non-interrupted or vice versa)
+
+    injects = dict()
+
+    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                            scribe.SCRIBE_PS_ENABLE_RET_CHECK)
+    injects[proc.pid] = dict({-cnt : action})
+
+    cutoff = dict(bookmark2)
+
+    print('%s index %d syscnt %d' %
+          (signal.event, signal.index, signal.syscnt))
+    sysind = session.next_syscall(signal.index)
+    syscall_old = session.events[sysind].event
+    syscall_new = scribe.EventSyscallExtra()
+    syscall_new.nr = syscall_old.nr
+
+    if syscall_old.ret in unistd.EINTERRUPTED:
+        syscall_new.ret = 0
+    else:
+        # FIXME: choice of ERESTARTSYS is arbitrary and probably
+        # incorrect. specific error value should be syscall specific
+        logging.warn('"reverse" signal race may be incorrect...')
+        syscall_new.ret = unistd.ERESTARTSYS
+
+    replace = list([(syscall_old, syscall_new)])
+
+    print('RACE %2d:  ' % (n_race + 1) +
+          'pid %d syscnt %d [sys(%d)=%d/%d]' %
+          (proc.pid, cnt, syscall_old.nr, syscall_old.ret, syscall_new.ret))
+    print('          cut:  %s' % bookmark1.values())
+
+    logging.info('   boobkmark1: %s' % (bookmark1))
+    logging.info('   boobkmark2: %s' % (bookmark2))
+    logging.info('      injects: %s' % (injects))
+    logging.info('       cutoff: %s' % (cutoff))
+    logging.info('      replace: %s' % (replace))
+
+    return bookmarks, injects, cutoff, replace
+
 def find_exitwait_races(session, vclocks):
     """Find all exit-wait races and return in a list"""
     exit_races = session.races_exitwait(vclocks)
@@ -523,6 +592,42 @@ def show_races(args):
             break
 
     ######################################################################
+    # step 3: Find signal races, Then for each race try to generate a
+    # (bookmarks, injects, cutoff) tuple. Finally, use those to write
+    # out a modified log.
+
+    if(args.no_signal_races):
+        signal_races = list()
+    else:
+        signal_races = find_signal_races(session, vclocks)
+
+    print('-' * 75)
+    print('SIGNAL RACES')
+    print('Found %d potential races' % len(signal_races))
+
+    if args.random:
+        r = random.sample(signal_races, len(signal_races))
+        print('Random sample to generate up to %d races:' % (args.count))
+    else:
+        r = signal_races
+
+    print('-' * 75)
+
+    for signal in signal_races:
+        ret = prep_signal_race(session, graph, vclocks, signal, n_race)
+        if not ret:
+            n_fail += 1
+            continue
+        n_race += 1
+
+        (bookmarks, injects, cutoff, replace) = ret
+        output = args.outfile + '.' + str(n_race) + '.log'
+        save_modify_log(session, bookmarks, injects, cutoff, replace, output)
+
+        if n_race == args.count:
+            break
+
+    ######################################################################
     # step 3: Statistics ..
 
     print('-' * 75)
@@ -607,6 +712,9 @@ parser_races.add_argument('--no-depend', dest='nodepend',
 parser_races.add_argument('--no-exit-races', dest='no_exit_races',
                           action='store_true', default=False,
                           help='Do not detect exit-exit-wait race')
+parser_races.add_argument('--no-signal-races', dest='no_signal_races',
+                          action='store_true', default=False,
+                          help='Do not detect signal race')
 
 desc = 'Process and modify scribe execution log'
 parser = argparse.ArgumentParser(description=desc)

@@ -91,6 +91,21 @@ class Resource:
         self.id = event.id
         self.events = list()
 
+class SignalEvent:
+    """An event from the point of view of a signal:
+    @info: pointer to scribe's info
+    @event: pointer to scribe's event
+    @index: index of event in global log
+    @sysind: index of owning syscall in global log
+    """
+    __slots__ = ('info', 'event', 'index', 'syscnt')
+
+    def __init__(self, info, event, index, syscnt):
+        self.info = info
+        self.event = event
+        self.index = index
+        self.syscnt = syscnt
+
 class Action:
     """Describe an action to be injected into a log"""
 
@@ -139,7 +154,9 @@ class Session:
     @process_list: list of all Process instances
     @resource_map: map a unique identifier to the coresponding Resource
     @resource_list: list of all Resource instances
+    @signals: list of all signals
     @events: list of all events (pointers to Process/Resources)
+    @cookie_e: map of all cookie events (signals)
     @clone_e: list of all clone() events
     @wait_e: list of all wait() events
     @exit_e: list of all exit() events
@@ -268,7 +285,8 @@ class Session:
         # we also collect for further processing:
         # - wait/exit
         # - pipe/socket read/write
-        # TODO: also add kill/signal
+        # - kill/signal
+        self.cookie_e = dict()
         self.clone_e = list()
         self.wait_e = list()
         self.exit_e = list()
@@ -329,6 +347,28 @@ class Session:
                 resource = self.resource_map[event.id]
                 r_ev = ResourceEvent(info, event, ind, proc.sysind)
                 resource.events.append(r_ev)
+
+            elif isinstance(event, scribe.EventSignal):
+                sig_ev = SignalEvent(info, event, ind, proc.syscnt + 1)
+                self.signals.append(sig_ev)
+
+            elif isinstance(event, scribe.EventSigSendCookie):
+                sig_ev = SignalEvent(info, event, ind, proc.syscnt + 1)
+                if event.cookie in self.cookie_e:
+                    send, recv = self.cookie_e[event.cookie]
+                else:
+                    send, recv = None, None
+                send = sig_ev
+                self.cookie_e[event.cookie] = (send, recv)
+
+            elif isinstance(event, scribe.EventSigRecvCookie):
+                sig_ev = SignalEvent(info, event, ind, proc.syscnt + 1)
+                if event.cookie in self.cookie_e:
+                    send, recv = self.cookie_e[event.cookie]
+                else:
+                    send, recv = None, None
+                recv = sig_ev
+                self.cookie_e[event.cookie] = (send, recv)
 
             s_ev = SessionEvent(info, event, proc, len(proc.events),
                                 None, 0, proc.sysind, proc.regind)
@@ -807,6 +847,19 @@ class Session:
 
                 ri += 1
 
+    def __dependency_signal(self, graph):
+        """ADD HB dependencies due to signal send/receive (cookies)"""
+        for send, recv in self.cookie_e.values():
+            proc1 = self.events[send.index].proc
+            cnt1 = send.syscnt
+            sender = self.make_node(proc1.pid, cnt1)
+
+            proc2 = self.events[recv.index].proc
+            cnt2 = recv.syscnt
+            receiver = self.make_node(proc2.pid, cnt2)
+
+            graph.add_edge(sender, receiver, signal='1', label='signal')
+
     def parent_pid(self, index):
         return self.events[index].proc.ppid
 
@@ -852,6 +905,7 @@ class Session:
     def __dependency_graph(self, graph):
         """Add HB dependencies due to resources to an execution graph"""
         self.__dependency_pipe(graph)
+        self.__dependency_signal(graph)
         ## self.__dependency_reparent(graph)
 
     def make_graph(self, full=False, dependency=True, resources=False):
@@ -909,6 +963,8 @@ class Session:
                 # is this an edge that should cause a tick ?
                 if next.pid != proc.pid:
                     if 'fork' in graph.edge[node][nn]:
+                        tick = True
+                    elif 'signal' in graph.edge[node][nn]:
                         tick = True
                     elif resources and 'resource' in graph.edge[node][nn]:
                         tick = True
@@ -1043,6 +1099,8 @@ class Session:
             logging.debug('    vc: %s' % vclocks[(proc, cnt)])
 
         logging.debug('merged clocks %s' % vc.clocks)
+        logging.debug('ticks array %s' %
+                      ([(p.pid, c, s) for ((p, c), s) in ticks.items()]))
 
         # syscnt before which we cut
         cut = dict([(int(p), int(c)) for p, c in
@@ -1222,6 +1280,24 @@ class Session:
         return [(vc1, r_ev1.index, vc2, r_ev2.index) for
                 vc1, r_ev1, vc2, r_ev2 in races]
 
+    def races_signals(self, vclocks):
+        """Given vclocks of all syscalls, find signal races for both
+        'internal' and 'external' signals (i.e. send by a process in
+        or out of the recorded session, respectively).
+
+        Initially, we just change the way the signals affects (or not)
+        the syscall. If the signal interrupted the syscall, we will
+        now allow the syscall to complete and then deliver the signal;
+        if the signal did not interrupt the syscall, we will force it
+        to interrupt the syscall.
+
+        TODO: attempt to deliver the signal to syscalls that occured
+        before the affected syscall and that are "racy" with the
+        sending syscall (for each syscall, once pre-, once post-).
+        """
+
+        return self.signals
+
     def races_exitwait(self, vclocks):
         """Given vclocks of all syscalls, find exit-wait races:
         For each exit() successfully waited for, find all the other
@@ -1303,4 +1379,5 @@ class Session:
         self.process_list = list()
         self.resource_map = dict()
         self.resource_list = list()
+        self.signals = list()
         self.events = list()
