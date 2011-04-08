@@ -1,5 +1,17 @@
 import sys
 
+ERESTARTSYS = -512
+ERESTARTNOINTR = -513
+ERESTARTNOHAND = -514
+ERESTART_RESTARTBLOCK = -516
+
+EINTERRUPTED = [
+    ERESTARTSYS,
+    ERESTARTNOINTR,
+    ERESTARTNOHAND,
+    ERESTART_RESTARTBLOCK,
+]
+
 def syscall_ret(ret):
     """Convert syscall return value from unsigned to signed"""
     if ret >= sys.maxint:
