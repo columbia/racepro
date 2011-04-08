@@ -77,16 +77,17 @@ class ResourceEvent:
 
 class Resource:
     """Describe execution log related to a resource isntance.
-    @type: type of resource
+    @type: type of resource event
+    @subtype: type of specific resource
     @desc: descruption of resource
     @id: unique identifier of the resource
     @events: (ordered) list of events affecting this resource
     """
-    __slots__ = ('type', 'desc', 'id', 'events')
+    __slots__ = ('type', 'subtype', 'desc', 'id', 'events')
 
     def __init__(self, event):
         self.type = event.type
-        self.subtype = None
+        self.subtype = event.resource_type
         self.id = event.id
         self.events = list()
 
@@ -165,6 +166,12 @@ class Session:
     def get_syscall(self, index):
         sysind = self.events[index].sysind
         return self.events[sysind].event
+
+    def next_syscall(self, index):
+        proc = self.events[index].proc
+        pindex = self.events[index].pindex
+        pindex = proc.next_syscall(pindex)
+        return proc.events[pindex].index
 
     def get_registers(self, index):
         sysind = self.events[index].regind
@@ -878,7 +885,8 @@ class Session:
         vclocks = dict()
         vclocks[self.process_map[1], 0] = VectorClock(1)
 
-        assert networkx.algorithms.dag.is_directed_acyclic_graph(graph), 'graph is not a DAG'
+        assert networkx.algorithms.dag.is_directed_acyclic_graph(graph), \
+            'graph is not a DAG'
 
         for node in networkx.algorithms.dag.topological_sort(graph):
             proc, index = self.split_node(node)
@@ -1002,6 +1010,7 @@ class Session:
                     ticks[(proc, c)] = min(syscnt, ticks[(proc, c)])
                 else:
                     ticks[(proc, c)] = syscnt
+            vclocks['ticks'] = ticks
 
         # given @anchors with clock @vcs, find a set nof nodes N in each
         # process, s.t. each pair of nodes in N are concurrent.
@@ -1059,6 +1068,7 @@ class Session:
 
             cut[pid] = syscnt
 
+        logging.debug('temp-cut: %s' % cut)
         # convert cut to bookmarks understandable by save_events()
         # we use two passes (first cut, then marks) because when checking
         # if a child process has been cloned or not, we must make sure
@@ -1217,7 +1227,8 @@ class Session:
         """Given vclocks of all syscalls, find exit-wait races:
         For each exit() successfully waited for, find all the other
         exit() calls that may be concurrent to this one and thus
-        could be waited for instead."""
+        could be waited for instead.
+        """
 
         # step one: divide the exits() into per-parent lists, each
         # list ordered by vclocks: loop on waits to determine where
