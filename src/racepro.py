@@ -1259,6 +1259,7 @@ class Session:
                 # just drop such resources
                 logging.info('resource %d has too many (%d) events; skip'
                              % (resource.id, len(resource.events)))
+                continue
 
             access = dict(map(lambda k: (k, list()), self.process_map.keys()))
 
