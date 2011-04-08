@@ -1186,9 +1186,13 @@ class Session:
         This is passsed to __races_accesses() which returns a list of
         actual races: (vclock1, index1, vclock2, index2)
         """
+        races = list()
+        resource_ignore = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
 
         races = list()
         for resource in self.resource_list:
+            if resource.subtype in resource_ignore:
+                continue
 
             # YJF: FIXME: switch to random sampling if there are too many events
             events = resource.events
@@ -1197,11 +1201,6 @@ class Session:
                 # just drop such resources
                 logging.info('resource %d has too many (%d) events; skip'
                              % (resource.id, len(resource.events)))
-                #logging.info('resource %d has too many (%d) events; sample %d'
-                #             % (resource.id, len(resource.events), thresh))
-                # Fix seed to make our algorithm deterministic
-                #random.seed(len(resource.events))
-                #events = random.sample(resource.events, thresh)
 
             access = dict(map(lambda k: (k, list()), self.process_map.keys()))
 
