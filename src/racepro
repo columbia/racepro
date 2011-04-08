@@ -163,7 +163,6 @@ def show_profile(args):
 def filter_syscall(session, proc, index):
     event = session.events[index].event
 
-    print('pid %d nr %d' % (proc.pid, event.nr))
     # getdents(): drop data* events to tolerate missing/unexpected
     # pids in /proc, and mark SCRIBE_PS_ENABLE_DATA to be unset
 
@@ -189,7 +188,7 @@ def filter_syscall(session, proc, index):
 def find_pairwise_races(session, vclocks):
     """Find all pairwise races and return in a list"""
     all_races = session.races_resources(vclocks)
-    logging.debug('total races %d' % (len(all_races)))
+    logging.debug('total resource races %d' % (len(all_races)))
 
     sys_races = set()
     map_races = dict()
@@ -231,7 +230,7 @@ def find_pairwise_races(session, vclocks):
     return all_races, sys_races
 
 def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
-    """prepare a race by computing bookmacks, injects, and cutoff"""
+    """prepare a race by computing bookmarks, injects, and cutoff"""
     proc1, cnt1 = session.split_node(node1)
     index1 = int(graph.node[node1]['index'])
     event1 = session.events[index1].event
@@ -287,11 +286,11 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
 def find_exitwait_races(session, vclocks):
     """Find all exit-wait races and return in a list"""
     exit_races = session.races_exitwait(vclocks)
-    logging.debug('total exit-races %d' % (len(all_races)))
+    logging.debug('total exit-races %d' % (len(exit_races)))
     return exit_races
 
 def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
-    """prepare a race by computing bookmacks, injects, and cutoff"""
+    """prepare a race by computing bookmarks, injects, and cutoff"""
     proc1, pindex1 = exit1
     p_ev1 = proc1.events[pindex1]
     event1 = p_ev1.event
@@ -494,7 +493,7 @@ def show_races(args):
     if(args.no_exit_races):
         exit_races = list()
     else:
-        exit_races = session.races_exitwait(vclocks)
+        exit_races = find_exitwait_races(session, vclocks)
 
     print('-' * 75)
     print('EXIT-WAIT RACES')
