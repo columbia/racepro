@@ -1,4 +1,5 @@
 import sys
+import random
 import pdb
 import logging
 import networkx
@@ -1175,13 +1176,27 @@ class Session:
         This is passsed to __races_accesses() which returns a list of
         actual races: (vclock1, index1, vclock2, index2)
         """
-        races = list()
 
+        races = list()
         for resource in self.resource_list:
+
+            # YJF: FIXME: switch to random sampling if there are too many events
+            events = resource.events
+            thresh = 100  # threshold to switch to random
+            if len(resource.events) > thresh:
+                # just drop such resources
+                logging.info('resource %d has too many (%d) events; skip'
+                             % (resource.id, len(resource.events)))
+                #logging.info('resource %d has too many (%d) events; sample %d'
+                #             % (resource.id, len(resource.events), thresh))
+                # Fix seed to make our algorithm deterministic
+                #random.seed(len(resource.events))
+                #events = random.sample(resource.events, thresh)
+
             access = dict(map(lambda k: (k, list()), self.process_map.keys()))
 
             # track accesses per process
-            for r_ev in resource.events:
+            for r_ev in events:
                 proc, index = self.r_ev_to_proc(r_ev, sysind=True)
                 p_ev = proc.events[index]
                 node = self.make_node(proc.pid, p_ev.syscnt)
