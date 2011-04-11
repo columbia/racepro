@@ -128,14 +128,14 @@ for t in args.tests:
     tests.append((s[1], s[0]))
 
 if len(tests) == 0:
-    if args._run:
+    if 'run' not in args:
+        print('No tests specified .. existing')
+        exit(1)
+    else:
         if 'name' not in args:
             print('Config file is missing "name = NAME" line')
             exit(1)
-        tests = [(args.name, args._run)]
-    else:
-        print('No tests specified .. existing')
-        exit(1)
+        tests = [(args.name, args.run)]
 
 if not args.outdir:
     args.outdir = '/persist'
