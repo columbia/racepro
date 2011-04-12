@@ -12,6 +12,9 @@ class VectorClock:
         except:
             return 0
 
+    def __getitem__(self, pid):
+        return self.get(pid)
+
     def tick(self, pid):
         self.clocks[pid] += 1
 
