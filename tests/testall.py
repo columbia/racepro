@@ -4,7 +4,7 @@ import sys
 import logging
 import argparse
 
-import racetest 
+from racepro import racetest
 
 desc = 'Run through Racepro tests'
 parser = argparse.ArgumentParser(description=desc)

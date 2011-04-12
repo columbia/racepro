@@ -14,8 +14,7 @@ import pygraphviz
 from itertools import *
 
 import scribe
-from racepro import racepro
-from racepro import unistd
+from racepro import *
 
 def load_session(logfile):
     """Load a scribe log from logfile"""
@@ -26,12 +25,9 @@ def load_session(logfile):
         exit(1)
 
     m = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
-    e = list(scribe.EventsFromBuffer(m, remove_annotations=False))
+    session = Session(scribe.EventsFromBuffer(m, remove_annotations=False))
     m.close()
     f.close()
-
-    session = racepro.Session()
-    session.load_events(e)
 
     return session
 
@@ -80,21 +76,6 @@ def _sudo(cmd):
 
 ##############################################################################
 
-def diet_graph(graph):
-    for n in graph.nodes():
-        if graph.in_degree(n) != 1 or graph.out_degree(n) != 1:
-            continue
-        t = graph.successors(n)[0]
-        s = graph.predecessors(n)[0]
-        if s.split(':')[0] != n.split(':')[0]:
-            continue
-        if n.split(':')[0] != t.split(':')[0]:
-            continue
-        graph.remove_edge(s, n)
-        graph.remove_edge(n, t)
-        graph.remove_node(n)
-        graph.add_edge(s, t)
-
 def show_graph(args):
 
     def do_filter_graph(graph):
@@ -117,6 +98,22 @@ def show_graph(args):
             if pn not in pids or nn < pids[pn][0] or nn > pids[pn][1]:
                 graph.remove_node(n)
 
+    def diet_graph(graph):
+        for n in graph.nodes():
+            if graph.in_degree(n) != 1 or graph.out_degree(n) != 1:
+                continue
+            t = graph.successors(n)[0]
+            s = graph.predecessors(n)[0]
+            if s.split(':')[0] != n.split(':')[0]:
+                continue
+            if n.split(':')[0] != t.split(':')[0]:
+                continue
+            graph.remove_edge(s, n)
+            graph.remove_edge(n, t)
+            graph.remove_node(n)
+            graph.add_edge(s, t)
+
+
     def do_show_graph(graph, output):
         networkx.write_dot(graph, output + '.dot')
         if args.pdf:
@@ -125,17 +122,15 @@ def show_graph(args):
             g.draw(output + '.pdf')
 
     session = load_session(args.logfile)
-    graph = session.make_graph(full=False,
-                               resources=False,
-                               dependency=not args.nodepend)
+    graph = ExecutionGraph(session, full=False, resources=False,
+                           dependency=not args.nodepend)
     if args.pids: do_filter_graph(graph)
     if args.thin: diet_graph(graph)
     do_show_graph(graph, args.outfile + '.hb')
 
     session = load_session(args.logfile)
-    graph = session.make_graph(full=True,
-                               resources=True,
-                               dependency=not args.nodepend)
+    graph = ExecutionGraph(session, full=True, resources=True,
+                           dependency=not args.nodepend)
     if args.pids: do_filter_graph(graph)
     if args.thin: diet_graph(graph)
     do_show_graph(graph, args.outfile + '.ob')
@@ -147,7 +142,7 @@ def show_syscalls(args):
     session = load_session(args.logfile)
     for pid in session.process_map.keys():
         print('')
-        session.syscalls_process(pid)
+        syscalls_process(session, pid)
     return 0
 
 ##############################################################################
@@ -155,7 +150,7 @@ def show_profile(args):
     session = load_session(args.logfile)
     for pid in session.process_map.keys():
         print('')
-        session.profile_process(pid)
+        profile_process(session, pid)
     return 0
 
 ##############################################################################
@@ -185,9 +180,10 @@ def filter_syscall(session, proc, index):
 
     return replace, mask
 
-def find_pairwise_races(session, vclocks):
+def find_pairwise_races(graph):
     """Find all pairwise races and return in a list"""
-    all_races = session.races_resources(vclocks)
+    session = graph.session
+    all_races = races_resources(graph)
     logging.debug('total resource races %d' % (len(all_races)))
 
     sys_races = set()
@@ -198,13 +194,13 @@ def find_pairwise_races(session, vclocks):
         r_ev1 = s_ev1.resource.events[s_ev1.rindex]
         proc1, pindex1 = session.r_ev_to_proc(r_ev1, sysind=True)
         p_ev1 = proc1.events[pindex1]
-        node1 = session.make_node(proc1.pid, p_ev1.syscnt)
+        node1 = graph.make_node(proc1.pid, p_ev1.syscnt)
 
         s_ev2 = session.events[i2]
         r_ev2 = s_ev2.resource.events[s_ev2.rindex]
         proc2, pindex2 = session.r_ev_to_proc(r_ev2, sysind=True)
         p_ev2 = proc2.events[pindex2]
-        node2 = session.make_node(proc2.pid, p_ev2.syscnt)
+        node2 = graph.make_node(proc2.pid, p_ev2.syscnt)
 
         logging.debug('[vc %s pid %d cnt %d  <->  vc %s pid %d cnt %d]' %
                       (vc1, proc1.pid, p_ev1.syscnt,
@@ -229,13 +225,16 @@ def find_pairwise_races(session, vclocks):
 
     return all_races, sys_races
 
-def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
+def prep_pairwise_race(graph, node1, node2, n_race):
     """prepare a race by computing bookmarks, injects, and cutoff"""
-    proc1, cnt1 = session.split_node(node1)
+    session = graph.session
+    vclocks = graph.vclocks
+
+    proc1, cnt1 = graph.split_node(node1)
     index1 = int(graph.node[node1]['index'])
     event1 = session.events[index1].event
 
-    proc2, cnt2 = session.split_node(node2)
+    proc2, cnt2 = graph.split_node(node2)
     index2 = int(graph.node[node2]['index'])
     event2 = session.events[index2].event
 
@@ -247,7 +246,7 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
         sys.stdout.write('p%d @ %s:' % (proc2.pid, vclocks[(proc2, cnt2)]))
         session.parse_syscall(index2)
 
-    bookmark1 = session.crosscut_graph(graph, vclocks, [node1, node2])
+    bookmark1 = graph.crosscut_graph([node1, node2])
 
     if not bookmark1:
         print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
@@ -262,7 +261,7 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
     # filter some events, mainly data, dataextra and fence.
     replace, mask = filter_syscall(session, proc1, index1)
 
-    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS, 0, mask)
+    action = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS, 0, mask)
 
     injects = dict()
     injects[proc1.pid] = dict({-cnt1 : action})
@@ -283,23 +282,25 @@ def prep_pairwise_race(session, graph, vclocks, node1, node2, n_race):
 
     return bookmarks, injects, cutoff, None  # replace
 
-def find_signal_races(session, vclocks):
+def find_signal_races(graph):
     """Find all signal races and return in a list"""
-    signal_races = session.races_signals(vclocks)
+    signal_races = races_signals(graph)
     logging.debug('total signal races %d' % (len(signal_races)))
     return signal_races
 
-def prep_signal_race(session, graph, vclocks, signal, n_race):
+def prep_signal_race(graph, signal, n_race):
     """prepare a race by computing bookmarks, injects, and cutoff
     If the signal interrupted the syscall, then make it not interrupt.
     If the signal did not interrupt the syscall, then make it interrupt.
     """
+    session = graph.session
+
     cnt = signal.syscnt
     proc = session.events[signal.index].proc
     index = session.events[signal.index].pindex
-    node = session.make_node(proc.pid, cnt)
+    node = graph.make_node(proc.pid, cnt)
 
-    bookmark1 = session.crosscut_graph(graph, vclocks, [node])
+    bookmark1 = graph.crosscut_graph([node])
     if not bookmark1:
         print('No consistent cut: pid %d syscnt %d' % proc.pid, cnt)
         return None
@@ -315,9 +316,9 @@ def prep_signal_race(session, graph, vclocks, signal, n_race):
 
     injects = dict()
 
-    action = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                            scribe.SCRIBE_PS_ENABLE_RET_CHECK)
+    action = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                    0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                    scribe.SCRIBE_PS_ENABLE_RET_CHECK)
     injects[proc.pid] = dict({-cnt : action})
 
     cutoff = dict(bookmark2)
@@ -352,14 +353,17 @@ def prep_signal_race(session, graph, vclocks, signal, n_race):
 
     return bookmarks, injects, cutoff, replace
 
-def find_exitwait_races(session, vclocks):
+def find_exitwait_races(graph):
     """Find all exit-wait races and return in a list"""
-    exit_races = session.races_exitwait(vclocks)
+    exit_races = races_exitwait(graph)
     logging.debug('total exit-races %d' % (len(exit_races)))
     return exit_races
 
-def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
+def prep_exitwait_race(graph, exit1, exit2, wait, n_race):
     """prepare a race by computing bookmarks, injects, and cutoff"""
+    session = graph.session
+    vclocks = graph.vclocks
+
     proc1, pindex1 = exit1
     p_ev1 = proc1.events[pindex1]
     event1 = p_ev1.event
@@ -379,17 +383,17 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
         print('Three racing system calls (exit-exit-wait) are:')
         sys.stdout.write('p%d @ %s:'
                          % (proc1.pid, vclocks[(proc1, cnt1)]))
-        session.parse_syscall(proc1.events[pindex1].index)
+        parse_syscall(session, proc1.events[pindex1].index)
         sys.stdout.write('p%d @ %s:' % (proc2.pid, vclocks[(proc2, cnt2)]))
-        session.parse_syscall(proc2.events[pindex2].index)
+        parse_syscall(session, proc2.events[pindex2].index)
         sys.stdout.write('p%d @ %s:' % (proc3.pid, vclocks[(proc3, cnt3)]))
-        session.parse_syscall(proc3.events[pindex3].index)
+        parse_syscall(session, proc3.events[pindex3].index)
 
     # TODO: extend crosscut_graph to handle 3-somes
-    nodes = [session.make_node(proc1.pid, cnt1),
-             session.make_node(proc2.pid, cnt2),
-             session.make_node(proc3.pid, cnt3)]
-    bookmark1 = session.crosscut_graph(graph, vclocks, nodes)
+    nodes = [graph.make_node(proc1.pid, cnt1),
+             graph.make_node(proc2.pid, cnt2),
+             graph.make_node(proc3.pid, cnt3)]
+    bookmark1 = graph.crosscut_graph(nodes)
 
     if not bookmark1:
         print('No consistent cut: pid %d syscnt %d --> pid %d syscnt %d' %
@@ -408,13 +412,13 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
 
     # we don't need scribe.SCRIBE_PS_ENABLE_DATA, because we know
     # our syscalls are wait() and exit()
-    action1 = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                               scribe.SCRIBE_PS_ENABLE_RET_CHECK)
+    action1 = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                    0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                       scribe.SCRIBE_PS_ENABLE_RET_CHECK)
     injects[proc1.pid] = dict({-cnt1 : action1})
-    action2 = racepro.Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                            0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                               scribe.SCRIBE_PS_ENABLE_RET_CHECK)
+    action2 = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                    0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
+                       scribe.SCRIBE_PS_ENABLE_RET_CHECK)
     injects[proc3.pid] = dict({-cnt3 : action2})
 
     cutoff = dict(bookmark3)
@@ -489,35 +493,32 @@ def prep_exitwait_race(session, graph, vclocks, exit1, exit2, wait, n_race):
 
 def save_modify_log(session, bookmarks, injects, cutoff, replace, output):
     """Generate and save a modified scribe log for a race"""
-
-    # write the new logfile out
-    event_iter = session.save_events(bookmarks, injects, cutoff, replace)
+    event_iter = save_events(session, bookmarks, injects, cutoff, replace)
     save_session(output, event_iter)
-
 
 def show_races(args):
     session = load_session(args.logfile)
 
-    graph = session.make_graph(full=True,
-                               resources=False,
-                               dependency=not args.nodepend)
+    graph = ExecutionGraph(session, full=True, resources=False,
+                           dependency=not args.nodepend)
+
     logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
 
-    vclocks = session.vclock_graph(graph)
-    for k in vclocks.keys():
-        logging.debug('%2d %5d -> %s' % (k[0].pid, k[1], vclocks[k]))
+    graph.compute_vclocks()
+    for k in graph.vclocks.keys():
+        logging.debug('%2d %5d -> %s' % (k[0].pid, k[1], graph.vclocks[k]))
 
     # YJF: show sysaclls with clocks
     if args.debug:
         for proc in session.process_list:
-            session.syscalls_process(proc.pid, vclocks)
+            syscalls_process(session, proc.pid, graph.vclocks)
 
     ######################################################################
     # step 1: Find pairwise races, (maybe) randomize the order. Then
     # for each race try to generate a (bookmarks, injects, cutoff)
     # tuple. Finally, use those to write out a modified log.
 
-    all_races, sys_races = find_pairwise_races(session, vclocks)
+    all_races, sys_races = find_pairwise_races(graph)
 
     print('-' * 75)
     print('REGULAR RACES')
@@ -526,7 +527,7 @@ def show_races(args):
 
     # YJF: sort them
     sys_races = sorted(sys_races, reverse=True,
-                       key=lambda race: session.score_race(graph, race))
+                       key=lambda race: score_race(graph, race))
     logging.debug('sorted race list %s' % sys_races)
 
     if args.random:
@@ -540,8 +541,7 @@ def show_races(args):
     n_race = 0
     n_fail = 0
     for (node1, node2) in r:
-        ret = prep_pairwise_race(session, graph, vclocks,
-                                 node1, node2, n_race)
+        ret = prep_pairwise_race(graph, node1, node2, n_race)
         if not ret:
             n_fail += 1
             continue
@@ -562,7 +562,7 @@ def show_races(args):
     if(args.no_exit_races):
         exit_races = list()
     else:
-        exit_races = find_exitwait_races(session, vclocks)
+        exit_races = find_exitwait_races(graph)
 
     print('-' * 75)
     print('EXIT-WAIT RACES')
@@ -577,8 +577,7 @@ def show_races(args):
     print('-' * 75)
 
     for (exit1, exit2, wait) in exit_races:
-        ret = prep_exitwait_race(session, graph, vclocks,
-                                 exit1, exit2, wait, n_race)
+        ret = prep_exitwait_race(graph, exit1, exit2, wait, n_race)
         if not ret:
             n_fail += 1
             continue
@@ -599,7 +598,7 @@ def show_races(args):
     if(args.no_signal_races):
         signal_races = list()
     else:
-        signal_races = find_signal_races(session, vclocks)
+        signal_races = find_signal_races(graph)
 
     print('-' * 75)
     print('SIGNAL RACES')
@@ -614,7 +613,7 @@ def show_races(args):
     print('-' * 75)
 
     for signal in signal_races:
-        ret = prep_signal_race(session, graph, vclocks, signal, n_race)
+        ret = prep_signal_race(graph, signal, n_race)
         if not ret:
             n_fail += 1
             continue

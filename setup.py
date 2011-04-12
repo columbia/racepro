@@ -9,5 +9,5 @@ setup(
     author_email = 'orenl@cs.columbia.edu',
     packages=['racepro'],
     scripts=['scripts/racepro', 'scripts/racetest', 'scripts/isolate'],
-    requires=['networkx']
+    requires=['networkx', 'argparse', 'scribe', 'pygraphviz']
 )

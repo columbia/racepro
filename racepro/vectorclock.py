@@ -1,5 +1,3 @@
-from itertools import ifilter
-
 class VectorClock:
     """Classic vector clock"""
 
@@ -40,7 +38,7 @@ class VectorClock:
 
     def __repr__(self):
         return str(self.clocks)
-    
+
     def __init__(self, pid=None, v=None):
         if v:
             self.clocks = dict(v.clocks)
@@ -48,4 +46,3 @@ class VectorClock:
             self.clocks = dict()
         if pid and pid not in self.clocks:
             self.clocks[pid] = 1
-        
