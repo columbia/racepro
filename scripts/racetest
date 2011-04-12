@@ -5,7 +5,7 @@ import sys
 import logging
 import argparse
 
-import racetest 
+from racepro import racetest
 
 desc = 'Automate Racepro race detection'
 parser = argparse.ArgumentParser(description=desc)

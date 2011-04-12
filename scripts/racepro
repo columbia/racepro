@@ -14,8 +14,8 @@ import pygraphviz
 from itertools import *
 
 import scribe
-import racepro
-import unistd
+from racepro import racepro
+from racepro import unistd
 
 def load_session(logfile):
     """Load a scribe log from logfile"""
