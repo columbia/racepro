@@ -23,7 +23,7 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
                                   stdout=stdout,
                                   stderr=stderr)
         except OSError as (e, s):
-            print("%s: %s" % (cmd.join(' '), s))
+            print("%s: %s" % (' '.join(cmd), s))
             raise
     return p1
 
