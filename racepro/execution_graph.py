@@ -1,5 +1,5 @@
 from racepro import unistd
-from racepro.vectorclock import VectorClock
+from vectorclock import VectorClock
 from itertools import *
 from collections import *
 import networkx
@@ -234,7 +234,7 @@ class ExecutionGraph(networkx.DiGraph):
         @resources: if True, consider dependencies induces by resources
         """
         vclocks = dict()
-        vclocks[self.session.process_map[1], 0] = VectorClock(1)
+        vclocks[self.session.process_map[1], 0] = VectorClock().tick(1)
 
         for node in networkx.algorithms.dag.topological_sort(self):
             proc, index = self.split_node(node)
@@ -250,9 +250,9 @@ class ExecutionGraph(networkx.DiGraph):
 
                 # need to creat vclock for this node ?
                 if (next, ncnt) not in vclocks:
-                    vclocks[(next, ncnt)] = VectorClock(next.pid, vc)
+                    vclocks[(next, ncnt)] = vc.tick(next.pid)
                 else:
-                    vclocks[(next, ncnt)].merge(vc)
+                    vclocks[(next, ncnt)] = vclocks[(next, ncnt)].merge(vc)
 
                 # is this an edge that should cause a tick ?
                 if next.pid != proc.pid:
@@ -269,9 +269,8 @@ class ExecutionGraph(networkx.DiGraph):
 
             if tick:
                 # tick before the merge, but w/o effect on @vc
-                vctmp = VectorClock(proc.pid, vc)
-                vctmp.tick(proc.pid)
-                vclocks[(tproc, tcnt)].merge(vctmp)
+                vctmp = vc.tick(proc.pid)
+                vclocks[(tproc, tcnt)] = vclocks[(tproc, tcnt)].merge(vctmp)
 
         self.vclocks = vclocks
 
@@ -343,10 +342,10 @@ class ExecutionGraph(networkx.DiGraph):
             proc, cnt = self.split_node(n)
             assert cnt > 0, 'Race before process fork (%d:%d)' % \
                 (proc.pid, cnt)
-            vc.merge(self.vclocks[(proc, cnt)])
+            vc = vc.merge(self.vclocks[(proc, cnt)])
             logging.debug('    vc: %s' % self.vclocks[(proc, cnt)])
 
-        logging.debug('merged clocks %s' % vc.clocks)
+        logging.debug('merged clocks %s' % vc)
         logging.debug('ticks array %s' %
                       ([(p.pid, c, s) for ((p, c), s) in ticks.items()]))
 
@@ -360,7 +359,7 @@ class ExecutionGraph(networkx.DiGraph):
 
             # find the last time we heard from pid
             pid = proc.pid
-            c = vc.get(pid)
+            c = vc[pid]
 
             logging.debug("pid=%d, local clock=%d" % (pid, c))
 

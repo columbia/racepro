@@ -2,7 +2,6 @@ import logging
 import scribe
 from itertools import *
 
-
 #def __races_accesses(session, access):
 #    """Given vclocks of a resource per process (non-decreasing
 #    order), find resources races:
@@ -98,7 +97,7 @@ def races_resources(graph):
 
         # track accesses per process
         for r_ev in events:
-            proc, index = session.r_ev_to_proc(r_ev, sysind=True)
+            proc, event = session.r_ev_to_proc(r_ev, sysind=True)
             p_ev = proc.events[index]
             node = graph.make_node(proc.pid, p_ev.syscnt)
             vc = vclocks[(proc, p_ev.syscnt)]
