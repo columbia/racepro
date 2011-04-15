@@ -36,30 +36,38 @@ def load_session(logfile):
     return session
 
 # YJF: remove holes in serial number sequence.
-# NOTE: this method updates the event in place because we do not use event
-# serials anywhere in racepro
+# NOTE: this method computes the new serials for events.  We can't update
+# in place because events in @events@ may not necessarily in ascending
+# serial order
 # FIXME: this should really be in py-scribe because we essentially
 # reverse engineer the serial assignment logic here.
-def condense_events(events):
-    # map from resource id to the previou event's (serial, seq, write_access)
-    # serial: serial number
-    # seq: sequence number ignoring access type
-    # write_access: non zero if the event is a write
-    serials = dict()  
+def condense_events(events, serial_map):
+    # initialize id, old_serial -> new serial mapping
     for e in events:
-        if isinstance(e, scribe.EventResourceLockExtra):
-            if e.id not in serials:
-                e.serial = 0
-                serials[e.id] = (0, 0, e.write_access)
+        if not isinstance(e, scribe.EventResourceLockExtra):
+            continue
+        if e.id not in serial_map:
+            serial_map[e.id] = dict()
+        serial_map[e.id][e] = -1
+
+    def evcmp(e1, e2):
+        return int(e1.serial - e2.serial)
+
+    # compute new serials
+    for r in serial_map:
+        evl = serial_map[r].keys()
+        evl.sort(cmp=evcmp)
+
+        (prev_serial, seq, prev_wr) = (0, -1, 0)
+        for e in evl:
+            seq += 1
+            if e.write_access or prev_wr:
+                serial_map[r][e] = seq
             else:
-                (prev_serial, seq, prev_wr) = serials[e.id]
-                seq += 1
-                if e.write_access or prev_wr:
-                    e.serial = seq
-                else:
-                    e.serial = prev_serial
-                serials[e.id] = (e.serial, seq, e.write_access)
-        yield e
+                serial_map[r][e] = prev_serial
+            prev_serial = serial_map[r][e]
+            prev_wr = e.write_access
+    return serial_map
 
 def save_session(logfile, events):
     """Save modified scribe log to logfile"""
@@ -69,8 +77,17 @@ def save_session(logfile, events):
         print('Cannot open log file %s' % logfile)
         exit(1)
 
-    for e in condense_events(events):
+    serials = dict()
+    condense_events(events, serials)
+
+    for e in events:
+        oldserial = -1
+        if isinstance(e, scribe.EventResourceLockExtra):
+            oldserial = e.serial
+            e.serial = serials[e.id][e]
         f.write(e.encode())
+        if oldserial != -1:
+            e.serial = oldserial
 
     f.close()
 
@@ -492,7 +509,8 @@ def save_modify_log(session, bookmarks, injects, cutoff, replace, output):
 
     # write the new logfile out
     event_iter = session.save_events(bookmarks, injects, cutoff, replace)
-    save_session(output, event_iter)
+    events = list(event_iter)
+    save_session(output, events)
 
 
 def show_races(args):
