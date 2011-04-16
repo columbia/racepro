@@ -218,6 +218,7 @@ def _testlist(args, races):
         t_start = datetime.datetime.now()
         logfile = '%s.%d.log' % (args.path, n)
         if not os.access(logfile, os.R_OK):
+            logging.error('failed to test races: cannot access %s' % logfile)
             break
         v = 'RACE %d: ' % n
         o = '-c %d' % args.timeout
