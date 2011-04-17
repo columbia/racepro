@@ -33,8 +33,12 @@ class Event:
 
     @property
     def syscall_index(self):
-        # The real value will be replaced by Process.EventList.add()
-        raise AttributeError
+        if self.proc is None:
+            raise AttributeError
+        index = self.proc.syscalls.index_of(self)
+        if index == -1:
+            raise AttributeError
+        return index
 
     @property
     def resource(self):
@@ -54,6 +58,12 @@ class EventList:
     def add(self, e):
         e.owners[self] = len(self._events)
         self._events.append(e)
+
+    def index_of(self, e):
+        try:
+            return e.owners[self]
+        except KeyError:
+            return -1
 
     def after(self, e):
         i = e.owners[self]
@@ -75,16 +85,14 @@ class Process:
             EventList.__init__(self)
             self.proc = proc
             self.current_syscall = None
-            self.current_syscall_index = 0
 
         def add(self, e):
             EventList.add(self, e)
             e.proc = self.proc
 
             if isinstance(e.event, scribe.EventSyscallExtra):
-                e.syscall_index = self.current_syscall_index
+                self.proc.syscalls.add(e)
                 self.current_syscall = e
-                self.current_syscall_index += 1
             elif isinstance(e.event, scribe.EventSyscallEnd):
                 self._check_execve(self.current_syscall)
                 self.current_syscall = None
@@ -112,6 +120,7 @@ class Process:
         self.parent = parent
         self.name = name
         self.events = Process.EventList(self)
+        self.syscalls = EventList()
 
     def __str__(self):
         return "pid=%d (%s)" % (self.pid, self.name if self.name else "??")
