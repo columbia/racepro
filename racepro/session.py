@@ -28,7 +28,7 @@ class Event:
 
     @property
     def syscall(self):
-        # The real value will be replaced by Process.EventList.add()
+        # The real value will be replaced by Process.add_event()
         raise AttributeError
 
     @property
@@ -42,7 +42,7 @@ class Event:
 
     @property
     def resource(self):
-        # The real value will be replaced by Resource.EventList.add()
+        # The real value will be replaced by Resource.add_event()
         raise AttributeError
 
 class EventList:
@@ -73,6 +73,10 @@ class EventList:
         i = e.owners[self]
         return (self._events[j] for j in xrange(i - 1, -1, -1))
 
+    def sort(self, key):
+        self._events.sort(key=key)
+        self._indices_have_changed()
+
     def _indices_have_changed(self):
         # Called when the event list has been re-ordered, and the indices
         # need to be reset
@@ -80,26 +84,21 @@ class EventList:
             self._events[i].owners[self] = i
 
 class Process:
-    class EventList(EventList):
-        def __init__(self, proc):
-            EventList.__init__(self)
-            self.proc = proc
-            self.current_syscall = None
+    def __init__(self, pid, parent=None, name=None):
+        self.pid = pid
+        self.parent = parent
+        self.name = name
+        self.events = EventList()
+        self.syscalls = EventList()
 
-        def add(self, e):
-            EventList.add(self, e)
-            e.proc = self.proc
+        # State for add_event()
+        self.current_syscall = None
 
-            if isinstance(e.event, scribe.EventSyscallExtra):
-                self.proc.syscalls.add(e)
-                self.current_syscall = e
-            elif isinstance(e.event, scribe.EventSyscallEnd):
-                self._check_execve(self.current_syscall)
-                self.current_syscall = None
-            elif self.current_syscall is not None:
-                e.syscall = self.current_syscall
+    def add_event(self, e):
+        self.events.add(e)
+        e.proc = self
 
-        def _check_execve(self, syscall):
+        def check_execve(syscall):
             if syscall.event.nr != unistd.NR_execve:
                 return
             if syscall.event.ret < 0:
@@ -111,16 +110,17 @@ class Process:
                 if se.data_type != scribe.SCRIBE_DATA_INPUT | \
                                    scribe.SCRIBE_DATA_STRING:
                     continue
-                self.proc.name = se.data
+                self.name = se.data
                 break
 
-
-    def __init__(self, pid, parent=None, name=None):
-        self.pid = pid
-        self.parent = parent
-        self.name = name
-        self.events = Process.EventList(self)
-        self.syscalls = EventList()
+        if isinstance(e.event, scribe.EventSyscallExtra):
+            self.syscalls.add(e)
+            self.current_syscall = e
+        elif isinstance(e.event, scribe.EventSyscallEnd):
+            check_execve(self.current_syscall)
+            self.current_syscall = None
+        elif self.current_syscall is not None:
+            e.syscall = self.current_syscall
 
     def __str__(self):
         return "pid=%d (%s)" % (self.pid, self.name if self.name else "??")
@@ -132,38 +132,31 @@ class Process:
                     len(self.events))
 
 class Resource:
-    class EventList(EventList):
-        def __init__(self, resource):
-            EventList.__init__(self)
-            self.resource = resource
-
-        def add(self, e):
-            EventList.add(self, e)
-            resource = self.resource
-
-            se = e.event
-            assert isinstance(se, scribe.EventResourceLockExtra)
-            e.resource = resource
-
-            if resource.id is None:
-                resource.id = se.id
-                resource.type = se.type
-                resource.desc = se.desc
-            else:
-                assert resource.id == se.id
-                assert resource.type == se.type
-                assert resource.desc == se.desc
-
-        def sort_by_serial(self):
-            self._events.sort(key=lambda e: e.event.serial)
-            self._indices_have_changed()
-
     def __init__(self):
         # The id, type, desc will be set after the first event gets added
         self.id = None
         self.type = None
         self.desc = None
-        self.events = Resource.EventList(self)
+        self.events = EventList()
+
+    def add_event(self, e):
+        self.events.add(e)
+
+        se = e.event
+        assert isinstance(se, scribe.EventResourceLockExtra)
+        e.resource = self
+
+        if self.id is None:
+            self.id = se.id
+            self.type = se.type
+            self.desc = se.desc
+        else:
+            assert self.id == se.id
+            assert self.type == se.type
+            assert self.desc == se.desc
+
+    def sort_events_by_serial(self):
+        self.events.sort(key=lambda e: e.event.serial)
 
     def __repr__(self):
         if self.id is None:
@@ -172,47 +165,43 @@ class Resource:
                (self.id, self.type, self.desc, len(self.events))
 
 class Session:
-    class EventList(EventList):
-        def __init__(self, session):
-            EventList.__init__(self)
-            self.session = session
-            self.current_proc = None
-
-        def add(self, e):
-            EventList.add(self, e)
-            se = e.event
-            session = self.session
-
-            # pid switcher logic
-            if isinstance(se, scribe.EventPid):
-                pid = se.pid
-                if pid not in session.processes:
-                    session.processes[pid] = Process(pid=pid)
-
-                self.current_proc = session.processes[pid]
-                return
-
-            if isinstance(se, scribe.EventResourceLockExtra):
-                id = se.id
-                if id not in session.resources:
-                    session.resources[id] = Resource()
-                session.resources[id].events.add(e)
-
-            if self.current_proc:
-                self.current_proc.events.add(e)
-
     def __init__(self, scribe_events):
         self.processes = dict()
         self.resources = dict()
-        self.events = Session.EventList(self)
+        self.events = EventList()
+
+        # State for add_event()
+        self.current_proc = None
 
         self._load_events(scribe_events)
         self._find_parent_of_each_proc()
         self._sort_events_for_each_resource()
 
+    def add_event(self, e):
+        self.events.add(e)
+        se = e.event
+
+        # pid switcher logic
+        if isinstance(se, scribe.EventPid):
+            pid = se.pid
+            if pid not in self.processes:
+                self.processes[pid] = Process(pid=pid)
+
+            self.current_proc = self.processes[pid]
+            return
+
+        if isinstance(se, scribe.EventResourceLockExtra):
+            id = se.id
+            if id not in self.resources:
+                self.resources[id] = Resource()
+            self.resources[id].add_event(e)
+
+        if self.current_proc:
+            self.current_proc.add_event(e)
+
     def _load_events(self, scribe_events):
         for se in scribe_events:
-            self.events.add(Event(se))
+            self.add_event(Event(se))
 
     def _find_parent_of_each_proc(self):
         for e in self.events:
@@ -225,4 +214,4 @@ class Session:
 
     def _sort_events_for_each_resource(self):
         for resource in self.resources.values():
-            resource.events.sort_by_serial()
+            resource.sort_events_by_serial()

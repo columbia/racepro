@@ -50,7 +50,7 @@ def test_event_doesnt_belong_to_proc_by_default():
 def test_add_proc_events_sets_event_proc():
     proc = Process(pid=1)
     e = Event(scribe.EventRegs())
-    proc.events.add(e)
+    proc.add_event(e)
     assert_equal(e.proc, proc)
 
 def test_event_no_proc():
@@ -75,7 +75,7 @@ def test_process_syscall():
 
     proc = Process(pid=1)
     for event in events:
-        proc.events.add(event)
+        proc.add_event(event)
 
     proc_events = list(proc.events)
     assert_equal(len(proc_events), 11)
@@ -136,13 +136,13 @@ def test_process_name():
     assert_equal(proc.name, None)
 
     for event in events:
-        proc.events.add(Event(event))
+        proc.add_event(Event(event))
     assert_equal(proc.name, 'cmd2')
 
     events[6].ret = -1 # if execve() < 0, it should not process the name
     proc = Process(pid=1)
     for event in events:
-        proc.events.add(Event(event))
+        proc.add_event(Event(event))
     assert_equal(proc.name, 'cmd1')
 
 def test_process_str():
@@ -154,8 +154,8 @@ def test_process_str():
 
 def test_process_repr():
     proc = Process(pid=1, name='cmd')
-    proc.events.add(Event(scribe.EventFence()))
-    proc.events.add(Event(scribe.EventSyscallExtra()))
+    proc.add_event(Event(scribe.EventFence()))
+    proc.add_event(Event(scribe.EventSyscallExtra()))
 
     assert_equal(repr(proc), "<Process pid=1 name='cmd' events=2>")
 
@@ -203,7 +203,7 @@ def test_process_parent():
 
 def test_resource_init():
     res = Resource()
-    res.events.add(Event(scribe.EventResourceLockExtra(id=2, type=3, desc='hello')))
+    res.add_event(Event(scribe.EventResourceLockExtra(id=2, type=3, desc='hello')))
     assert_equal(res.id, 2)
     assert_equal(res.type, 3)
     assert_equal(res.desc, 'hello')
@@ -211,8 +211,8 @@ def test_resource_init():
 def test_resource_repr():
     res = Resource()
     assert_equal(repr(res), "<Resource not initialized>")
-    res.events.add(Event(scribe.EventResourceLockExtra(id=2, type=2, desc='hello')))
-    res.events.add(Event(scribe.EventResourceLockExtra(id=2, type=2, desc='hello')))
+    res.add_event(Event(scribe.EventResourceLockExtra(id=2, type=2, desc='hello')))
+    res.add_event(Event(scribe.EventResourceLockExtra(id=2, type=2, desc='hello')))
     assert_equal(repr(res), "<Resource id=2 type=2 desc='hello' events=2>")
 
 def test_session_resource():
