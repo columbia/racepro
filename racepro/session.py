@@ -169,15 +169,17 @@ class Session:
         self.processes = dict()
         self.resources = dict()
         self.events = EventList()
+        self.current_proc = None # State for add_event()
 
-        # State for add_event()
-        self.current_proc = None
-
-        self._load_events(scribe_events)
+        for se in scribe_events:
+            self._add_event(Event(se))
         self._find_parent_of_each_proc()
         self._sort_events_for_each_resource()
 
-    def add_event(self, e):
+    def _add_event(self, e):
+        # the add_event() method is made private because we need to do extra
+        # processing after an event is added.
+
         self.events.add(e)
         se = e.event
 
@@ -199,19 +201,14 @@ class Session:
         if self.current_proc:
             self.current_proc.add_event(e)
 
-    def _load_events(self, scribe_events):
-        for se in scribe_events:
-            self.add_event(Event(se))
-
     def _find_parent_of_each_proc(self):
-        for e in self.events:
-            se = e.event
-            if isinstance(se, scribe.EventSyscallExtra):
-                if se.nr in unistd.SYS_fork:
-                    new_pid = se.ret
-                    if new_pid in self.processes:
-                        self.processes[new_pid].parent = e.proc
+        for proc in self.processes.itervalues():
+            for sys in proc.syscalls:
+                if sys.event.nr in unistd.SYS_fork:
+                  new_pid = sys.event.ret
+                  if new_pid in self.processes:
+                      self.processes[new_pid].parent = proc
 
     def _sort_events_for_each_resource(self):
-        for resource in self.resources.values():
+        for resource in self.resources.itervalues():
             resource.sort_events_by_serial()
