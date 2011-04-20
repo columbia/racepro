@@ -10,7 +10,7 @@ class Event(object):
         self.owners = dict()
 
     def __repr__(self):
-        return "Event(%s)" % repr(self.scribe)
+        return repr(self.scribe)
 
     def __str__(self):
         return str(self.scribe)

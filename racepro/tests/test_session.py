@@ -4,7 +4,7 @@ from racepro.session import *
 
 def test_event_str():
     e = Event(scribe.EventRegs())
-    assert_true("Event" in repr(e))
+    assert_equal(repr(e), repr(scribe.EventRegs()))
     assert_equal(str(e), str(scribe.EventRegs()))
 
 def test_event_attr():
