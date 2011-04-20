@@ -7,6 +7,10 @@ def test_event_str():
     assert_equal(repr(e), repr(scribe.EventRegs()))
     assert_equal(str(e), str(scribe.EventRegs()))
 
+def test_event_encode():
+    e = Event(scribe.EventRegs())
+    assert_equal(e.encode(), scribe.EventRegs().encode())
+
 def test_event_attr():
     e = Event(scribe.EventSyscallExtra(nr = 3))
     assert_equal(e.nr, 3)
@@ -17,10 +21,6 @@ def test_event_is():
     e = Event(scribe.EventSyscallExtra(nr = 3))
     assert_true(e.is_a(scribe.EventSyscallExtra))
     assert_false(e.is_a(scribe.EventResourceLockExtra))
-
-def test_event_scribe():
-    e = Event(scribe.EventSyscallExtra(nr = 3))
-    assert_equal(e.scribe, scribe.EventSyscallExtra(nr = 3))
 
 def test_event_list():
     e1 = Event(scribe.EventRegs())
@@ -109,8 +109,6 @@ def test_process_syscall():
     assert_raises(AttributeError, get_syscall, events[1])
     assert_raises(AttributeError, get_syscall, events[4])
 
-    print(repr(events[2].syscall.scribe.encode()))
-    print(repr(events[1].scribe.encode()))
     assert_equal(events[2].syscall, events[1])
     assert_equal(events[6].syscall, events[5])
     assert_equal(events[7].syscall, events[5])

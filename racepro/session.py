@@ -5,15 +5,15 @@ import re
 
 class Event(object):
     def __init__(self, scribe_event):
-        self.scribe = scribe_event
+        self._scribe_event = scribe_event
         self.proc = None
         self.owners = dict()
 
     def __repr__(self):
-        return repr(self.scribe)
+        return repr(self._scribe_event)
 
     def __str__(self):
-        return str(self.scribe)
+        return str(self._scribe_event)
 
     @property
     def children(self):
@@ -52,9 +52,9 @@ class Event(object):
 
     # Proxying attributes getters to the scribe event instance
     def __getattr__(self, name):
-        return getattr(self.scribe, name)
+        return getattr(self._scribe_event, name)
     def is_a(self, klass):
-        return isinstance(self.scribe, klass)
+        return isinstance(self._scribe_event, klass)
 
 class EventList:
     def __init__(self):
