@@ -176,7 +176,6 @@ class Resource:
 class Pipe:
     def __init__(self, resources):
         assert len(resources) == 2
-        self.id = int(re.findall('pipe:\[(.*)\]', resources[0].desc)[0])
         self.reads = EventList()
         self.writes = EventList()
 
@@ -194,7 +193,7 @@ class Session:
     def __init__(self, scribe_events):
         self.processes = dict()
         self.resources = dict()
-        self.pipes = dict()
+        self.pipes = list()
         self.events = EventList()
         self.current_proc = None # State for add_event()
 
@@ -241,7 +240,6 @@ class Session:
             res.sort_events_by_serial()
 
     def _find_pipe_dependencies(self):
-        self.pipes = dict()
         pipe_res = dict()
         for res in self.resources.itervalues():
             if 'pipe:' in res.desc:
@@ -249,4 +247,4 @@ class Session:
 
         for lres in pipe_res.itervalues():
             p = Pipe(lres)
-            self.pipes[p.id] = p
+            self.pipes.append(p)

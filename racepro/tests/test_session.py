@@ -292,13 +292,13 @@ def test_pipe():
                     if e.is_a(scribe.EventSyscallExtra)]
 
         assert_equal(len(session.pipes), 2)
-        assert_equal(list(session.pipes[1].reads),
+        assert_equal(list(session.pipes[0].reads),
                      [syscalls[1], syscalls[4]])
-        assert_equal(list(session.pipes[1].writes),
+        assert_equal(list(session.pipes[0].writes),
                      [syscalls[5], syscalls[6], syscalls[8]])
 
-        assert_equal(list(session.pipes[3].reads),  [syscalls[10], syscalls[3]])
-        assert_equal(list(session.pipes[3].writes), [syscalls[9]])
+        assert_equal(list(session.pipes[1].reads),  [syscalls[10], syscalls[3]])
+        assert_equal(list(session.pipes[1].writes), [syscalls[9]])
 
     for read_nr in [unistd.NR_read, unistd.NR_readv,
                     unistd.NR_pread64, unistd.NR_preadv]:
