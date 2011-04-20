@@ -305,3 +305,62 @@ def test_pipe():
         for write_nr in [unistd.NR_write, unistd.NR_writev,
                          unistd.NR_pwrite64, unistd.NR_pwritev]:
             yield gen_test_pipe, read_nr, write_nr
+
+def test_signal():
+    events = [
+               scribe.EventPid(pid=1),                 # 0
+               scribe.EventFence(),                    # 1
+               scribe.EventSyscallExtra(),             # 2
+               scribe.EventFence(),                    # 3
+               scribe.EventSigSendCookie(cookie=1),    # 4
+               scribe.EventSyscallEnd(),               # 5
+               scribe.EventSyscallExtra(),             # 6
+               scribe.EventFence(),                    # 7
+               scribe.EventSigRecvCookie(cookie=2),    # 8
+               scribe.EventSyscallEnd(),               # 9
+               scribe.EventPid(pid=2),                 # 10
+               scribe.EventSyscallExtra(),             # 11
+               scribe.EventFence(),                    # 12
+               scribe.EventSigRecvCookie(cookie=1),    # 13
+               scribe.EventSyscallEnd(),               # 14
+               scribe.EventFence(),                    # 15
+               scribe.EventSyscallExtra(),             # 16
+               scribe.EventFence(),                    # 17
+               scribe.EventSigSendCookie(cookie=2),    # 18
+               scribe.EventSyscallEnd(),               # 19
+               scribe.EventSigHandledCookie(cookie=1), # 20
+             ]
+
+    session = Session(events)
+    events = list(session.events)
+
+    assert_equal(len(session.signals), 2)
+    assert_equal(session.signals[0].send,    events[4])
+    assert_equal(session.signals[0].recv,    events[13])
+    assert_equal(session.signals[0].handled, events[20])
+
+    assert_equal(session.signals[1].send,    events[18])
+    assert_equal(session.signals[1].recv,    events[8])
+    assert_equal(session.signals[1].handled, None)
+
+@raises(ValueError)
+def test_signal_no_recv():
+    events = [
+               scribe.EventPid(pid=1),
+               scribe.EventSyscallExtra(),
+               scribe.EventSigSendCookie(cookie=1),
+               scribe.EventSyscallEnd(),
+             ]
+
+    session = Session(events)
+
+@raises(ValueError)
+def test_signal_no_send():
+    events = [
+               scribe.EventPid(pid=1),
+               scribe.EventSyscallExtra(),
+               scribe.EventSigRecvCookie(cookie=1),
+               scribe.EventSyscallEnd(),
+             ]
+
+    session = Session(events)

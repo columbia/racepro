@@ -189,11 +189,18 @@ class Pipe:
                 elif sys.nr in unistd.SYS_write:
                     self.writes.add(sys)
 
+class Signal:
+    def __init__(self, send, recv, handled):
+        self.send = send
+        self.recv = recv
+        self.handled = handled
+
 class Session:
     def __init__(self, scribe_events):
         self.processes = dict()
         self.resources = dict()
         self.pipes = list()
+        self.signals = list()
         self.events = EventList()
         self.current_proc = None # State for add_event()
 
@@ -204,6 +211,7 @@ class Session:
         self._find_parent_of_each_proc()
         self._sort_events_for_each_resource()
         self._find_pipe_dependencies()
+        self._find_signals()
 
     def _add_event(self, e):
         # the add_event() method is made private because we need to do extra
@@ -248,3 +256,25 @@ class Session:
         for lres in pipe_res.itervalues():
             p = Pipe(lres)
             self.pipes.append(p)
+
+    def _find_signals(self):
+        sigs = dict()
+
+        def do_sig_cookie(e, type):
+            sigs.setdefault(e.cookie, dict())[type] = e
+
+        for e in self.events:
+            if e.is_a(scribe.EventSigSendCookie):
+                   do_sig_cookie(e, 'send')
+            elif e.is_a(scribe.EventSigRecvCookie):
+                   do_sig_cookie(e, 'recv')
+            elif e.is_a(scribe.EventSigHandledCookie):
+                   do_sig_cookie(e, 'handled')
+
+        for sig in sigs.itervalues():
+            if not sig.has_key('send'):
+                raise ValueError
+            if not sig.has_key('recv'):
+                raise ValueError
+            sig.setdefault('handled', None)
+            self.signals.append(Signal(**sig))
