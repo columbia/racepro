@@ -50,10 +50,10 @@ def test_event_list():
     assert_equal(list(el1.before(e3)), [e2, e1])
     assert_equal(list(el2.before(e2)), [])
 
-    assert_equal(el1.index_of(e2), 1)
-    assert_equal(el2.index_of(e2), 0)
-    assert_equal(el3.index_of(e2), 0)
-    assert_equal(el3.index_of(e3), -1)
+    assert_equal(el1.index(e2), 1)
+    assert_equal(el2.index(e2), 0)
+    assert_equal(el3.index(e2), 0)
+    assert_equal(el3.index(e3), -1)
 
     assert_raises(KeyError, el3.after, e1)
 

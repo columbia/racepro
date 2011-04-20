@@ -38,7 +38,7 @@ class Event(object):
     def syscall_index(self):
         if self.proc is None:
             raise AttributeError
-        index = self.proc.syscalls.index_of(self)
+        index = self.proc.syscalls.index(self)
         if index == -1:
             raise AttributeError
         return index
@@ -70,7 +70,7 @@ class EventList:
         e.owners[self] = len(self._events)
         self._events.append(e)
 
-    def index_of(self, e):
+    def index(self, e):
         try:
             return e.owners[self]
         except KeyError:
