@@ -241,3 +241,50 @@ def test_session_resource():
     assert_raises(AttributeError, get_resource, events[1])
     assert_equal(events[3].resource, session.resources[1])
     assert_equal(events[6].resource, session.resources[2])
+
+def test_pipe():
+    def pipe_syscall(nr, pipe, ret, res_id, serial):
+        return [
+                scribe.EventSyscallExtra(nr = nr, ret = ret),
+                scribe.EventFence(),
+                scribe.EventResourceLockExtra(
+                        id = res_id, desc='pipe:[%d]' % pipe,
+                        serial = serial, type = scribe.SCRIBE_RES_TYPE_FILE),
+                scribe.EventFence(),
+                scribe.EventSyscallEnd()]
+
+    def gen_test_pipe(read_nr, write_nr):
+        events = [
+          [scribe.EventPid(pid=1)],
+          pipe_syscall(nr=unistd.NR_fstat64, pipe=1, ret=5,  res_id=1, serial=1), # buf=0 i=0
+          pipe_syscall(nr=read_nr,  pipe=1, ret=3,  res_id=1, serial=2), # buf=2 i=1
+          pipe_syscall(nr=read_nr,  pipe=1, ret=-1, res_id=1, serial=3), # buf=2 i=2
+          pipe_syscall(nr=read_nr,  pipe=3, ret=1,  res_id=3, serial=2), # buf=4 i=3
+          pipe_syscall(nr=read_nr,  pipe=1, ret=1,  res_id=1, serial=4), # buf=1 i=4
+          [scribe.EventPid(pid=2)],
+          pipe_syscall(nr=write_nr, pipe=1, ret=3,  res_id=2, serial=1), # buf=3 i=5
+          pipe_syscall(nr=write_nr, pipe=1, ret=2,  res_id=2, serial=2), # buf=5 i=6
+          [scribe.EventPid(pid=3)],
+          pipe_syscall(nr=write_nr, pipe=1, ret=-1, res_id=2, serial=1), # buf=0 i=7
+          pipe_syscall(nr=write_nr, pipe=1, ret=5,  res_id=2, serial=2), # buf=5 i=8
+          pipe_syscall(nr=write_nr, pipe=3, ret=5,  res_id=4, serial=1), # buf=5 i=9
+          pipe_syscall(nr=read_nr,  pipe=3, ret=3,  res_id=3, serial=1), # buf=1 i=10
+        ]
+        session = Session(e for el in events for e in el)
+        syscalls = [e for e in session.events
+                    if isinstance(e.event, scribe.EventSyscallExtra)]
+
+        assert_equal(len(session.pipes), 2)
+        assert_equal(list(session.pipes[1].reads),
+                     [syscalls[1], syscalls[4]])
+        assert_equal(list(session.pipes[1].writes),
+                     [syscalls[5], syscalls[6], syscalls[8]])
+
+        assert_equal(list(session.pipes[3].reads),  [syscalls[10], syscalls[3]])
+        assert_equal(list(session.pipes[3].writes), [syscalls[9]])
+
+    for read_nr in [unistd.NR_read, unistd.NR_readv,
+                    unistd.NR_pread64, unistd.NR_preadv]:
+        for write_nr in [unistd.NR_write, unistd.NR_writev,
+                         unistd.NR_pwrite64, unistd.NR_pwritev]:
+            yield gen_test_pipe, read_nr, write_nr

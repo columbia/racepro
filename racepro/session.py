@@ -1,6 +1,7 @@
 import scribe
 import unistd
 import itertools
+import re
 
 class Event:
     def __init__(self, event):
@@ -164,17 +165,38 @@ class Resource:
         return "<Resource id=%d type=%d desc='%s' events=%d>" % \
                (self.id, self.type, self.desc, len(self.events))
 
+class Pipe:
+    def __init__(self, resources):
+        assert len(resources) == 2
+        self.id = int(re.findall('pipe:\[(.*)\]', resources[0].desc)[0])
+        self.reads = EventList()
+        self.writes = EventList()
+
+        for res in resources:
+            for e in res.events:
+                sys = e.syscall
+                if sys.event.ret <= 0:
+                    continue
+                if sys.event.nr in unistd.SYS_read:
+                    self.reads.add(sys)
+                elif sys.event.nr in unistd.SYS_write:
+                    self.writes.add(sys)
+
 class Session:
     def __init__(self, scribe_events):
         self.processes = dict()
         self.resources = dict()
+        self.pipes = dict()
         self.events = EventList()
         self.current_proc = None # State for add_event()
 
         for se in scribe_events:
+            assert isinstance(se, scribe.Event)
             self._add_event(Event(se))
+
         self._find_parent_of_each_proc()
         self._sort_events_for_each_resource()
+        self._find_pipe_dependencies()
 
     def _add_event(self, e):
         # the add_event() method is made private because we need to do extra
@@ -210,5 +232,15 @@ class Session:
                       self.processes[new_pid].parent = proc
 
     def _sort_events_for_each_resource(self):
-        for resource in self.resources.itervalues():
-            resource.sort_events_by_serial()
+        for res in self.resources.itervalues():
+            res.sort_events_by_serial()
+
+    def _find_pipe_dependencies(self):
+        pipes = dict()
+        for res in self.resources.itervalues():
+            if 'pipe:' in res.desc:
+                pipes.setdefault(res.desc, list()).append(res)
+
+        for lres in pipes.itervalues():
+            p = Pipe(lres)
+            self.pipes[p.id] = p
