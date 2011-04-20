@@ -7,6 +7,21 @@ def test_event_str():
     assert_true("Event" in repr(e))
     assert_equal(str(e), str(scribe.EventRegs()))
 
+def test_event_attr():
+    e = Event(scribe.EventSyscallExtra(nr = 3))
+    assert_equal(e.nr, 3)
+    e = Event(scribe.EventResourceLockExtra(id = 3))
+    assert_equal(e.id, 3)
+
+def test_event_is():
+    e = Event(scribe.EventSyscallExtra(nr = 3))
+    assert_true(e.is_a(scribe.EventSyscallExtra))
+    assert_false(e.is_a(scribe.EventResourceLockExtra))
+
+def test_event_scribe():
+    e = Event(scribe.EventSyscallExtra(nr = 3))
+    assert_equal(e.scribe, scribe.EventSyscallExtra(nr = 3))
+
 def test_event_list():
     e1 = Event(scribe.EventRegs())
     e2 = Event(scribe.EventRegs())
@@ -94,6 +109,8 @@ def test_process_syscall():
     assert_raises(AttributeError, get_syscall, events[1])
     assert_raises(AttributeError, get_syscall, events[4])
 
+    print(repr(events[2].syscall.scribe.encode()))
+    print(repr(events[1].scribe.encode()))
     assert_equal(events[2].syscall, events[1])
     assert_equal(events[6].syscall, events[5])
     assert_equal(events[7].syscall, events[5])
@@ -272,7 +289,7 @@ def test_pipe():
         ]
         session = Session(e for el in events for e in el)
         syscalls = [e for e in session.events
-                    if isinstance(e.event, scribe.EventSyscallExtra)]
+                    if e.is_a(scribe.EventSyscallExtra)]
 
         assert_equal(len(session.pipes), 2)
         assert_equal(list(session.pipes[1].reads),
