@@ -1,5 +1,6 @@
 from racepro import unistd
-from vectorclock import VectorClock
+from vectorclock import *
+from session import *
 from itertools import *
 from collections import *
 import networkx
@@ -7,43 +8,36 @@ import scribe
 import logging
 import sys
 
+class Node:
+    def dummy(proc):
+        e = Event(scribe.EventFence())
+        e.proc = proc
+        return Node(e)
+
+    def __init__(self, event):
+        self.event = event
+        self.vclock = None
+
+    @property
+    def proc(self):
+        return self.event.proc
+
 class ExecutionGraph(networkx.DiGraph):
-    def __init__(self, session, full=False, dependency=True, resources=False):
+    def __init__(self, session):
         """Build the execution DAG from the execution log.
-        @full: if True, include all syscalls, else only fork/wait/exit
-        @depends: if True, add additional HB dependencies (e.g. pipes)
-        @resources: if True, add dependencies induced by resources
-        Return a graph.
         """
+        networkx.DiGraph.__init__(self)
         self.session = session
 
-        networkx.DiGraph.__init__(self)
-        self.add_node('1:0')
+        self._dependency_fifo()
 
-        if dependency:
-            # add dependencies of mandatory HB
-            self._dependency_pipe()
-            self._dependency_signal()
-            ## self._dependency_reparent()
+        init = session.processes[1]
+        init.anchor = Node.dummy(init)
+        self.add_node(init.anchor)
+        self._build_graph(init)
 
-        # build initial graph
-        self._build_graph(self.session.process_list[0], full)
-
-        if resources:
-            # add dependencies of resources
-            self._resources_graph()
-
-    def make_node(self, pid, syscall):
-        return str(pid) + ':' + str(syscall)
-
-    def split_node(self, node):
-        (pid, index) = node.split(':')
-        proc = self.session.process_map[int(pid)]
-        return (proc, int(index))
-
-    def _build_graph(self, proc, full):
+    def _build_graph(self, proc):
         """Build the execution DAG from the execution log, as follows:
-        - The first node is '0'
         - New processes begin with a node 'pid'
         - Syscalls add a node 'pid:syscall' (and edge from previous)
         - Syscall fork() creates a new process and an edge to it 
@@ -53,235 +47,153 @@ class ExecutionGraph(networkx.DiGraph):
         - Resource access add edge from the previous user to current
         (note: attributes must be strings)
         """
-        pid = proc.pid
-        ancestor = self.make_node(pid, 0)
-        for p_ev in proc.events:
-            event = p_ev.event
-            if not isinstance(event, scribe.EventSyscallExtra):
-                pass
-            elif event.nr in unistd.Syscalls.SYS_fork and event.ret > 0:
-                newpid = event.ret
-                parent = self.make_node(pid, p_ev.syscnt)
-                self.add_node(parent, index=str(p_ev.index), fork='1')
-                self.add_edge(ancestor, parent)
-                child = self.make_node(newpid, 0)
-                self.add_node(child)
-                self.add_edge(parent, child, fork='1', label='fork')
-                self._build_graph(self.session.process_map[newpid], full)
-                ancestor = parent
-            elif event.nr in unistd.Syscalls.SYS_wait and event.ret > 0:
-                newpid = event.ret
-                node = self.make_node(pid, p_ev.syscnt)
-                self.add_node(node, index=str(p_ev.index))
-                self.add_edge(ancestor, node)
-                child = self.make_node(newpid, self.session.process_map[newpid].syscnt)
-                self.add_edge(child, node, label='exit')
-                ancestor = node
-            elif event.nr in unistd.Syscalls.SYS_exit:
-                node = self.make_node(pid, p_ev.syscnt)
-                self.add_node(node, index=str(p_ev.index), exit='1')
-                self.add_edge(ancestor, node)
-                ancestor = node
-            elif full:
-                node = self.make_node(pid, p_ev.syscnt)
-                self.add_node(node, index=str(p_ev.index))
-                self.add_edge(ancestor, node)
-                ancestor = node
-            else:
-                # node already exists (from dependcies HBs) - connect it
-                node = self.make_node(pid, p_ev.syscnt)
-                if node in self.node:
-                    self.add_edge(ancestor, node)
-                    ancestor = node
+        ancestor = proc.anchor
 
-    def _resources_graph(self):
-        """Add OB dependencies due to resources to an execution graph"""
+        for sys in proc.syscalls:
+            node = Node(sys)
 
-        for r in self.session.resource_list:
-            prev, pind = self.session.r_ev_to_proc(r.events[0])
-            pr_ev = list()
-            nr_ev = list()
-            serial = 0
+            if sys.nr in unistd.Syscalls.SYS_fork and sys.ret > 0:
+                newpid = sys.ret
+                self.add_node(node, type='fork')
 
-            def add_resource_edges():
-                tr_ev = product(pr_ev, nr_ev)
+                child = self.session.processes[newpid]
+                child.anchor = Node.dummy(child)
+                self.add_node(child.anchor)
+                self.add_edge(node, child.anchor, label='fork')
 
-                for (prev, pind), (next, nind) in tr_ev:
-                    if prev == next:
-                        continue
-                    logging.debug('%d:%d -> %d:%d' %
-                                  (prev.pid,pind,next.pid,nind))
-                    src = self.make_node(prev.pid, prev.events[pind].syscnt)
-                    dst = self.make_node(next.pid, next.events[nind].syscnt)
-                    if dst not in self[src]:
-                        self.add_edge(src, dst,
-                                      resource=str(r.id),
-                                      label='r%d(%d)' % (r.id, serial))
+                self._build_graph(child)
 
-            for r_ev in r.events:
-                next, nind = self.session.r_ev_to_proc(r_ev)
-                if r_ev.event.serial == serial:
-                    nr_ev.append((next, nind))
-                else:
-                    add_resource_edges()
-                    pr_ev = nr_ev
-                    nr_ev = list([(next, nind)])
-                    serial = r_ev.event.serial
-            else:
-                add_resource_edges()
+            elif sys.nr in unistd.Syscalls.SYS_wait and sys.ret > 0:
+                pid = sys.ret
+                self.add_node(node, type='wait')
 
-    def _dependency_pipe(self):
+                last = Node(self.session.processes[pid].syscalls[-1])
+                self.add_node(last)
+                self.add_edge(last, node, label='exit')
+
+            elif sys.nr in unistd.Syscalls.SYS_exit:
+                self.add_node(node, type='exit')
+
+            # unless node already exists (from dependcies HBs) - skip it
+            # (otherwise, we need to connect it)
+            elif node not in self.node:
+                continue
+
+            self.add_edge(ancestor, node)
+            ancestor = node
+
+    def _dependency_fifo(self):
         """Add HB dependencies due to pipes and sockets"""
-        for pipe in self.session.pipe_e.values():
-            pipe_buf = 0
-            ri = 0  # current read event
-            wi = 0  # current write event
-            wleft = 0  # data "left" in the first write
+        for fifo in self.session.fifos:
+            buf = 0
+            write_left = 0  # data "left" in the first write
             writes = deque()
 
-            if len(pipe[0]) > 0:
-                desc = pipe[0][0][0].event.desc
-                if desc and desc not in self.session.pipe_d:
-                    continue
+            if len(fifo.reads) == 0:
+                continue
 
-            while ri < len(pipe[0]):
-                read_rev, read_nr = pipe[0][ri]
+            write_iter = iter(fifo.writes)
 
-                while pipe_buf < read_nr and wi < len(pipe[1]):
-                    write_rev, write_nr = pipe[1][wi]
-                    pipe_buf += write_nr
-                    writes.append((write_rev, write_nr))
-                    wi += 1
+            for read_sys in fifo.reads:
+                read_bytes = read_sys.ret
+                # TODO HB from a non-blocking read that returns -EAGAIN
+                # to the next write
 
-                p2, i2 = self.session.r_ev_to_proc(read_rev, sysind=True)
-                sc2 = p2.events[i2].syscnt
-                node2 = self.make_node(p2.pid, sc2)
+                while buf < read_bytes:
+                    try:
+                        write_sys = write_iter.next()
+                    except StopIteration:
+                        raise ValueError("Not enough fifo writes :(")
+
+                    write_bytes = write_sys.ret
+                    buf += write_bytes
+                    writes.append((write_sys, write_bytes))
+
+                dst = Node(read_sys)
 
                 # add HB nodes from previous writes to us
-                for write_rev, write_nr in writes:
-                    p1, i1 = self.session.r_ev_to_proc(write_rev, sysind=True)
-                    sc1 = p1.events[i1].syscnt
-                    if p1 != p2:
-                        node1 = self.make_node(p1.pid, sc1)
-                        self.add_edge(node1, node2, pipe='1', label='pipe')
+                for write_sys, write_bytes in writes:
+                    if read_sys.proc != write_sys.proc:
+                        src = Node(write_sys)
+                        self.add_edge(src, dst, label='pipe')
 
                 # discard previous writes which have been consumed
-                while read_nr > 0:
-                    if wleft == 0:
-                        wleft = writes[0][1]
-                    nr = min([wleft, read_nr])
-                    pipe_buf -= nr
-                    read_nr -= nr
-                    wleft -= nr
-                    if wleft == 0:
+                while read_bytes > 0:
+                    if write_left == 0:
+                        write_left = writes[0][1]
+                    nr = min([write_left, read_bytes])
+                    buf -= nr
+                    read_bytes -= nr
+                    write_left -= nr
+                    if write_left == 0:
                         writes.popleft()
-
-                ri += 1
 
     def _dependency_signal(self):
         """ADD HB dependencies due to signal send/receive (cookies)"""
-        for send, recv in self.session.cookie_e.values():
-            proc1 = self.session.events[send.index].proc
-            cnt1 = send.syscnt
-            sender = self.make_node(proc1.pid, cnt1)
+        for sig in self.session.signals:
+            self.add_edge(Node(sig.send), Node(sig.recv), label='signal')
 
-            proc2 = self.session.events[recv.index].proc
-            cnt2 = recv.syscnt
-            receiver = self.make_node(proc2.pid, cnt2)
-
-            self.add_edge(sender, receiver, signal='1', label='signal')
-
-    def _dependency_reparent(self):
-        """Add HB dependencies due to reparenting of orphans to init"""
-
-        def parent_pid(self, index):
-            return self.session.events[index].proc.ppid
-
-        for index in self.session.exit_e:
-
-            # for each exit() syscall, get all the events that belong
-            # to this syscall, and filter only the EventResource that
-            # refer to ppid resources: the event.desc field of these
-            # indicates the current children that will be reparented.
-
-            ppid = parent_pid(index)
-            if not ppid:
-                continue
-
-            # now that we know the children that are being reparented,
-            # we add HB edges to the graph from a this syscall to
-            # their own exit syscall.
-            # FIXME1: to be precise, the edge needs to go to the next
-            # access to the reaprent child's ppid, but this should be
-            # close enough.
-            # FIXME2: we assume that reparenting occurs to init; but
-            # children of threads will first be reparented to another
-            # thread if exists; this will need to be fixed.
-
-            p1, cnt1 = self.session.s_ev_to_proc(self.session.events[index],
-                                                 syscnt=True)
-            node1 = self.make_node(p1.pid, cnt1)
-
-            p2 = self.session.process_map[ppid]
-            i2 = p2.sysind               # points to last syscall: exit
-            cnt2 = p2.events[self.session.events[i2].pindex].syscnt
-            node2 = self.make_node(p2.pid, cnt2)
-            self.add_edge(node1, node2, reparent='1', label='reparent')
-
-
-    def compute_vclocks(self, resources=False):
+    def compute_vclocks(self):
         """Compute the vector-clocks of nodes in the execution graph.
-        @resources: if True, consider dependencies induces by resources
         """
-        vclocks = dict()
-        vclocks[self.session.process_map[1], 0] = VectorClock().tick(1)
+        init = self.session.processes[1]
+        init.anchor.vclock = VectorClock().tick(init)
 
         for node in networkx.algorithms.dag.topological_sort(self):
-            proc, index = self.split_node(node)
-            vc = vclocks[(proc, index)]
+            vc = node.vclock
             tick = False
 
-            for nn in self.neighbors(node):
-                next, ncnt = self.split_node(nn)
-
-                # disregard resource dependencies if not @resource ?
-                if not resources and 'resource' in self.edge[node][nn]:
-                    continue
-
-                # need to creat vclock for this node ?
-                if (next, ncnt) not in vclocks:
-                    vclocks[(next, ncnt)] = vc.tick(next.pid)
+            for next in self.neighbors(node):
+                # need to create vclock for this node ?
+                if not next.vclock:
+                    next.vclock = vc.tick(next.event.proc)
                 else:
-                    vclocks[(next, ncnt)] = vclocks[(next, ncnt)].merge(vc)
+                    next.vclock = next.vclock.merge(vc)
 
                 # is this an edge that should cause a tick ?
-                if next.pid != proc.pid:
-                    if 'fork' in self.edge[node][nn]:
-                        tick = True
-                    elif 'signal' in self.edge[node][nn]:
-                        tick = True
-                    elif resources and 'resource' in self.edge[node][nn]:
+                if node.event.proc != next.event.proc:
+                    if self.edge[node][next]['type'] in ['fork', 'signal']:
                         tick = True
                 else:
                     # remember for below
-                    tproc = next
-                    tcnt = ncnt
+                    tnode = next
 
             if tick:
                 # tick before the merge, but w/o effect on @vc
-                vctmp = vc.tick(proc.pid)
-                vclocks[(tproc, tcnt)] = vclocks[(tproc, tcnt)].merge(vctmp)
+                tnode.vclock = tnode.vclock.merge(vc.tick(proc))
 
-        self.vclocks = vclocks
+        # @ticks will map from a <proc, clock> tuple to the first
+        # syscall (syscnt) by which proc that value of local clock.
+        #
+        # We deliberately include in the map syscnt=0 which doesn't really
+        # map to a real system call, because it doesn't help special case
+        # it here: we have to deal with clone() and clone() returns anyway
+        ticks = dict()
+        for node in self.nodes:
+            c = node.vclock[node.event.proc]
+            if (proc, c) in ticks:  # use earlier ones
+                if node.event.syscall_index < ticks[(proc, c)].syscall_index:
+                    ticks[(proc, c)] = node.event
+            else:
+                ticks[(proc, c)] = node.event
+
+    class SysLoc:
+        def __init__(self, syscall, after=None, before=None):
+            self.syscall = syscall
+            if after is not None:
+                self.after = after
+            if before is not None:
+                self.after = not before
 
     def crosscut_graph(self, anchors):
         """Given a list of initial nodes in the graph, find a consistent
         crosscut, such that both nodes are just about to be executed.
         Returns bookmarks dict of the cut, or None if none found
-        @graph: graph data
-        @vclock: vector vclocks
         @anchors: list of (graph) nodes
         """
+
+
+
         # YJF: improved version
         # FIXME: (1) should just merge syscnt and vector clock.
         #        (2) should create special nodes to represent process
@@ -290,30 +202,9 @@ class ExecutionGraph(networkx.DiGraph):
 
         # if any of the anchors HB another anchor - we're screwed
         for n1, n2 in combinations(anchors, 2):
-            p1, c1 = self.split_node(n1)
-            p2, c2 = self.split_node(n2)
-            assert not self.vclocks[(p1, c1)].race(self.vclocks[(p1, c1)]), \
+            assert not n1.vclock.race(n2.vclock), \
                 'Anchor nodes inconsistency: %s vs %s !' % (n1, n2)
 
-        # @ticks will map from a <proc, clock> tuple to the first
-        # syscall (syscnt) by which proc that value of local clock.
-        #
-        # We deliberately include in the map syscnt=0 which doesn't really
-        # map to a real system call, because it doesn't help special case
-        # it here: we have to deal with clone() and clone() returns anyway
-        #
-        # Only compute once and cache it inside vclock['ticks']...
-        if 'ticks' in self.vclocks:
-            ticks = self.vclocks['ticks']
-        else:
-            ticks = dict()
-            for (proc, syscnt), vc in self.vclocks.iteritems():
-                c = vc.get(proc.pid)
-                if (proc, c) in ticks:  # use earlier ones
-                    ticks[(proc, c)] = min(syscnt, ticks[(proc, c)])
-                else:
-                    ticks[(proc, c)] = syscnt
-            self.vclocks['ticks'] = ticks
 
         # given @anchors with clock @vcs, find a set nof nodes N in each
         # process, s.t. each pair of nodes in N are concurrent.
@@ -337,41 +228,30 @@ class ExecutionGraph(networkx.DiGraph):
                 
         logging.debug('finding cut for nodes %s' % (", ".join(anchors)))
 
-        vc = VectorClock()  # vector clocks for anchors
-        for n in anchors:
-            proc, cnt = self.split_node(n)
-            assert cnt > 0, 'Race before process fork (%d:%d)' % \
-                (proc.pid, cnt)
-            vc = vc.merge(self.vclocks[(proc, cnt)])
-            logging.debug('    vc: %s' % self.vclocks[(proc, cnt)])
+        vc = reduce(lambda vc, n: vc.merge(n.vclock), anchors, VectorClock())
 
         logging.debug('merged clocks %s' % vc)
         logging.debug('ticks array %s' %
-                      ([(p.pid, c, s) for ((p, c), s) in ticks.items()]))
+                      ([(p.pid, c, s) for ((p, c), s) in self.ticks.items()]))
 
-        # syscnt before which we cut
-        cut = dict([(int(p), int(c)) for p, c in
-                    [n.split(':') for n in anchors]])
+        cut = dict(lambda n: (n.proc, SysLoc(n.event, before=True)), anchors)
 
-        for proc in self.session.process_list:
-            if proc.pid in cut:
+        for proc in self.session.processes.itervalues():
+            if proc in map(lambda n: n.event.proc, anchors):
                 continue
 
             # find the last time we heard from pid
-            pid = proc.pid
-            c = vc[pid]
-
+            c = vc[proc]
             logging.debug("pid=%d, local clock=%d" % (pid, c))
 
             if (proc, c + 1) in ticks:
                 # normal case: stop before the syscall
-                syscnt = ticks[(proc, c + 1)]
+                cut[proc] = ticks[(proc, c + 1)]
             else:
                 # special case: process already exited
                 assert (c > 0), 'Invalid syscall count %d' % c
-                syscnt = sys.maxint # use maxint to represent exited process
+                cut[proc] = None
 
-            cut[pid] = syscnt
 
         logging.debug('temp-cut: %s' % cut)
         # convert cut to bookmarks understandable by save_events()
@@ -379,12 +259,8 @@ class ExecutionGraph(networkx.DiGraph):
         # if a child process has been cloned or not, we must make sure
         # that we have computed the cut
         marks = dict()
-        for pid, cnt in cut.iteritems():
-            if cnt == sys.maxint:
-                marks[pid] = 0 # include everything for already exited process
-                continue
-            if cnt > 0:
-                marks[pid] = -cnt # normal case: negate to indicate cut before
+        for proc, sysloc in cut.iteritems():
+            if sysloc.syscall not in map(lambda n: n.event, anchors):
                 continue
 
             # Exception: for a process that was stopped on syscall 0
@@ -398,18 +274,15 @@ class ExecutionGraph(networkx.DiGraph):
             # returns from clone() in the parent and the child processes
             # must be in the log
 
-            assert cnt == 0, 'invalid syscnt!'
-            n = self.make_node(pid, 0)
-            pred = self.predecessors(n)
-            assert pred, "only the first process %d? can't have race!" % pid
-            assert len(pred)>0, 'More than one parent for %d !' % pid
+            predec = self.predecessors(proc.anchor)
+            assert predec, "only the first process %s? can't have race!" % proc
+            assert len(predec)>0, 'More than one parent for %s !' % proc
 
-            prvproc, prvcnt = self.split_node(pred[0])
+            prev = predec[0]
+            logging.debug('parent %s, child %s, clone@%d, cut@%s'
+                          % (prev.proc, proc, prev.event.sycall_index, cut[prev]))
 
-            logging.debug('parent %d, child %d, clone@%d, cut@%d' 
-                          % (prvproc.pid, pid, prvcnt, cut[prvproc.pid]))
-
-            if cut[prvproc.pid] <= prvcnt: # clone() not in cut
+            if cut[proc].syscall.syscall_index <= prev.event.syscall_index: # clone() not in cut
                 logging.debug('exclude child not yet cloned')
             else: # clone() in cut
                 logging.debug("include child already cloned")
