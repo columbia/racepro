@@ -26,8 +26,8 @@ def test_fork_wait_dep():
                  ]
 
         g = ExecutionGraph(events)
-        e = list(g.session.events)
-        procs = g.session.processes
+        e = list(g.events)
+        procs = g.processes
 
         assert_equal(set(g.edges()), set([
             # natural edges
@@ -78,8 +78,8 @@ def test_fifo_dep():
              ]
 
     g = ExecutionGraph(e for el in events for e in el)
-    sys = [e for e in g.session.events if e.is_a(scribe.EventSyscallExtra)]
-    procs = g.session.processes
+    sys = [e for e in g.events if e.is_a(scribe.EventSyscallExtra)]
+    procs = g.processes
 
     assert_equal(set(g.edges()) ^ set([
         # natural edges

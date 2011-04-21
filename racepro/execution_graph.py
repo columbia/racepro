@@ -28,16 +28,16 @@ class Node(Event):
             syscall_index = -1
         return "%d:%d" % (self.proc.pid, syscall_index)
 
-class ExecutionGraph(networkx.DiGraph):
+class ExecutionGraph(networkx.DiGraph, Session):
     def __init__(self, events):
         """Build the execution DAG from the execution log.
         """
         networkx.DiGraph.__init__(self)
-        self.session = Session(Node(e) for e in events)
+        Session.__init__(self, (Node(e) for e in events))
 
         self._dependency_fifo()
 
-        init = self.session.init_proc
+        init = self.init_proc
         init.anchor = Node.anchor(init)
         self.add_node(init.anchor)
         self._build_graph(init)
@@ -60,7 +60,7 @@ class ExecutionGraph(networkx.DiGraph):
                 newpid = sys.ret
                 self.add_node(sys, type='fork')
 
-                child = self.session.processes[newpid]
+                child = self.processes[newpid]
                 child.anchor = Node.anchor(child)
                 self.add_node(child.anchor)
                 self.add_edge(sys, child.anchor, label='fork')
@@ -71,7 +71,7 @@ class ExecutionGraph(networkx.DiGraph):
                 pid = sys.ret
                 self.add_node(sys, type='wait')
 
-                last = self.session.processes[pid].syscalls[-1]
+                last = self.processes[pid].syscalls[-1]
                 self.add_node(last)
                 self.add_edge(last, sys, label='exit')
 
@@ -88,7 +88,7 @@ class ExecutionGraph(networkx.DiGraph):
 
     def _dependency_fifo(self):
         """Add HB dependencies due to pipes and sockets"""
-        for fifo in self.session.fifos:
+        for fifo in self.fifos:
             buf = 0
             write_left = 0  # data "left" in the first write
             writes = deque()
