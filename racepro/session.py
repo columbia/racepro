@@ -162,7 +162,10 @@ class Resource:
         else:
             assert self.id == e.id
             assert self.type == e.type
-            assert self.desc == e.desc
+            # desc might change for sockets, we'll keep the longest desc in
+            # the resource lifetime to easily track the socket peers
+            if len(e.desc) > len(self.desc):
+                self.desc = e.desc
 
     def sort_events_by_serial(self):
         self.events.sort(key=lambda e: e.serial)
@@ -174,36 +177,61 @@ class Resource:
                (self.id, self.type, self.desc, len(self.events))
 
 class Fifo:
-    """ A Fifo represents a uni-directional data stream. A regular pipe would
-    be represented with one Fifo, and a socket with two fifos.
+    """ A Fifo represents a uni-directional data stream.
+    A regular pipe is represented with one Fifo, and a socket with two fifos.
     """
     @staticmethod
     def find_fifos(resources):
         fifo_res = dict()
+        def got_fifo_res(key, res):
+            fifo_res.setdefault(key, list()).append(res)
+
+        pipe_re = re.compile('^pipe:\[(.*)\]$')
+        sock_re = re.compile('^socket:\[(.*)\] socket:\[(.*)\]$')
         for res in resources.itervalues():
-            if 'pipe:' in res.desc:
-                fifo_res.setdefault(res.desc, list()).append(res)
+            if res.type != scribe.SCRIBE_RES_TYPE_FILE:
+                continue
+
+            pipe_inode = pipe_re.findall(res.desc)
+            if pipe_inode:
+                got_fifo_res(pipe_inode[0], res)
+                continue
+
+            sock_inodes = sock_re.findall(res.desc)
+            if sock_inodes:
+                # sorting because we need 'socket:[1] socket:[2]'
+                # and 'socket:[2] socket:[1]' to map to the same key
+                got_fifo_res(tuple(sorted(sock_inodes[0])), res)
+                print(sorted(sock_inodes[0]))
 
         fifos = list()
         for lres in fifo_res.itervalues():
-            p = Fifo(lres)
-            fifos.append(p)
+            # We only want fifos which have both endpoints in the session
+            assert(len(lres) <= 2)
+            if len(lres) != 2:
+                continue
+
+            # We'll try both endpoints as (src, dst) and (dst, src) and
+            # keep only the one(s) that makes sense.
+            # pipes should have one fifo valid, whereas sockets can have
+            # two fifos.
+            for src, dst in [(lres[0], lres[1]),
+                             (lres[1], lres[0])]:
+                f = Fifo(src, dst)
+                if len(f.reads) or len(f.writes):
+                    fifos.append(f)
         return fifos
 
-    def __init__(self, resources):
-        assert len(resources) == 2
+    def __init__(self, src_res, dst_res):
         self.reads = EventList()
         self.writes = EventList()
 
-        for res in resources:
+        for res, el, nr in [(src_res, self.writes, unistd.SYS_ext_write),
+                            (dst_res, self.reads,  unistd.SYS_ext_read)]:
             for e in res.events:
                 sys = e.syscall
-                if sys.ret <= 0:
-                    continue
-                if sys.nr in unistd.SYS_read:
-                    self.reads.add(sys)
-                elif sys.nr in unistd.SYS_write:
-                    self.writes.add(sys)
+                if sys.nr in nr:
+                    el.add(sys)
 
 class Signal:
     @staticmethod
@@ -235,7 +263,6 @@ class Signal:
         self.send = send
         self.recv = recv
         self.handled = handled
-
 
 class Session:
     def __init__(self, scribe_events):

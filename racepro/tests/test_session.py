@@ -1,6 +1,6 @@
-import scribe
 from nose.tools import *
 from racepro.session import *
+from racepro.unistd import *
 
 def test_event_str():
     e = Event(scribe.EventRegs())
@@ -262,8 +262,8 @@ def test_pipe():
           pipe_syscall(nr=write_nr, pipe=1, ret=3,  res_id=2, serial=1), # buf=3 i=5
           pipe_syscall(nr=write_nr, pipe=1, ret=2,  res_id=2, serial=2), # buf=5 i=6
           [scribe.EventPid(pid=3)],
-          pipe_syscall(nr=write_nr, pipe=1, ret=-1, res_id=2, serial=1), # buf=0 i=7
-          pipe_syscall(nr=write_nr, pipe=1, ret=5,  res_id=2, serial=2), # buf=5 i=8
+          pipe_syscall(nr=write_nr, pipe=1, ret=-1, res_id=2, serial=3), # buf=0 i=7
+          pipe_syscall(nr=write_nr, pipe=1, ret=5,  res_id=2, serial=4), # buf=5 i=8
           pipe_syscall(nr=write_nr, pipe=3, ret=5,  res_id=4, serial=1), # buf=5 i=9
           pipe_syscall(nr=read_nr,  pipe=3, ret=3,  res_id=3, serial=1), # buf=1 i=10
         ]
@@ -272,11 +272,8 @@ def test_pipe():
                     if e.is_a(scribe.EventSyscallExtra)]
 
         assert_equal(len(session.fifos), 2)
-        assert_equal(list(session.fifos[0].reads),
-                     [syscalls[1], syscalls[4]])
-        assert_equal(list(session.fifos[0].writes),
-                     [syscalls[5], syscalls[6], syscalls[8]])
-
+        assert_equal(list(session.fifos[0].reads), [syscalls[1], syscalls[2], syscalls[4]])
+        assert_equal(list(session.fifos[0].writes), [syscalls[5], syscalls[6], syscalls[7], syscalls[8]])
         assert_equal(list(session.fifos[1].reads),  [syscalls[10], syscalls[3]])
         assert_equal(list(session.fifos[1].writes), [syscalls[9]])
 
@@ -285,6 +282,54 @@ def test_pipe():
         for write_nr in [unistd.NR_write, unistd.NR_writev,
                          unistd.NR_pwrite64, unistd.NR_pwritev]:
             yield gen_test_pipe, read_nr, write_nr
+
+def test_socket():
+    def gen_test_socket(read_nr, write_nr):
+        def socket_syscall(nr, sock1, sock2, ret, res_id, serial):
+            desc = 'socket:[%d]' % sock1
+            if sock2:
+                desc += ' socket:[%d]' % sock2
+            return [
+                    scribe.EventSyscallExtra(nr = nr, ret = ret),
+                    scribe.EventFence(),
+                    scribe.EventResourceLockExtra(
+                            id = res_id, desc = desc, serial = serial,
+                            type = scribe.SCRIBE_RES_TYPE_FILE),
+                    scribe.EventFence(),
+                    scribe.EventSyscallEnd()]
+
+        events = [
+          [scribe.EventPid(pid=1)],
+          socket_syscall(nr=unistd.NR_fstat64, sock1=1, sock2=None, ret=5, res_id=1, serial=1), # i=0
+          socket_syscall(nr=write_nr, sock1=1, sock2=None, ret=-1,  res_id=1, serial=2), # i=1
+          socket_syscall(nr=write_nr, sock1=1, sock2=2,    ret=3,   res_id=1, serial=3), # i=2
+          socket_syscall(nr=read_nr,  sock1=1, sock2=2,    ret=10,  res_id=1, serial=4), # i=3
+          socket_syscall(nr=read_nr,  sock1=1, sock2=None, ret=5,   res_id=1, serial=5), # i=4
+          [scribe.EventPid(pid=2)],
+          socket_syscall(nr=read_nr,  sock1=2, sock2=1,    ret=1,   res_id=2, serial=1), # i=5
+          socket_syscall(nr=write_nr, sock1=2, sock2=1,    ret=15,  res_id=2, serial=2), # i=6
+          socket_syscall(nr=read_nr,  sock1=2, sock2=None, ret=2,   res_id=2, serial=3), # i=7
+        ]
+        session = Session(e for el in events for e in el)
+        syscalls = [e for e in session.events
+                    if e.is_a(scribe.EventSyscallExtra)]
+
+        assert_equal(len(session.fifos), 2)
+        assert_equal(list(session.fifos[0].reads), [syscalls[5], syscalls[7]])
+        assert_equal(list(session.fifos[0].writes), [syscalls[1], syscalls[2]])
+        assert_equal(list(session.fifos[1].reads),  [syscalls[3], syscalls[4]])
+        assert_equal(list(session.fifos[1].writes), [syscalls[6]])
+
+    for read_nr in [unistd.NR_read, unistd.NR_readv,
+                    unistd.NR_pread64, unistd.NR_preadv]:
+        for write_nr in [unistd.NR_write, unistd.NR_writev,
+                         unistd.NR_pwrite64, unistd.NR_pwritev]:
+            yield gen_test_socket, read_nr, write_nr
+    # not in the same loop to limit the number of tests generated
+    for read_nr in [NR_recv, NR_recvfrom, NR_recvmsg]:
+        for write_nr in [NR_send, NR_sendto, NR_sendmsg]:
+            yield gen_test_socket, read_nr, write_nr
+
 
 def test_signal():
     events = [
