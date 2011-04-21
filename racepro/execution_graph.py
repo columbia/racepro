@@ -8,31 +8,28 @@ import scribe
 import logging
 import sys
 
-class Node:
-    def dummy(proc):
-        e = Event(scribe.EventFence())
-        e.proc = proc
-        return Node(e)
-
-    def __init__(self, event):
-        self.event = event
+class Node(Event):
+    def __init__(self, scribe_event):
+        Event.__init__(self, scribe_event)
         self.vclock = None
 
-    @property
-    def proc(self):
-        return self.event.proc
+    @staticmethod
+    def anchor(proc):
+        e = Node(scribe.EventFence())
+        e.proc = proc
+        return e
 
 class ExecutionGraph(networkx.DiGraph):
-    def __init__(self, session):
+    def __init__(self, events):
         """Build the execution DAG from the execution log.
         """
         networkx.DiGraph.__init__(self)
-        self.session = session
+        self.session = Session(Node(e) for e in events)
 
         self._dependency_fifo()
 
-        init = session.processes[1]
-        init.anchor = Node.dummy(init)
+        init = self.session.init_proc
+        init.anchor = Node.anchor(init)
         self.add_node(init.anchor)
         self._build_graph(init)
 
@@ -50,37 +47,35 @@ class ExecutionGraph(networkx.DiGraph):
         ancestor = proc.anchor
 
         for sys in proc.syscalls:
-            node = Node(sys)
-
-            if sys.nr in unistd.Syscalls.SYS_fork and sys.ret > 0:
+            if sys.nr in unistd.SYS_fork and sys.ret > 0:
                 newpid = sys.ret
-                self.add_node(node, type='fork')
+                self.add_node(sys, type='fork')
 
                 child = self.session.processes[newpid]
-                child.anchor = Node.dummy(child)
+                child.anchor = Node.anchor(child)
                 self.add_node(child.anchor)
-                self.add_edge(node, child.anchor, label='fork')
+                self.add_edge(sys, child.anchor, label='fork')
 
                 self._build_graph(child)
 
-            elif sys.nr in unistd.Syscalls.SYS_wait and sys.ret > 0:
+            elif sys.nr in unistd.SYS_wait and sys.ret > 0:
                 pid = sys.ret
-                self.add_node(node, type='wait')
+                self.add_node(sys, type='wait')
 
-                last = Node(self.session.processes[pid].syscalls[-1])
+                last = self.session.processes[pid].syscalls[-1]
                 self.add_node(last)
-                self.add_edge(last, node, label='exit')
+                self.add_edge(last, sys, label='exit')
 
-            elif sys.nr in unistd.Syscalls.SYS_exit:
-                self.add_node(node, type='exit')
+            elif sys.nr in unistd.SYS_exit:
+                self.add_node(sys, type='exit')
 
             # unless node already exists (from dependcies HBs) - skip it
             # (otherwise, we need to connect it)
-            elif node not in self.node:
+            elif sys not in self.nodes():
                 continue
 
-            self.add_edge(ancestor, node)
-            ancestor = node
+            self.add_edge(ancestor, sys)
+            ancestor = sys
 
     def _dependency_fifo(self):
         """Add HB dependencies due to pipes and sockets"""
@@ -95,9 +90,11 @@ class ExecutionGraph(networkx.DiGraph):
             write_iter = iter(fifo.writes)
 
             for read_sys in fifo.reads:
+                if read_sys.ret < 0:
+                    # TODO HB from a non-blocking read that returns -EAGAIN
+                    # to the next write
+                    continue
                 read_bytes = read_sys.ret
-                # TODO HB from a non-blocking read that returns -EAGAIN
-                # to the next write
 
                 while buf < read_bytes:
                     try:
@@ -105,17 +102,19 @@ class ExecutionGraph(networkx.DiGraph):
                     except StopIteration:
                         raise ValueError("Not enough fifo writes :(")
 
-                    write_bytes = write_sys.ret
-                    buf += write_bytes
-                    writes.append((write_sys, write_bytes))
+                    if write_sys.ret < 0:
+                        continue
+                    written_bytes = write_sys.ret
+                    buf += written_bytes
+                    writes.append((write_sys, written_bytes))
 
                 dst = Node(read_sys)
 
                 # add HB nodes from previous writes to us
-                for write_sys, write_bytes in writes:
+                for write_sys, written_bytes in writes:
                     if read_sys.proc != write_sys.proc:
                         src = Node(write_sys)
-                        self.add_edge(src, dst, label='pipe')
+                        self.add_edge(src, dst, label='fifo')
 
                 # discard previous writes which have been consumed
                 while read_bytes > 0:
@@ -136,7 +135,7 @@ class ExecutionGraph(networkx.DiGraph):
     def compute_vclocks(self):
         """Compute the vector-clocks of nodes in the execution graph.
         """
-        init = self.session.processes[1]
+        init = self.session.init_proc
         init.anchor.vclock = VectorClock().tick(init)
 
         for node in networkx.algorithms.dag.topological_sort(self):
@@ -146,12 +145,12 @@ class ExecutionGraph(networkx.DiGraph):
             for next in self.neighbors(node):
                 # need to create vclock for this node ?
                 if not next.vclock:
-                    next.vclock = vc.tick(next.event.proc)
+                    next.vclock = vc.tick(next.proc)
                 else:
                     next.vclock = next.vclock.merge(vc)
 
                 # is this an edge that should cause a tick ?
-                if node.event.proc != next.event.proc:
+                if node.proc != next.proc:
                     if self.edge[node][next]['type'] in ['fork', 'signal']:
                         tick = True
                 else:
@@ -170,7 +169,7 @@ class ExecutionGraph(networkx.DiGraph):
         # it here: we have to deal with clone() and clone() returns anyway
         ticks = dict()
         for node in self.nodes:
-            c = node.vclock[node.event.proc]
+            c = node.vclock[node.proc]
             if (proc, c) in ticks:  # use earlier ones
                 if node.event.syscall_index < ticks[(proc, c)].syscall_index:
                     ticks[(proc, c)] = node.event
@@ -237,7 +236,7 @@ class ExecutionGraph(networkx.DiGraph):
         cut = dict(lambda n: (n.proc, SysLoc(n.event, before=True)), anchors)
 
         for proc in self.session.processes.itervalues():
-            if proc in map(lambda n: n.event.proc, anchors):
+            if proc in map(lambda n: n.proc, anchors):
                 continue
 
             # find the last time we heard from pid
