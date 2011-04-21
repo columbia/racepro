@@ -178,10 +178,11 @@ class Resource:
 
 class Fifo:
     """ A Fifo represents a uni-directional data stream.
-    A regular pipe is represented with one Fifo, and a socket with two fifos.
+    A regular pipe is represented with one fifo, and a socket with two fifos.
     """
     @staticmethod
     def find_fifos(resources):
+        # First we want to group resources that belongs to the same fifo
         fifo_res = dict()
         def got_fifo_res(key, res):
             fifo_res.setdefault(key, list()).append(res)
@@ -204,6 +205,7 @@ class Fifo:
                 got_fifo_res(tuple(sorted(sock_inodes[0])), res)
                 print(sorted(sock_inodes[0]))
 
+        # Then we create the fifos
         fifos = list()
         for lres in fifo_res.itervalues():
             # We only want fifos which have both endpoints in the session
@@ -307,3 +309,7 @@ class Session:
 
         if self._current_proc:
             self._current_proc.add_event(e)
+
+    @property
+    def init_proc(self):
+        return self.processes[1]

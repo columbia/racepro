@@ -198,6 +198,8 @@ def test_process_pid():
                                                      events[9], events[10]])
     assert_equal(list(session.processes[2].events), [events[5]])
 
+    assert_equal(session.processes[1], session.init_proc)
+
 def test_resource_init():
     res = Resource()
     res.add_event(Event(scribe.EventResourceLockExtra(id=2, type=3, desc='hello')))
