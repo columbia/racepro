@@ -38,8 +38,9 @@ class Event(object):
     def syscall_index(self):
         if self.proc is None:
             raise AttributeError
-        index = self.proc.syscalls.index(self)
-        if index == -1:
+        try:
+            index = self.proc.syscalls.index(self)
+        except ValueError:
             raise AttributeError
         return index
 
@@ -66,7 +67,10 @@ class EventList:
     def __len__(self):
         return len(self._events)
 
-    def add(self, e):
+    def __getitem__(self, index):
+        return self._events[index]
+
+    def append(self, e):
         e.owners[self] = len(self._events)
         self._events.append(e)
 
@@ -74,15 +78,15 @@ class EventList:
         try:
             return e.owners[self]
         except KeyError:
-            return -1
+            raise ValueError('event not in list')
 
     def after(self, e):
-        i = e.owners[self]
-        return (self._events[j] for j in xrange(i + 1, len(self)))
+        i = self.index(e)
+        return (self[j] for j in xrange(i + 1, len(self)))
 
     def before(self, e):
-        i = e.owners[self]
-        return (self._events[j] for j in xrange(i - 1, -1, -1))
+        i = self.index(e)
+        return (self[j] for j in xrange(i - 1, -1, -1))
 
     def sort(self, key):
         self._events.sort(key=key)
@@ -106,7 +110,7 @@ class Process:
         self.current_syscall = None
 
     def add_event(self, e):
-        self.events.add(e)
+        self.events.append(e)
         e.proc = self
 
         def check_execve(syscall):
@@ -124,7 +128,7 @@ class Process:
                 break
 
         if e.is_a(scribe.EventSyscallExtra):
-            self.syscalls.add(e)
+            self.syscalls.append(e)
             self.current_syscall = e
         elif e.is_a(scribe.EventSyscallEnd):
             check_execve(self.current_syscall)
@@ -150,7 +154,7 @@ class Resource:
         self.events = EventList()
 
     def add_event(self, e):
-        self.events.add(e)
+        self.events.append(e)
 
         assert e.is_a(scribe.EventResourceLockExtra)
         e.resource = self
@@ -233,7 +237,7 @@ class Fifo:
             for e in res.events:
                 sys = e.syscall
                 if sys.nr in nr:
-                    el.add(sys)
+                    el.append(sys)
 
 class Signal:
     @staticmethod
@@ -292,7 +296,7 @@ class Session:
         # the add_event() method is made private because we need to do extra
         # processing after an event is added.
 
-        self.events.add(e)
+        self.events.append(e)
 
         # pid switcher logic
         if e.is_a(scribe.EventPid):

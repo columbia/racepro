@@ -28,16 +28,16 @@ def test_event_list():
     e3 = Event(scribe.EventRegs())
 
     el1 = EventList()
-    el1.add(e1)
-    el1.add(e2)
-    el1.add(e3)
+    el1.append(e1)
+    el1.append(e2)
+    el1.append(e3)
 
     el2 = EventList()
-    el2.add(e2)
-    el2.add(e3)
+    el2.append(e2)
+    el2.append(e3)
 
     el3 = EventList()
-    el3.add(e2)
+    el3.append(e2)
 
     assert_equal(list(el1), [e1, e2, e3])
     assert_equal(list(el2), [e2, e3])
@@ -53,9 +53,12 @@ def test_event_list():
     assert_equal(el1.index(e2), 1)
     assert_equal(el2.index(e2), 0)
     assert_equal(el3.index(e2), 0)
-    assert_equal(el3.index(e3), -1)
+    assert_raises(ValueError, el3.index, e3)
 
-    assert_raises(KeyError, el3.after, e1)
+    assert_equal(el1[0], e1)
+    assert_equal(el1[-1], e3)
+
+    assert_raises(ValueError, el3.after, e1)
 
 
 def test_event_doesnt_belong_to_proc_by_default():
