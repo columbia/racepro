@@ -2,7 +2,7 @@ from nose.tools import *
 from racepro.execution_graph import *
 from racepro.unistd import *
 
-def test_fork_process_edge():
+def test_fork_wait_dep():
     def gen_test_fork_process_edge(nr_fork, nr_wait, nr_exit):
         events = [
                    scribe.EventPid(pid=1),                       # 0
@@ -55,3 +55,43 @@ def test_fork_process_edge():
         yield gen_test_fork_process_edge, NR_fork, nr_wait, NR_exit
     for nr_exit in [NR_exit, NR_exit_group]:
         yield gen_test_fork_process_edge, NR_fork, NR_waitpid, nr_exit
+
+def test_fifo_dep():
+    def pipe_syscall(nr, pipe, ret, res_id, serial):
+        return [
+                scribe.EventSyscallExtra(nr = nr, ret = ret),
+                scribe.EventResourceLockExtra(
+                        id = res_id, desc='pipe:[%d]' % pipe,
+                        serial = serial, type = scribe.SCRIBE_RES_TYPE_FILE),
+                scribe.EventSyscallEnd()]
+    events = [
+          [scribe.EventPid(pid=1)],
+          pipe_syscall(nr=NR_read,  pipe=1, ret=2,  res_id=1, serial=1), # i=0
+          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=2), # i=1
+          pipe_syscall(nr=NR_read,  pipe=1, ret=3,  res_id=1, serial=3), # i=2
+          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=4), # i=3
+          [scribe.EventPid(pid=2)],
+          pipe_syscall(nr=NR_write, pipe=1, ret=3,  res_id=2, serial=1), # i=4
+          pipe_syscall(nr=NR_write, pipe=1, ret=2,  res_id=2, serial=2), # i=5
+          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=3), # i=6
+          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=4)  # i=7
+             ]
+
+    g = ExecutionGraph(e for el in events for e in el)
+    sys = [e for e in g.session.events if e.is_a(scribe.EventSyscallExtra)]
+    procs = g.session.processes
+
+    assert_equal(set(g.edges()) ^ set([
+        # natural edges
+        (procs[1].anchor, sys[0]),
+        (sys[0], sys[1]),
+        (sys[1], sys[2]),
+        (sys[2], sys[3]),
+        # shouldn't we include the natural deps of pid=2 ?
+        # pipe deps
+        (sys[4], sys[0]),
+        (sys[4], sys[1]),
+        (sys[4], sys[1]),
+        (sys[5], sys[2]),
+        (sys[6], sys[2]),
+        (sys[6], sys[3])]), set())

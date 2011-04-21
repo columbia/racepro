@@ -19,6 +19,15 @@ class Node(Event):
         e.proc = proc
         return e
 
+    def __repr__(self):
+        if self.proc is None:
+            return Event.__repr__(self)
+        try:
+            syscall_index = self.syscall_index
+        except:
+            syscall_index = -1
+        return "%d:%d" % (self.proc.pid, syscall_index)
+
 class ExecutionGraph(networkx.DiGraph):
     def __init__(self, events):
         """Build the execution DAG from the execution log.
@@ -108,12 +117,12 @@ class ExecutionGraph(networkx.DiGraph):
                     buf += written_bytes
                     writes.append((write_sys, written_bytes))
 
-                dst = Node(read_sys)
+                dst = read_sys
 
                 # add HB nodes from previous writes to us
                 for write_sys, written_bytes in writes:
                     if read_sys.proc != write_sys.proc:
-                        src = Node(write_sys)
+                        src = write_sys
                         self.add_edge(src, dst, label='fifo')
 
                 # discard previous writes which have been consumed
