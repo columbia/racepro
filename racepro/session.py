@@ -271,16 +271,19 @@ class Signal:
         self.handled = handled
 
 class Session:
-    def __init__(self, scribe_events):
+    def __init__(self, events):
         self.processes = dict()
         self.resources = dict()
         self.events = EventList()
 
         # process all events. It constructs the resource and processes maps
         self._current_proc = None # State for add_event()
-        for se in scribe_events:
-            assert isinstance(se, scribe.Event)
-            self._add_event(Event(se))
+        for e in events:
+            if isinstance(e, Event):
+                self._add_event(e)
+            else:
+                assert isinstance(e, scribe.Event)
+                self._add_event(Event(e))
 
         # Sort all the resource event by serial number
         for res in self.resources.itervalues():

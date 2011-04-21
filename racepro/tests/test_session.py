@@ -177,6 +177,17 @@ def test_process_repr():
 
     assert_equal(repr(proc), "<Process pid=1 name='cmd' events=2>")
 
+def test_session_events():
+    events = [ scribe.EventFence(), scribe.EventRegs() ]
+
+    session = Session(events)
+    assert(len(session.events), 2)
+    assert(isinstance(session.events[0], Event))
+
+    session = Session(map(lambda se: Event(se), events))
+    assert(len(session.events), 2)
+    assert(isinstance(session.events[0], Event))
+
 def test_process_pid():
     events = [ scribe.EventFence(),             # 0
                scribe.EventPid(pid=1),          # 1
