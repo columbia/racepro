@@ -66,32 +66,28 @@ def test_fifo_dep():
                 scribe.EventSyscallEnd()]
     events = [
           [scribe.EventPid(pid=1)],
-          pipe_syscall(nr=NR_read,  pipe=1, ret=2,  res_id=1, serial=1), # i=0
-          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=2), # i=1
-          pipe_syscall(nr=NR_read,  pipe=1, ret=3,  res_id=1, serial=3), # i=2
-          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=4), # i=3
+          [scribe.EventSyscallExtra(nr=NR_fork, ret=2)],                 # i=0
+          pipe_syscall(nr=NR_read,  pipe=1, ret=2,  res_id=1, serial=1), # i=1
+          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=2), # i=2
+          pipe_syscall(nr=NR_read,  pipe=1, ret=3,  res_id=1, serial=3), # i=3
+          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=4), # i=4
           [scribe.EventPid(pid=2)],
-          pipe_syscall(nr=NR_write, pipe=1, ret=3,  res_id=2, serial=1), # i=4
-          pipe_syscall(nr=NR_write, pipe=1, ret=2,  res_id=2, serial=2), # i=5
-          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=3), # i=6
-          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=4)  # i=7
+          pipe_syscall(nr=NR_write, pipe=1, ret=3,  res_id=2, serial=1), # i=5
+          pipe_syscall(nr=NR_write, pipe=1, ret=2,  res_id=2, serial=2), # i=6
+          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=3), # i=7
+          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=4)  # i=8
              ]
 
     g = ExecutionGraph(e for el in events for e in el)
     sys = [e for e in g.events if e.is_a(scribe.EventSyscallExtra)]
     procs = g.processes
 
-    assert_equal(set(g.edges()) ^ set([
-        # natural edges
-        (procs[1].anchor, sys[0]),
-        (sys[0], sys[1]),
-        (sys[1], sys[2]),
-        (sys[2], sys[3]),
-        # shouldn't we include the natural deps of pid=2 ?
-        # pipe deps
-        (sys[4], sys[0]),
-        (sys[4], sys[1]),
-        (sys[4], sys[1]),
+    edges = ((u,v) for (u,v,d) in g.edges_iter(data=True)
+             if d.get('label') == 'fifo')
+    assert_equal(set(edges), set([
+        (sys[5], sys[1]),
         (sys[5], sys[2]),
-        (sys[6], sys[2]),
-        (sys[6], sys[3])]), set())
+        (sys[5], sys[2]),
+        (sys[6], sys[3]),
+        (sys[7], sys[3]),
+        (sys[7], sys[4])]))
