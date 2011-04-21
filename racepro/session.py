@@ -74,6 +74,10 @@ class EventList:
         e.owners[self] = len(self._events)
         self._events.append(e)
 
+    def extend(self, el):
+        for e in el:
+            self.append(e)
+
     def index(self, e):
         try:
             return e.owners[self]
@@ -226,6 +230,7 @@ class Fifo:
                 f = Fifo(src, dst)
                 if len(f.reads) or len(f.writes):
                     fifos.append(f)
+
         return fifos
 
     def __init__(self, src_res, dst_res):
@@ -234,10 +239,8 @@ class Fifo:
 
         for res, el, nr in [(src_res, self.writes, unistd.SYS_ext_write),
                             (dst_res, self.reads,  unistd.SYS_ext_read)]:
-            for e in res.events:
-                sys = e.syscall
-                if sys.nr in nr:
-                    el.append(sys)
+            syscalls = (e.syscall for e in res.events)
+            el.extend(sys for sys in syscalls if sys.nr in nr)
 
 class Signal:
     @staticmethod

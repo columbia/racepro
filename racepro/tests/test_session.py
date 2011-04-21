@@ -60,6 +60,9 @@ def test_event_list():
 
     assert_raises(ValueError, el3.after, e1)
 
+    el1.extend(el2)
+    assert_equal(list(el1), [e1, e2, e3, e2, e3])
+
 
 def test_event_doesnt_belong_to_proc_by_default():
     e = Event(scribe.EventRegs())
@@ -181,12 +184,12 @@ def test_session_events():
     events = [ scribe.EventFence(), scribe.EventRegs() ]
 
     session = Session(events)
-    assert(len(session.events), 2)
-    assert(isinstance(session.events[0], Event))
+    assert_equal(len(session.events), 2)
+    assert_true(isinstance(session.events[0], Event))
 
     session = Session(map(lambda se: Event(se), events))
-    assert(len(session.events), 2)
-    assert(isinstance(session.events[0], Event))
+    assert_equal(len(session.events), 2)
+    assert_true(isinstance(session.events[0], Event))
 
 def test_process_pid():
     events = [ scribe.EventFence(),             # 0
