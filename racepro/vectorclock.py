@@ -5,18 +5,18 @@ class VectorClock:
             raise ValueError('clock values must be positive')
         self._clocks = dict(d)
 
-    def __getitem__(self, pid):
+    def __getitem__(self, proc):
         try:
-            return self._clocks[pid]
+            return self._clocks[proc]
         except KeyError:
             return 0
 
-    def tick(self, pid):
+    def tick(self, proc):
         vc_new = VectorClock(self._clocks)
         try:
-            vc_new._clocks[pid] += 1
+            vc_new._clocks[proc] += 1
         except KeyError:
-            vc_new._clocks[pid] = 1
+            vc_new._clocks[proc] = 1
         return vc_new
 
     def __eq__(self, vc):
@@ -26,13 +26,13 @@ class VectorClock:
 
     def merge(self, vc):
         vc_new = VectorClock()
-        for pid in set(self._clocks.keys() + vc._clocks.keys()):
-            vc_new._clocks[pid] = max([self[pid], vc[pid]])
+        for proc in set(self._clocks.keys() + vc._clocks.keys()):
+            vc_new._clocks[proc] = max([self[proc], vc[proc]])
         return vc_new
 
     def before(self, vc):
-        for pid in set(self._clocks.keys() + vc._clocks.keys()):
-            if self[pid] > vc[pid]:
+        for proc in set(self._clocks.keys() + vc._clocks.keys()):
+            if self[proc] > vc[proc]:
                 return False
         return True
 

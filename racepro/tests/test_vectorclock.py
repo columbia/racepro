@@ -32,6 +32,10 @@ def test_tick():
     vc3 = vc2.tick(1)
     assert_equal(vc3[1], 2)
 
+def test_obj():
+    vc = VectorClock().tick('x')
+    assert_equal(vc['x'], 1)
+
 def test_before():
     vc1 = VectorClock({1:1, 2:2})
     vc2 = VectorClock({     2:2, 3:3})
