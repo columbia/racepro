@@ -698,10 +698,10 @@ SYSCALLS = {
     NR_recvmmsg : 'recvmmsg'
 }
 
-SYS_fork = set([NR_fork, NR_clone, NR_vfork])
-SYS_exit = set([NR_exit, NR_exit_group])
-SYS_wait = set([NR_waitpid, NR_wait4, NR_waitid])
-SYS_read = set([NR_read, NR_readv, NR_pread64, NR_preadv])
-SYS_write = set([NR_write, NR_writev, NR_pwrite64, NR_pwritev])
-SYS_creat = set([NR_creat, NR_link, NR_mknod])
-SYS_kill = set([NR_kill, NR_tkill])
+SYS_fork       = set([NR_fork, NR_clone, NR_vfork])
+SYS_exit       = set([NR_exit, NR_exit_group])
+SYS_wait       = set([NR_waitpid, NR_wait4, NR_waitid])
+SYS_read       = set([NR_read, NR_readv, NR_pread64, NR_preadv])
+SYS_write      = set([NR_write, NR_writev, NR_pwrite64, NR_pwritev])
+SYS_creat      = set([NR_creat, NR_link, NR_mknod])
+SYS_kill       = set([NR_kill, NR_tkill])

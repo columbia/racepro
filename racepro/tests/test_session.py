@@ -198,24 +198,6 @@ def test_process_pid():
                                                      events[9], events[10]])
     assert_equal(list(session.processes[2].events), [events[5]])
 
-def test_process_parent():
-    def gen_test_process_parent(fork_sysnr):
-        events = [ scribe.EventPid(pid=3),
-                   scribe.EventRdtsc(),
-                   scribe.EventPid(pid=1),
-                   scribe.EventSyscallExtra(nr=fork_sysnr, ret=-1),
-                   scribe.EventSyscallExtra(nr=fork_sysnr, ret=2),
-                   scribe.EventSyscallExtra(nr=fork_sysnr, ret=3),
-                   scribe.EventPid(pid=2),
-                   scribe.EventRdtsc() ]
-
-        session = Session(events)
-        assert_equal(session.processes[2].parent, session.processes[1])
-        assert_equal(session.processes[3].parent, session.processes[1])
-
-    for nr in [unistd.NR_fork, unistd.NR_clone, unistd.NR_vfork]:
-        yield gen_test_process_parent, nr
-
 def test_resource_init():
     res = Resource()
     res.add_event(Event(scribe.EventResourceLockExtra(id=2, type=3, desc='hello')))
@@ -258,17 +240,17 @@ def test_session_resource():
     assert_equal(events[6].resource, session.resources[2])
 
 def test_pipe():
-    def pipe_syscall(nr, pipe, ret, res_id, serial):
-        return [
-                scribe.EventSyscallExtra(nr = nr, ret = ret),
-                scribe.EventFence(),
-                scribe.EventResourceLockExtra(
-                        id = res_id, desc='pipe:[%d]' % pipe,
-                        serial = serial, type = scribe.SCRIBE_RES_TYPE_FILE),
-                scribe.EventFence(),
-                scribe.EventSyscallEnd()]
-
     def gen_test_pipe(read_nr, write_nr):
+        def pipe_syscall(nr, pipe, ret, res_id, serial):
+            return [
+                    scribe.EventSyscallExtra(nr = nr, ret = ret),
+                    scribe.EventFence(),
+                    scribe.EventResourceLockExtra(
+                            id = res_id, desc='pipe:[%d]' % pipe,
+                            serial = serial, type = scribe.SCRIBE_RES_TYPE_FILE),
+                    scribe.EventFence(),
+                    scribe.EventSyscallEnd()]
+
         events = [
           [scribe.EventPid(pid=1)],
           pipe_syscall(nr=unistd.NR_fstat64, pipe=1, ret=5,  res_id=1, serial=1), # buf=0 i=0
@@ -289,14 +271,14 @@ def test_pipe():
         syscalls = [e for e in session.events
                     if e.is_a(scribe.EventSyscallExtra)]
 
-        assert_equal(len(session.pipes), 2)
-        assert_equal(list(session.pipes[0].reads),
+        assert_equal(len(session.fifos), 2)
+        assert_equal(list(session.fifos[0].reads),
                      [syscalls[1], syscalls[4]])
-        assert_equal(list(session.pipes[0].writes),
+        assert_equal(list(session.fifos[0].writes),
                      [syscalls[5], syscalls[6], syscalls[8]])
 
-        assert_equal(list(session.pipes[1].reads),  [syscalls[10], syscalls[3]])
-        assert_equal(list(session.pipes[1].writes), [syscalls[9]])
+        assert_equal(list(session.fifos[1].reads),  [syscalls[10], syscalls[3]])
+        assert_equal(list(session.fifos[1].writes), [syscalls[9]])
 
     for read_nr in [unistd.NR_read, unistd.NR_readv,
                     unistd.NR_pread64, unistd.NR_preadv]:

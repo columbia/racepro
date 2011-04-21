@@ -173,7 +173,23 @@ class Resource:
         return "<Resource id=%d type=%d desc='%s' events=%d>" % \
                (self.id, self.type, self.desc, len(self.events))
 
-class Pipe:
+class Fifo:
+    """ A Fifo represents a uni-directional data stream. A regular pipe would
+    be represented with one Fifo, and a socket with two fifos.
+    """
+    @staticmethod
+    def find_fifos(resources):
+        fifo_res = dict()
+        for res in resources.itervalues():
+            if 'pipe:' in res.desc:
+                fifo_res.setdefault(res.desc, list()).append(res)
+
+        fifos = list()
+        for lres in fifo_res.itervalues():
+            p = Fifo(lres)
+            fifos.append(p)
+        return fifos
+
     def __init__(self, resources):
         assert len(resources) == 2
         self.reads = EventList()
@@ -190,28 +206,58 @@ class Pipe:
                     self.writes.add(sys)
 
 class Signal:
+    @staticmethod
+    def find_signals(events):
+        cookies = dict()
+
+        def got_a_cookie(e, type):
+            cookies.setdefault(e.cookie, dict())[type] = e
+
+        for e in events:
+            if e.is_a(scribe.EventSigSendCookie):
+                   got_a_cookie(e, 'send')
+            elif e.is_a(scribe.EventSigRecvCookie):
+                   got_a_cookie(e, 'recv')
+            elif e.is_a(scribe.EventSigHandledCookie):
+                   got_a_cookie(e, 'handled')
+
+        signals = list()
+        for sig in cookies.itervalues():
+            if not sig.has_key('send'):
+                raise ValueError('Found a signal without a send cookie')
+            if not sig.has_key('recv'):
+                raise ValueError('Found a signal without a recv cookie')
+            sig.setdefault('handled', None)
+            signals.append(Signal(**sig))
+        return signals
+
     def __init__(self, send, recv, handled):
         self.send = send
         self.recv = recv
         self.handled = handled
 
+
 class Session:
     def __init__(self, scribe_events):
         self.processes = dict()
         self.resources = dict()
-        self.pipes = list()
-        self.signals = list()
         self.events = EventList()
-        self.current_proc = None # State for add_event()
 
+        # process all events. It constructs the resource and processes maps
+        self._current_proc = None # State for add_event()
         for se in scribe_events:
             assert isinstance(se, scribe.Event)
             self._add_event(Event(se))
 
-        self._find_parent_of_each_proc()
-        self._sort_events_for_each_resource()
-        self._find_pipe_dependencies()
-        self._find_signals()
+        # Sort all the resource event by serial number
+        for res in self.resources.itervalues():
+            res.sort_events_by_serial()
+
+        # Find fifo (pipes and sockets) dependencies
+        self.fifos = Fifo.find_fifos(self.resources)
+
+        # Lookup all internal signals
+        self.signals = Signal.find_signals(self.events)
 
     def _add_event(self, e):
         # the add_event() method is made private because we need to do extra
@@ -224,7 +270,7 @@ class Session:
             if e.pid not in self.processes:
                 self.processes[e.pid] = Process(pid=e.pid)
 
-            self.current_proc = self.processes[e.pid]
+            self._current_proc = self.processes[e.pid]
             return
 
         if e.is_a(scribe.EventResourceLockExtra):
@@ -232,49 +278,5 @@ class Session:
                 self.resources[e.id] = Resource()
             self.resources[e.id].add_event(e)
 
-        if self.current_proc:
-            self.current_proc.add_event(e)
-
-    def _find_parent_of_each_proc(self):
-        for proc in self.processes.itervalues():
-            for sys in proc.syscalls:
-                if sys.nr in unistd.SYS_fork:
-                  new_pid = sys.ret
-                  if new_pid in self.processes:
-                      self.processes[new_pid].parent = proc
-
-    def _sort_events_for_each_resource(self):
-        for res in self.resources.itervalues():
-            res.sort_events_by_serial()
-
-    def _find_pipe_dependencies(self):
-        pipe_res = dict()
-        for res in self.resources.itervalues():
-            if 'pipe:' in res.desc:
-                pipe_res.setdefault(res.desc, list()).append(res)
-
-        for lres in pipe_res.itervalues():
-            p = Pipe(lres)
-            self.pipes.append(p)
-
-    def _find_signals(self):
-        sigs = dict()
-
-        def do_sig_cookie(e, type):
-            sigs.setdefault(e.cookie, dict())[type] = e
-
-        for e in self.events:
-            if e.is_a(scribe.EventSigSendCookie):
-                   do_sig_cookie(e, 'send')
-            elif e.is_a(scribe.EventSigRecvCookie):
-                   do_sig_cookie(e, 'recv')
-            elif e.is_a(scribe.EventSigHandledCookie):
-                   do_sig_cookie(e, 'handled')
-
-        for sig in sigs.itervalues():
-            if not sig.has_key('send'):
-                raise ValueError
-            if not sig.has_key('recv'):
-                raise ValueError
-            sig.setdefault('handled', None)
-            self.signals.append(Signal(**sig))
+        if self._current_proc:
+            self._current_proc.add_event(e)
