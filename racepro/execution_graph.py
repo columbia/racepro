@@ -136,6 +136,14 @@ class ExecutionGraph(networkx.DiGraph, Session):
                     if write_left == 0:
                         writes.popleft()
 
+    def edges_labeled(self, label):
+        iter = networkx.DiGraph.edges_iter(self, data=True)
+        if isinstance(label, str):
+            return ((u,v) for (u,v,d) in iter if d.get('label') == label)
+        else:
+            labels = list(label)
+            return ((u,v) for (u,v,d) in iter if d.get('label') in labels)
+
     def _dependency_signal(self):
         """ADD HB dependencies due to signal send/receive (cookies)"""
         for sig in self.session.signals:

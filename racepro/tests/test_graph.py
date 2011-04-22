@@ -29,22 +29,12 @@ def test_fork_wait_dep():
         e = list(g.events)
         procs = g.processes
 
-        assert_equal(set(g.edges()), set([
-            # natural edges
-            (procs[1].anchor, e[3]),
-            (e[3], e[4]),
-            (e[4], e[6]),
-            (e[6], e[7]),
-            (e[7], e[8]),
-            (e[8], e[9]),
-            (procs[2].anchor, e[11]),
-            (procs[3].anchor, e[13]),
-            (procs[4].anchor, e[15]),
-            # forks
+        assert_equal(set(g.edges_labeled('fork')), set([
             (e[3],  procs[2].anchor),
             (e[4],  procs[3].anchor),
-            (e[11], procs[4].anchor),
-            # waits
+            (e[11], procs[4].anchor)]))
+
+        assert_equal(set(g.edges_labeled('exit')), set([
             (e[11], e[7]),
             (e[13], e[6]),
             (e[15], e[8])]))
@@ -82,9 +72,7 @@ def test_fifo_dep():
     sys = [e for e in g.events if e.is_a(scribe.EventSyscallExtra)]
     procs = g.processes
 
-    edges = ((u,v) for (u,v,d) in g.edges_iter(data=True)
-             if d.get('label') == 'fifo')
-    assert_equal(set(edges), set([
+    assert_equal(set(g.edges_labeled('fifo')), set([
         (sys[5], sys[1]),
         (sys[5], sys[2]),
         (sys[5], sys[2]),
