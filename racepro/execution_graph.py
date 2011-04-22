@@ -15,7 +15,7 @@ class Node(Event):
 
     @staticmethod
     def anchor(proc):
-        e = Node(scribe.EventFence())
+        e = Node('%d:anchor' % proc.pid)
         e.proc = proc
         return e
 
@@ -149,34 +149,27 @@ class ExecutionGraph(networkx.DiGraph, Session):
             labels = list(label)
             return ((u,v) for (u,v,d) in iter if d.get('label') in labels)
 
-    def compute_vclocks(self):
+    def adjacents_iter(self, node):
+        return itertools.chain(self.predecessors_iter(node),
+                               self.successors_iter(node))
+
+    def need_vclocks(self):
         """Compute the vector-clocks of nodes in the execution graph.
         """
-        init = self.session.init_proc
-        init.anchor.vclock = VectorClock().tick(init)
-
         for node in networkx.algorithms.dag.topological_sort(self):
-            vc = node.vclock
-            tick = False
+            vc = VectorClock()
+            need_tick = False
+            for adj in self.adjacents_iter(node):
+                if node.proc != adj.proc:
+                    need_tick = True
+                if adj.vclock is not None:
+                    vc = vc.merge(adj.vclock)
+            if need_tick:
+                vc = vc.tick(node.proc)
+            node.vclock = vc
 
-            for next in self.neighbors(node):
-                # need to create vclock for this node ?
-                if not next.vclock:
-                    next.vclock = vc.tick(next.proc)
-                else:
-                    next.vclock = next.vclock.merge(vc)
-
-                # is this an edge that should cause a tick ?
-                if node.proc != next.proc:
-                    if self.edge[node][next]['type'] in ['fork', 'signal']:
-                        tick = True
-                else:
-                    # remember for below
-                    tnode = next
-
-            if tick:
-                # tick before the merge, but w/o effect on @vc
-                tnode.vclock = tnode.vclock.merge(vc.tick(proc))
+    def need_ticks(self):
+        self.need_vclocks()
 
         # @ticks will map from a <proc, clock> tuple to the first
         # syscall (syscnt) by which proc that value of local clock.
