@@ -14,12 +14,12 @@ def test_init_dict():
     assert_equal(vc[2], 4)
     assert_equal(vc[3], 5)
 
-@raises(ValueError)
-def test_init_dict_inval1():
-    VectorClock({1:0})
+def test_init_dict_zero_ignored():
+    vc = VectorClock({1: 0, 2: 1})
+    assert_equal(vc, VectorClock({2: 1}))
 
 @raises(ValueError)
-def test_init_dict_inval2():
+def test_init_dict_negative():
     VectorClock({1:-1})
 
 def test_tick():

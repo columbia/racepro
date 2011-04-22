@@ -1,8 +1,15 @@
 class VectorClock:
     """Classic vector clock"""
     def __init__(self, d=dict()):
-        if d and min(d.values()) <= 0:
-            raise ValueError('clock values must be positive')
+        if d:
+            newd = dict()
+            for proc, value in d.iteritems():
+                if value < 0:
+                    raise ValueError('clock values must be non negative')
+                if value == 0:
+                    continue
+                newd[proc] = value
+            d = newd
         self._clocks = dict(d)
 
     def __getitem__(self, proc):
