@@ -32,9 +32,10 @@ class VectorClock:
         return self._clocks == vc._clocks
 
     def merge(self, vc):
-        vc_new = VectorClock()
-        for proc in set(self._clocks.keys() + vc._clocks.keys()):
-            vc_new._clocks[proc] = max([self[proc], vc[proc]])
+        # we copy vc because chances are self is empty
+        vc_new = VectorClock(vc._clocks)
+        for proc, value in self._clocks.iteritems():
+            vc_new._clocks[proc] = max([value, vc_new[proc]])
         return vc_new
 
     def before(self, vc):
