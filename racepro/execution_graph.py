@@ -13,12 +13,6 @@ class Node(Event):
         Event.__init__(self, scribe_event)
         self.vclock = None
 
-    @staticmethod
-    def anchor(proc):
-        e = Node('%d:anchor' % proc.pid)
-        e.proc = proc
-        return e
-
     def __repr__(self):
         if self.proc is None:
             return Event.__repr__(self)
@@ -38,10 +32,16 @@ class ExecutionGraph(networkx.DiGraph, Session):
         self._dependency_fifo()
         self._dependency_signal()
 
-        init = self.init_proc
-        init.anchor = Node.anchor(init)
-        self.add_node(init.anchor)
-        self._build_graph(init)
+        self._add_proc_anchors(self.init_proc)
+        self._build_graph(self.init_proc)
+
+    def _add_proc_anchors(self, proc):
+        proc.first_anchor      = Node('%d:first_anchor' % proc.pid)
+        proc.first_anchor.proc = proc
+        self.add_node(proc.first_anchor)
+        proc.last_anchor       = Node('%d:last_anchor' % proc.pid)
+        proc.last_anchor.proc  = proc
+        self.add_node(proc.last_anchor)
 
     def _build_graph(self, proc):
         """Build the execution DAG from the execution log, as follows:
@@ -54,7 +54,7 @@ class ExecutionGraph(networkx.DiGraph, Session):
         - Resource access add edge from the previous user to current
         (note: attributes must be strings)
         """
-        ancestor = proc.anchor
+        ancestor = proc.first_anchor
 
         for sys in proc.syscalls:
             if sys.nr in unistd.SYS_fork and sys.ret > 0:
@@ -62,9 +62,8 @@ class ExecutionGraph(networkx.DiGraph, Session):
                 self.add_node(sys, type='fork')
 
                 child = self.processes[newpid]
-                child.anchor = Node.anchor(child)
-                self.add_node(child.anchor)
-                self.add_edge(sys, child.anchor, label='fork')
+                self._add_proc_anchors(child)
+                self.add_edge(sys, child.first_anchor, label='fork')
 
                 self._build_graph(child)
 
@@ -72,8 +71,7 @@ class ExecutionGraph(networkx.DiGraph, Session):
                 pid = sys.ret
                 self.add_node(sys, type='wait')
 
-                last = self.processes[pid].syscalls[-1]
-                self.add_node(last)
+                last = self.processes[pid].last_anchor
                 self.add_edge(last, sys, label='exit')
 
             elif sys.nr in unistd.SYS_exit:
@@ -86,6 +84,8 @@ class ExecutionGraph(networkx.DiGraph, Session):
 
             self.add_edge(ancestor, sys)
             ancestor = sys
+
+        self.add_edge(ancestor, proc.last_anchor)
 
     def _dependency_fifo(self):
         """Add HB dependencies due to pipes and sockets"""
