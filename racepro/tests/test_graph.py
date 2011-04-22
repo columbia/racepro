@@ -70,7 +70,6 @@ def test_fifo_dep():
 
     g = ExecutionGraph(e for el in events for e in el)
     sys = [e for e in g.events if e.is_a(scribe.EventSyscallExtra)]
-    procs = g.processes
 
     assert_equal(set(g.edges_labeled('fifo')), set([
         (sys[5], sys[1]),
@@ -79,3 +78,36 @@ def test_fifo_dep():
         (sys[6], sys[3]),
         (sys[7], sys[3]),
         (sys[7], sys[4])]))
+
+def test_signal_dep():
+    events = [
+               scribe.EventPid(pid=1),                      # 0
+               scribe.EventSyscallExtra(nr=NR_fork, ret=2), # 1
+               scribe.EventFence(),                         # 2
+               scribe.EventSyscallExtra(),                  # 3
+               scribe.EventFence(),                         # 4
+               scribe.EventSigSendCookie(cookie=1),         # 5
+               scribe.EventSyscallEnd(),                    # 6
+               scribe.EventSyscallExtra(),                  # 7
+               scribe.EventFence(),                         # 8
+               scribe.EventSigRecvCookie(cookie=2),         # 9
+               scribe.EventSyscallEnd(),                    # 10
+               scribe.EventPid(pid=2),                      # 11
+               scribe.EventSyscallExtra(),                  # 12
+               scribe.EventFence(),                         # 13
+               scribe.EventSigRecvCookie(cookie=1),         # 14
+               scribe.EventSyscallEnd(),                    # 15
+               scribe.EventFence(),                         # 16
+               scribe.EventSyscallExtra(),                  # 17
+               scribe.EventFence(),                         # 18
+               scribe.EventSigSendCookie(cookie=2),         # 19
+               scribe.EventSyscallEnd(),                    # 20
+               scribe.EventSigHandledCookie(cookie=1),      # 21
+             ]
+
+    g = ExecutionGraph(events)
+    e = list(g.events)
+
+    assert_equal(set(g.edges_labeled('signal')), set([
+        (e[3],  e[12]),
+        (e[17], e[7])]))

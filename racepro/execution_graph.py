@@ -36,6 +36,7 @@ class ExecutionGraph(networkx.DiGraph, Session):
         Session.__init__(self, (Node(e) for e in events))
 
         self._dependency_fifo()
+        self._dependency_signal()
 
         init = self.init_proc
         init.anchor = Node.anchor(init)
@@ -136,6 +137,10 @@ class ExecutionGraph(networkx.DiGraph, Session):
                     if write_left == 0:
                         writes.popleft()
 
+    def _dependency_signal(self):
+        for sig in self.signals:
+            self.add_edge(sig.send.syscall, sig.recv.syscall, label='signal')
+
     def edges_labeled(self, label):
         iter = networkx.DiGraph.edges_iter(self, data=True)
         if isinstance(label, str):
@@ -143,11 +148,6 @@ class ExecutionGraph(networkx.DiGraph, Session):
         else:
             labels = list(label)
             return ((u,v) for (u,v,d) in iter if d.get('label') in labels)
-
-    def _dependency_signal(self):
-        """ADD HB dependencies due to signal send/receive (cookies)"""
-        for sig in self.session.signals:
-            self.add_edge(Node(sig.send), Node(sig.recv), label='signal')
 
     def compute_vclocks(self):
         """Compute the vector-clocks of nodes in the execution graph.
