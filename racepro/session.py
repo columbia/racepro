@@ -155,7 +155,7 @@ class Resource:
         self.id = None
         self.type = None
         self.desc = None
-        self.events = EventList()
+        self.events = list()
 
     def add_event(self, e):
         self.events.append(e)
@@ -233,8 +233,8 @@ class Fifo:
         return fifos
 
     def __init__(self, src_res, dst_res):
-        self.reads = EventList()
-        self.writes = EventList()
+        self.reads = list()
+        self.writes = list()
 
         for res, el, nr in [(src_res, self.writes, unistd.SYS_ext_write),
                             (dst_res, self.reads,  unistd.SYS_ext_read)]:
@@ -276,7 +276,7 @@ class Session:
     def __init__(self, events):
         self.processes = dict()
         self.resources = dict()
-        self.events = EventList()
+        self.events = list()
         self._current_proc = None # State for add_event()
 
         self._add_events(events)
