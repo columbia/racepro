@@ -127,6 +127,114 @@ def test_signal_dep():
 def test_vclocks():
     events = [
                scribe.EventPid(pid=1),                        # 0
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=-1), # 1
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=2),  # 2
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=3),  # 3
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=-1), # 4
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=3),  # 5
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=2),  # 6
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=4),  # 7
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0),  # 8
+               scribe.EventPid(pid=2),                        # 9
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=4),  # 10
+               scribe.EventPid(pid=3),                        # 11
+               scribe.EventSyscallExtra(nr=NR_read,  ret=0),  # 12
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0),  # 13
+               scribe.EventPid(pid=4),                        # 14
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0)   # 15
+             ]
+    # p1: p1f e1 e2 e3 e4              e5     e6         e7 e8 p1l
+    #             \  \                 /      /          /
+    # p2:         p2f \               / e10 p2l         /
+    #                  \             /    \            /
+    # p3:              p3f e12 e13 p3l     \          /
+    #                                       \        /
+    # p4:                                   p4f e15 p4l
+
+
+    g = ExecutionGraph(events)
+    e = list(g.events)
+    p = g.processes
+
+    def vc(*l):
+        procs = sorted(p.values(), key=lambda p: p.pid)
+        return VectorClock(dict(zip(procs, l)))
+
+    # Following standard vclock behavior as
+    # defined at http://en.wikipedia.org/wiki/Vector_clock
+    assert_equal(p[ 1].first_anchor.vclock, vc(1, 0, 0, 0))
+    assert_equal(e[ 1].vclock,              vc(2, 0, 0, 0))
+    assert_equal(e[ 2].vclock,              vc(3, 0, 0, 0))
+    assert_equal(p[ 2].first_anchor.vclock, vc(3, 1, 0, 0))
+    assert_equal(e[ 3].vclock,              vc(4, 0, 0, 0))
+    assert_equal(p[ 3].first_anchor.vclock, vc(4, 0, 1, 0))
+    assert_equal(e[ 4].vclock,              vc(5, 0, 0, 0))
+    assert_equal(e[12].vclock,              vc(4, 0, 2, 0))
+    assert_equal(e[13].vclock,              vc(4, 0, 3, 0))
+    assert_equal(p[ 3].last_anchor.vclock,  vc(4, 0, 4, 0))
+    assert_equal(e[ 5].vclock,              vc(6, 0, 4, 0))
+    assert_equal(e[10].vclock,              vc(3, 2, 0, 0))
+    assert_equal(p[ 4].first_anchor.vclock, vc(3, 2, 0, 1))
+    assert_equal(p[ 2].last_anchor.vclock,  vc(3, 3, 0, 0))
+    assert_equal(e[ 6].vclock,              vc(7, 3, 4, 0))
+    assert_equal(e[15].vclock,              vc(3, 2, 0, 2))
+    assert_equal(p[ 4].last_anchor.vclock,  vc(3, 2, 0, 3))
+    assert_equal(e[ 7].vclock,              vc(8, 3, 4, 3))
+    assert_equal(e[ 8].vclock,              vc(9, 3, 4, 3))
+    assert_equal(p[ 1].last_anchor.vclock,  vc(10, 3, 4, 3))
+
+def test_vclocks_multiple():
+    def pipe_syscall(nr, pipe, ret, res_id, serial):
+        return [
+                scribe.EventSyscallExtra(nr = nr, ret = ret),
+                scribe.EventResourceLockExtra(
+                        id = res_id, desc='pipe:[%d]' % pipe,
+                        serial = serial, type = scribe.SCRIBE_RES_TYPE_FILE),
+                scribe.EventSyscallEnd()]
+    events = [
+          [scribe.EventPid(pid=1)],
+          [scribe.EventSyscallExtra(nr=NR_fork, ret=2)],                 # i=0
+          pipe_syscall(nr=NR_read,  pipe=1, ret=2,  res_id=1, serial=1), # i=1
+          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=2), # i=2
+          pipe_syscall(nr=NR_read,  pipe=1, ret=3,  res_id=1, serial=3), # i=3
+          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=4), # i=4
+          [scribe.EventPid(pid=2)],
+          pipe_syscall(nr=NR_write, pipe=1, ret=3,  res_id=2, serial=1), # i=5
+          pipe_syscall(nr=NR_write, pipe=1, ret=2,  res_id=2, serial=2), # i=6
+          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=3), # i=7
+          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=4)  # i=8
+             ]
+    # p1: p1f s0         s1 s2        s3  s4    p1l
+    #          \         /  /      .--/   /
+    #           \       +--+      /  +---+
+    #            \     /         /  /
+    # p2:        p2f  s5       s6  s7        s8 p2l
+
+    g = ExecutionGraph(e for el in events for e in el)
+    s = [e for e in g.events if e.is_a(scribe.EventSyscallExtra)]
+    p = g.processes
+
+    def vc(*l):
+        procs = sorted(p.values(), key=lambda p: p.pid)
+        return VectorClock(dict(zip(procs, l)))
+
+    assert_equal(p[1].first_anchor.vclock, vc(1, 0))
+    assert_equal(s[0].vclock,              vc(2, 0))
+    assert_equal(p[2].first_anchor.vclock, vc(2, 1))
+    assert_equal(s[5].vclock,              vc(2, 2))
+    assert_equal(s[1].vclock,              vc(3, 2))
+    assert_equal(s[2].vclock,              vc(4, 2))
+    assert_equal(s[6].vclock,              vc(2, 3))
+    assert_equal(s[7].vclock,              vc(2, 4))
+    assert_equal(s[3].vclock,              vc(5, 4))
+    assert_equal(s[4].vclock,              vc(6, 4))
+    assert_equal(s[8].vclock,              vc(2, 5))
+    assert_equal(p[1].last_anchor.vclock,  vc(7, 4))
+    assert_equal(p[2].last_anchor.vclock,  vc(2, 6))
+
+def test_crosscut():
+    events = [
+               scribe.EventPid(pid=1),                        # 0
                scribe.EventRegs(),                            # 1
                scribe.EventSyscallExtra(nr=NR_fork,  ret=-1), # 2
                scribe.EventSyscallExtra(nr=NR_fork,  ret=2),  # 3
@@ -152,84 +260,23 @@ def test_vclocks():
     #                                       \        /
     # p4:                                   p4f e16 p4l
 
-
     g = ExecutionGraph(events)
-    g.need_vclocks()
     e = list(g.events)
     p = g.processes
 
-    def vc(*l):
-        procs = sorted(p.values(), key=lambda p: p.pid)
-        return VectorClock(dict(zip(procs, l)))
+    assert_raises(ValueError, g.crosscut, [])
 
-    # Following standard vclock behavior as
-    # defined at http://en.wikipedia.org/wiki/Vector_clock
-    assert_equal(p[ 1].first_anchor.vclock, vc(0, 0, 0, 0))
-   #assert_equal(e[ 2].vclock,              vc(0, 0, 0, 0))
-    assert_equal(e[ 3].vclock,              vc(1, 0, 0, 0))
-    assert_equal(p[ 2].first_anchor.vclock, vc(1, 1, 0, 0))
-    assert_equal(e[ 4].vclock,              vc(2, 0, 0, 0))
-    assert_equal(p[ 3].first_anchor.vclock, vc(2, 0, 1, 0))
-   #assert_equal(e[ 5].vclock,              vc(2, 0, 0, 0))
-   #assert_equal(e[13].vclock,              vc(2, 0, 1, 0))
-   #assert_equal(e[14].vclock,              vc(2, 0, 1, 0))
-    assert_equal(p[ 3].last_anchor.vclock,  vc(2, 0, 2, 0))
-    assert_equal(e[ 6].vclock,              vc(3, 0, 2, 0))
-    assert_equal(e[11].vclock,              vc(1, 2, 0, 0))
-    assert_equal(p[ 4].first_anchor.vclock, vc(1, 2, 0, 1))
-    assert_equal(p[ 2].last_anchor.vclock,  vc(1, 3, 0, 0))
-    assert_equal(e[ 7].vclock,              vc(4, 3, 2, 0))
-    assert_equal(e[16].vclock,              vc(1, 2, 0, 1))
-    assert_equal(p[ 4].last_anchor.vclock,  vc(1, 2, 0, 2))
-    assert_equal(e[ 8].vclock,              vc(5, 3, 2, 2))
-    assert_equal(e[ 9].vclock,              vc(5, 3, 2, 2))
-    assert_equal(p[ 1].last_anchor.vclock,  vc(5, 3, 2, 2))
+    assert_equal(set(g.crosscut([e[14]])),
+                 set([e[5], p[2].first_anchor, e[14], p[4].first_anchor]))
 
-def test_vclocks_multiple():
-    def pipe_syscall(nr, pipe, ret, res_id, serial):
-        return [
-                scribe.EventSyscallExtra(nr = nr, ret = ret),
-                scribe.EventResourceLockExtra(
-                        id = res_id, desc='pipe:[%d]' % pipe,
-                        serial = serial, type = scribe.SCRIBE_RES_TYPE_FILE),
-                scribe.EventSyscallEnd()]
-    events = [
-          [scribe.EventPid(pid=1)],
-          [scribe.EventSyscallExtra(nr=NR_fork, ret=2)],                 # i=0
-          pipe_syscall(nr=NR_read,  pipe=1, ret=2,  res_id=1, serial=1), # i=1
-          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=2), # i=2
-          pipe_syscall(nr=NR_read,  pipe=1, ret=3,  res_id=1, serial=3), # i=3
-          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=4), # i=4
-          [scribe.EventPid(pid=2)],
-          pipe_syscall(nr=NR_write, pipe=1, ret=3,  res_id=2, serial=1), # i=5
-          pipe_syscall(nr=NR_write, pipe=1, ret=2,  res_id=2, serial=2), # i=6
-          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=3), # i=7
-          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=4)  # i=8
-             ]
-    # p1: p1f s0         s1 s2        s3  s4 p1l
-    #          \         /  /      .--/   /
-    #           \       +--+      /  +---+
-    #            \     /         /  /
-    # p2:        p2f  s5       s6  s7        p2l
+    assert_equal(set(g.crosscut([e[14], e[11]])),
+                 set([e[5], e[11], e[14], p[4].first_anchor]))
 
-    g = ExecutionGraph(e for el in events for e in el)
-    g.need_vclocks()
-    s = [e for e in g.events if e.is_a(scribe.EventSyscallExtra)]
-    p = g.processes
+    assert_raises(ValueError, g.crosscut, [e[14], e[2]])
 
-    def vc(*l):
-        procs = sorted(p.values(), key=lambda p: p.pid)
-        return VectorClock(dict(zip(procs, l)))
+    assert_equal(set(g.crosscut([p[2].last_anchor])),
+                 set([e[4], p[2].last_anchor,
+                      p[3].first_anchor, p[4].first_anchor]))
 
-    assert_equal(p[1].first_anchor.vclock, vc(0, 0))
-    assert_equal(s[0].vclock,              vc(1, 0))
-    assert_equal(p[2].first_anchor.vclock, vc(1, 1))
-    assert_equal(s[5].vclock,              vc(1, 2))
-    assert_equal(s[1].vclock,              vc(2, 2))
-    assert_equal(s[2].vclock,              vc(3, 2))
-    assert_equal(s[6].vclock,              vc(1, 3))
-    assert_equal(s[7].vclock,              vc(1, 4))
-    assert_equal(s[3].vclock,              vc(4, 4))
-    assert_equal(s[4].vclock,              vc(5, 4))
-    assert_equal(p[1].last_anchor.vclock,  vc(5, 4))
-    assert_equal(p[2].last_anchor.vclock,  vc(1, 4))
+    for node in g.nodes():
+        assert_true(node in g.crosscut([node]))

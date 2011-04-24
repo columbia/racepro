@@ -32,9 +32,15 @@ class VectorClock:
         return self._clocks == vc._clocks
 
     def merge(self, vc):
-        # we copy vc because chances are self is empty
-        vc_new = VectorClock(vc._clocks)
-        for proc, value in self._clocks.iteritems():
+        # we can do such things because VectorClock() is immutable
+        assert isinstance(vc, VectorClock)
+        if not self._clocks:
+            return vc
+        if not vc._clocks:
+            return self
+
+        vc_new = VectorClock(self._clocks)
+        for proc, value in vc._clocks.iteritems():
             vc_new._clocks[proc] = max([value, vc_new[proc]])
         return vc_new
 

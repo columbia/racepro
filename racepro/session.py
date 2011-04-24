@@ -211,7 +211,6 @@ class Fifo:
                 # sorting because we need 'socket:[1] socket:[2]'
                 # and 'socket:[2] socket:[1]' to map to the same key
                 got_fifo_res(tuple(sorted(sock_inodes[0])), res)
-                print(sorted(sock_inodes[0]))
 
         # Then we create the fifos
         fifos = list()
@@ -278,9 +277,14 @@ class Session:
         self.processes = dict()
         self.resources = dict()
         self.events = EventList()
-
-        # process all events. It constructs the resource and processes maps
         self._current_proc = None # State for add_event()
+
+        self._add_events(events)
+        self._sort_all_resources()
+        self.fifos = Fifo.find_fifos(self.resources)
+        self.signals = Signal.find_signals(self.events)
+
+    def _add_events(self, events):
         for e in events:
             if isinstance(e, Event):
                 self._add_event(e)
@@ -288,23 +292,12 @@ class Session:
                 assert isinstance(e, scribe.Event)
                 self._add_event(Event(e))
 
-        # Sort all the resource event by serial number
-        for res in self.resources.itervalues():
-            res.sort_events_by_serial()
-
-        # Find fifo (pipes and sockets) dependencies
-        self.fifos = Fifo.find_fifos(self.resources)
-
-        # Lookup all internal signals
-        self.signals = Signal.find_signals(self.events)
-
     def _add_event(self, e):
         # the add_event() method is made private because we need to do extra
-        # processing after an event is added.
+        # processing after an event is added (resource sorting, ...)
 
         self.events.append(e)
 
-        # pid switcher logic
         if e.is_a(scribe.EventPid):
             if e.pid not in self.processes:
                 self.processes[e.pid] = Process(pid=e.pid)
@@ -319,6 +312,10 @@ class Session:
 
         if self._current_proc:
             self._current_proc.add_event(e)
+
+    def _sort_all_resources(self):
+        for res in self.resources.itervalues():
+            res.sort_events_by_serial()
 
     @property
     def init_proc(self):
