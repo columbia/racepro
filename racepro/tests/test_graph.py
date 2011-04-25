@@ -54,14 +54,15 @@ def test_fork_wait_dep():
     for nr_exit in [NR_exit, NR_exit_group]:
         yield gen_test_fork_process_edge, NR_fork, NR_waitpid, nr_exit
 
+def pipe_syscall(nr, pipe, ret, res_id, serial):
+    return [
+            scribe.EventSyscallExtra(nr = nr, ret = ret),
+            scribe.EventResourceLockExtra(
+                    id = res_id, desc='pipe:[%d]' % pipe,
+                    serial = serial, type = scribe.SCRIBE_RES_TYPE_FILE),
+            scribe.EventSyscallEnd()]
+
 def test_fifo_dep():
-    def pipe_syscall(nr, pipe, ret, res_id, serial):
-        return [
-                scribe.EventSyscallExtra(nr = nr, ret = ret),
-                scribe.EventResourceLockExtra(
-                        id = res_id, desc='pipe:[%d]' % pipe,
-                        serial = serial, type = scribe.SCRIBE_RES_TYPE_FILE),
-                scribe.EventSyscallEnd()]
     events = [
           [scribe.EventPid(pid=1)],
           [scribe.EventSyscallExtra(nr=NR_fork, ret=2)],                 # i=0
@@ -184,13 +185,6 @@ def test_vclocks():
     assert_equal(p[ 1].last_anchor.vclock,  vc(10, 3, 4, 3))
 
 def test_vclocks_multiple():
-    def pipe_syscall(nr, pipe, ret, res_id, serial):
-        return [
-                scribe.EventSyscallExtra(nr = nr, ret = ret),
-                scribe.EventResourceLockExtra(
-                        id = res_id, desc='pipe:[%d]' % pipe,
-                        serial = serial, type = scribe.SCRIBE_RES_TYPE_FILE),
-                scribe.EventSyscallEnd()]
     events = [
           [scribe.EventPid(pid=1)],
           [scribe.EventSyscallExtra(nr=NR_fork, ret=2)],                 # i=0

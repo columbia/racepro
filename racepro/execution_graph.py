@@ -84,9 +84,6 @@ class ExecutionGraph(networkx.DiGraph, Session):
             write_left = 0  # data "left" in the first write
             writes = deque()
 
-            if len(fifo.reads) == 0:
-                continue
-
             write_iter = iter(fifo.writes)
 
             for read_sys in fifo.reads:
@@ -108,13 +105,10 @@ class ExecutionGraph(networkx.DiGraph, Session):
                     buf += written_bytes
                     writes.append((write_sys, written_bytes))
 
-                dst = read_sys
-
                 # add HB nodes from previous writes to us
-                for write_sys, written_bytes in writes:
+                for write_sys, _ in writes:
                     if read_sys.proc != write_sys.proc:
-                        src = write_sys
-                        self.add_edge(src, dst, label='fifo')
+                        self.add_edge(write_sys, read_sys, label='fifo')
 
                 # discard previous writes which have been consumed
                 while read_bytes > 0:
@@ -133,10 +127,9 @@ class ExecutionGraph(networkx.DiGraph, Session):
 
     def _compute_vclocks(self):
         for node in networkx.algorithms.dag.topological_sort(self):
-            proc = node.proc
             vc = reduce(lambda vc, node: vc.merge(node.vclock),
                         self.predecessors_iter(node), VectorClock())
-            node.vclock = vc.tick(proc)
+            node.vclock = vc.tick(node.proc)
 
     def crosscut(self, cut_nodes):
         if len(cut_nodes) == 0:
