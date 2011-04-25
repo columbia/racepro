@@ -67,30 +67,32 @@ def test_fifo_dep():
           [scribe.EventPid(pid=1)],
           [scribe.EventSyscallExtra(nr=NR_fork, ret=2)],                 # i=0
           pipe_syscall(nr=NR_read,  pipe=1, ret=2,  res_id=1, serial=1), # i=1
-          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=2), # i=2
-          pipe_syscall(nr=NR_read,  pipe=1, ret=3,  res_id=1, serial=3), # i=3
-          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=4), # i=4
+          pipe_syscall(nr=NR_read,  pipe=1, ret=-1, res_id=1, serial=2), # i=2
+          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=3), # i=3
+          pipe_syscall(nr=NR_read,  pipe=1, ret=3,  res_id=1, serial=4), # i=4
+          pipe_syscall(nr=NR_read,  pipe=1, ret=1,  res_id=1, serial=5), # i=5
           [scribe.EventPid(pid=2)],
-          pipe_syscall(nr=NR_write, pipe=1, ret=3,  res_id=2, serial=1), # i=5
-          pipe_syscall(nr=NR_write, pipe=1, ret=2,  res_id=2, serial=2), # i=6
-          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=3), # i=7
-          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=4)  # i=8
+          pipe_syscall(nr=NR_write, pipe=1, ret=3,  res_id=2, serial=1), # i=6
+          pipe_syscall(nr=NR_write, pipe=1, ret=-1, res_id=2, serial=2), # i=7
+          pipe_syscall(nr=NR_write, pipe=1, ret=2,  res_id=2, serial=3), # i=8
+          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=4), # i=9
+          pipe_syscall(nr=NR_write, pipe=1, ret=5,  res_id=2, serial=5)  # i=10
              ]
-    # p1: p1f s0         s1 s2        s3  s4 p1l
-    #          \         /  /      .--/   /
-    #           \       +--+      /  +---+
-    #            \     /         /  /
-    # p2:        p2f  s5       s6  s7        p2l
+    # p1: p1f s0         s1 s2 s3          s4  s5     p1l
+    #          \         /     /        .--/   /
+    #           \       +-----+        /  +---+
+    #            \     /              /  /
+    # p2:        p2f  s6         s7 s8  s9        s10 p2l
 
     g = ExecutionGraph(e for el in events for e in el)
     sys = [e for e in g.events if e.is_a(scribe.EventSyscallExtra)]
 
     assert_equal(set(g.edges_labeled('fifo')), set([
-        (sys[5], sys[1]),
-        (sys[5], sys[2]),
+        (sys[6], sys[1]),
         (sys[6], sys[3]),
-        (sys[7], sys[3]),
-        (sys[7], sys[4])]))
+        (sys[8], sys[4]),
+        (sys[9], sys[4]),
+        (sys[9], sys[5])]))
 
 def test_signal_dep():
     events = [
