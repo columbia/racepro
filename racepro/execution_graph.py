@@ -22,6 +22,10 @@ class Node(Event):
         except:
             return str(self)
 
+    def prev_node(self):
+        return (node for node in self.graph.predecessors_iter(self)
+                if node.proc == self.proc).next()
+
     def next_node(self):
         return (node for node in self.graph.successors_iter(self)
                 if node.proc == self.proc).next()
