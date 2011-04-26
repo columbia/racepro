@@ -262,17 +262,29 @@ def test_crosscut():
 
     assert_raises(ValueError, g.crosscut, [])
 
-    assert_equal(set(g.crosscut([e[14]])),
-                 set([e[5], p[2].first_anchor, e[14], p[4].first_anchor]))
+    assert_equal(set(g.crosscut([NodeLoc(e[14], 'before')])),
+                 set([NodeLoc(e[4],              'after'),
+                      NodeLoc(p[2].first_anchor, 'after'),
+                      NodeLoc(e[14],             'before'),
+                      NodeLoc(p[4].first_anchor, 'before')]))
 
     assert_equal(set(g.crosscut([e[14], e[11]])),
-                 set([e[5], e[11], e[14], p[4].first_anchor]))
+                 set([NodeLoc(e[4],              'after'),
+                      NodeLoc(e[11],             'before'),
+                      NodeLoc(e[14],             'before'),
+                      NodeLoc(p[4].first_anchor, 'before')]))
+
+    assert_equal(set(g.crosscut([p[2].last_anchor])),
+                 set([NodeLoc(e[3],              'after'),
+                      NodeLoc(p[2].last_anchor,  'before'),
+                      NodeLoc(p[3].first_anchor, 'before'),
+                      NodeLoc(p[4].first_anchor, 'after')]))
 
     assert_raises(ValueError, g.crosscut, [e[14], e[2]])
 
-    assert_equal(set(g.crosscut([p[2].last_anchor])),
-                 set([e[4], p[2].last_anchor,
-                      p[3].first_anchor, p[4].first_anchor]))
-
     for node in g.nodes():
-        assert_true(node in g.crosscut([node]))
+        nl = NodeLoc(node, 'before')
+        assert_true(nl in g.crosscut([nl]))
+        assert_equal(g.crosscut([nl]), g.crosscut([node]))
+        nl = NodeLoc(node, 'after')
+        assert_true(nl in g.crosscut([nl]))

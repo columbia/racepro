@@ -26,6 +26,36 @@ class Node(Event):
         return (node for node in self.graph.successors_iter(self)
                 if node.proc == self.proc).next()
 
+class NodeLoc:
+    def __init__(self, node, loc):
+        self.node = node
+        if loc == 'before':
+            self.before = True
+            self.after = False
+        elif loc == 'after':
+            self.before = False
+            self.after = True
+        else:
+            raise ValueError
+
+    @property
+    def vclock(self):
+        if self.before:
+            try:
+                return self.node.prev_node().vclock
+            except StopIteration:
+                pass
+        return self.node.vclock
+
+    def __eq__(self, nl):
+        return self.node == nl.node and self.before == nl.before
+
+    def __hash__(self):
+        return hash(self.node) ^ hash(self.before)
+
+    def __repr__(self):
+        return repr(self.node) + ('a' if self.after else 'b')
+
 class ExecutionGraph(networkx.DiGraph, Session):
     def __init__(self, events):
         networkx.DiGraph.__init__(self)
@@ -37,8 +67,8 @@ class ExecutionGraph(networkx.DiGraph, Session):
         self._dependency_signal()
         self._compute_vclocks()
 
-    def edges_labeled(self, value):
-        return ((u,v) for (u,v,d) in self.edges_iter(data=True)
+    def edges_labeled(self, value, nbunch=None):
+        return ((u,v) for (u,v,d) in self.edges_iter(nbunch, data=True)
                 if d.get('label') == value)
 
     def nodes_typed(self, type):
@@ -131,28 +161,31 @@ class ExecutionGraph(networkx.DiGraph, Session):
                         self.predecessors_iter(node), VectorClock())
             node.vclock = vc.tick(node.proc)
 
-    def crosscut(self, cut_nodes):
-        if len(cut_nodes) == 0:
+    def crosscut(self, cut):
+        if len(cut) == 0:
             raise ValueError('Give me some nodes')
-        for n1, n2 in combinations(cut_nodes, 2):
-            if not n1.vclock.race(n2.vclock):
-                raise ValueError('Cut nodes HB error: %s vs %s !' % (n1, n2))
+        cut = map(lambda n: n if isinstance(n, NodeLoc) else NodeLoc(n, 'before'), cut)
 
-        vc = reduce(lambda vc, node: vc.merge(node.vclock),
-                    cut_nodes, VectorClock())
-        cut_procs = map(lambda node: node.proc, cut_nodes)
+        for nl1, nl2 in combinations(cut, 2):
+            if not nl1.vclock.race(nl2.vclock):
+                raise ValueError('Cut nodes HB error: %s vs %s !' % (nl1, nl2))
+
+        vc = reduce(lambda vc, nl: vc.merge(nl.vclock), cut, VectorClock())
 
         def get_clock_node(proc):
             clock = vc[proc]
-            if not proc in cut_procs:
-                # This is where we explicitly say that we want to include the
-                # syscall that got us here
-                clock += 1
+            if clock == 0:
+                fork = self.predecessors_iter(proc.first_anchor).next()
+                if fork.vclock.before(vc):
+                    return NodeLoc(proc.first_anchor, 'after')
+                return NodeLoc(proc.first_anchor, 'before')
+            elif clock == 1:
+                return NodeLoc(proc.first_anchor, 'after')
+            elif clock == len(proc.syscalls) + 2:
+                return NodeLoc(proc.last_anchor, 'after')
+            else:
+                return NodeLoc(proc.syscalls[clock-2], 'after')
 
-            if clock == 0 or clock == 1:
-                return proc.first_anchor
-            if clock >= len(proc.syscalls) + 2:
-                return proc.last_anchor
-            return proc.syscalls[clock-2]
-
-        return map(lambda proc: get_clock_node(proc), self.processes.values())
+        proc_todo = set(self.processes.values()) - \
+                    set(map(lambda nl: nl.node.proc, cut))
+        return cut + map(lambda proc: get_clock_node(proc), proc_todo)
