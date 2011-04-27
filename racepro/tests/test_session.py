@@ -105,9 +105,7 @@ def test_process_syscall():
     assert_equal(list(proc_events[5].children), [events[6], events[7]])
     assert_equal(list(proc_events[9].children), [])
 
-    def get_children(e):
-        return e.children
-    assert_raises(AttributeError, get_children, proc_events[6])
+    assert_equal(list(proc_events[6].children), [])
 
     def get_syscall(e):
         return e.syscall

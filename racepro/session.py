@@ -22,7 +22,7 @@ class Event(object):
         if self.proc is None:
             raise AttributeError
         if not self.is_a(scribe.EventSyscallExtra):
-            raise AttributeError
+            return []
         return itertools.takewhile(
                 lambda e: not e.is_a(scribe.EventSyscallEnd),
                 self.proc.events.after(self))
