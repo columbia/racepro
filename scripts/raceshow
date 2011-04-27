@@ -1,0 +1,82 @@
+#!/usr/bin/python
+import scribe
+import mmap
+from optparse import OptionParser
+from racepro import *
+import networkx
+import itertools
+import sys
+
+def main():
+    usage = 'usage: %prog [options] log_file'
+    desc = 'Output the dot file (graph) of a scribe log file'
+    parser = OptionParser(usage=usage, description=desc)
+
+    parser.add_option("-p", "--pid", action="append", dest="pids",
+                      metavar='PID', type='int',
+                      help="Only show the given PID. --pid can be repeated.")
+
+    (options, args) = parser.parse_args()
+    if not args:
+        parser.error('Give me a log file')
+    if len(args) > 2:
+        parser.error('You have extra arguments')
+
+    logfile = open(args[0], 'r')
+    logfile_map = mmap.mmap(logfile.fileno(), 0, prot=mmap.PROT_READ)
+    events = scribe.EventsFromBuffer(logfile_map)
+    g = ExecutionGraph(events)
+    to_skip = set()
+    real_nodes = []
+
+    def is_node_trivial(n):
+        adjs = list(itertools.chain(g.predecessors(n), g.successors(n)))
+        same_proc_adj = [a for a in adjs if a.proc == n.proc]
+        return len(adjs) == 2 and len(same_proc_adj) == len(adjs)
+
+    pids = None
+    if options.pids:
+        pids = set(options.pids)
+
+    for n in g.nodes():
+        if is_node_trivial(n) or (pids and n.proc.pid not in pids):
+            to_skip.add(n)
+        else:
+            real_nodes.append(n)
+
+    newg = networkx.DiGraph()
+    for n in real_nodes:
+        newg.add_node(n, **g.node[n])
+    for n in real_nodes:
+        for s in g.successors(n):
+            skip_path = []
+            while s in to_skip and n.proc == s.proc:
+                skip_path.append(s)
+                s = g.successors(s)[0]
+
+            if skip_path:
+                first_node = skip_path[0]
+                last_node = skip_path[-1]
+                inter_node = None
+                if len(skip_path) == 1:
+                    inter_node = [0]
+                else:
+                    inter_node = "%d:[%d..%d]" % (first_node.proc.pid,
+                                                  first_node.syscall_index,
+                                                  last_node.syscall_index)
+
+                newg.add_edge(n, inter_node, weight=100)
+                newg.add_edge(inter_node, g.successors(last_node)[0], weight=100)
+            else:
+                for s in g.successors(n):
+                    if s in to_skip:
+                        continue
+                    attr = g[n][s]
+                    if n.proc == s.proc:
+                        attr['weight'] = 100
+                    newg.add_edge(n, s, **attr)
+
+    networkx.write_dot(newg, sys.stdout)
+
+if __name__ == '__main__':
+    main()

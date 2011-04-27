@@ -8,6 +8,7 @@ setup(
     author = 'Oren Laadan',
     author_email = 'orenl@cs.columbia.edu',
     packages=['racepro'],
-    scripts=['scripts/racepro', 'scripts/racetest', 'scripts/isolate'],
+    scripts=['scripts/racepro', 'scripts/racetest', 'scripts/isolate',
+             'scripts/raceshow'],
     requires=['networkx', 'argparse', 'scribe', 'pygraphviz']
 )
