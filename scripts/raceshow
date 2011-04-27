@@ -29,8 +29,12 @@ def main():
     to_skip = set()
     real_nodes = []
 
+    def ignore_proc(proc):
+        return pids and proc.pid not in pids
+
     def is_node_trivial(n):
-        adjs = list(itertools.chain(g.predecessors(n), g.successors(n)))
+        adjs = [a for a in itertools.chain(g.predecessors(n), g.successors(n))
+                if not ignore_proc(a.proc)]
         same_proc_adj = [a for a in adjs if a.proc == n.proc]
         return len(adjs) == 2 and len(same_proc_adj) == len(adjs)
 
@@ -39,7 +43,7 @@ def main():
         pids = set(options.pids)
 
     for n in g.nodes():
-        if is_node_trivial(n) or (pids and n.proc.pid not in pids):
+        if is_node_trivial(n) or ignore_proc(n.proc):
             to_skip.add(n)
         else:
             real_nodes.append(n)
@@ -65,15 +69,15 @@ def main():
                                                   first_node.syscall_index+1,
                                                   last_node.syscall_index+1)
 
-                newg.add_edge(n, inter_node, weight=100)
-                newg.add_edge(inter_node, g.successors(last_node)[0], weight=100)
+                newg.add_edge(n, inter_node, weight=10000)
+                newg.add_edge(inter_node, g.successors(last_node)[0], weight=10000)
             else:
                 for s in g.successors(n):
                     if s in to_skip:
                         continue
                     attr = g[n][s]
                     if n.proc == s.proc:
-                        attr['weight'] = 100
+                        attr['weight'] = 100000
                     newg.add_edge(n, s, **attr)
 
     networkx.write_dot(newg, sys.stdout)
