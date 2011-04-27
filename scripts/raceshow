@@ -59,7 +59,7 @@ def main():
                 last_node = skip_path[-1]
                 inter_node = None
                 if len(skip_path) == 1:
-                    inter_node = [0]
+                    inter_node = skip_path[0]
                 else:
                     inter_node = "%d:[%d..%d]" % (first_node.proc.pid,
                                                   first_node.syscall_index+1,
