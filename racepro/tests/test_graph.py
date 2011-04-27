@@ -280,6 +280,12 @@ def test_crosscut():
                       NodeLoc(p[3].first_anchor, 'before'),
                       NodeLoc(p[4].first_anchor, 'after')]))
 
+    assert_equal(set(g.crosscut([e[5], p[3].first_anchor])),
+                 set([NodeLoc(e[5],              'before'),
+                      NodeLoc(p[2].first_anchor, 'after'),
+                      NodeLoc(p[3].first_anchor, 'before'),
+                      NodeLoc(p[4].first_anchor, 'before')]))
+
     assert_raises(ValueError, g.crosscut, [e[14], e[2]])
 
     for node in g.nodes():
