@@ -62,8 +62,8 @@ def main():
                     inter_node = [0]
                 else:
                     inter_node = "%d:[%d..%d]" % (first_node.proc.pid,
-                                                  first_node.syscall_index,
-                                                  last_node.syscall_index)
+                                                  first_node.syscall_index+1,
+                                                  last_node.syscall_index+1)
 
                 newg.add_edge(n, inter_node, weight=100)
                 newg.add_edge(inter_node, g.successors(last_node)[0], weight=100)

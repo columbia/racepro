@@ -21,7 +21,7 @@ class Node(Event):
         if self.proc is None:
             return Event.__repr__(self)
         try:
-            return "%d:%d %s" % (self.proc.pid, self.syscall_index, str(self._scribe_event))
+            return "%d:%d %s" % (self.proc.pid, self.syscall_index+1, str(self._scribe_event))
         except:
             return str(self._scribe_event)
 
