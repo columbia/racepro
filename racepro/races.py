@@ -1,117 +1,93 @@
 import logging
 import scribe
 from itertools import *
+from racepro import *
 
-#def __races_accesses(session, access):
-#    """Given vclocks of a resource per process (non-decreasing
-#    order), find resources races:
-#
-#    For each two processes, iterate in parallel over accesses and
-#    find those that are neither before nor after each other. Each
-#    such race is reported as (vclock1, r_ev1, vclock2, r_ev2).
-#
-#    This works because, given two process A[1..n] and B[1..m]:
-#    - for i < j:  Ai < Aj,  Bi < Bj
-#    - for i, j:   Ai < Bj  or  Ai > Bj  or  Ai || Bj
-#    - the relation '<' is transitive
-#    """
-#    races = list()
-#
-#    for k1, k2 in combinations(access, 2):
-#        q1, q2 = access[k1], access[k2]
-#
-#        n, m = 0, 0
-#        while n < len(q1) and m < len(q2):
-#            vc1, r_ev1 = q1[n]
-#            vc2, r_ev2 = q2[m]
-#
-#            aa,ab = session.r_ev_to_proc(r_ev1)
-#            ba,bb = session.r_ev_to_proc(r_ev2)
-#
-#            if vc1.before(vc2):
-#                n += 1
-#            elif vc2.before(vc1):
-#                m += 1
-#            else:
-#                for vc3, r_ev3 in q2[m:]:
-#                    # going too far ?
-#                    if vc1.before(vc3):
-#                        break
-#                    # read-read case ?
-#                    if (r_ev1.event.write_access == 0 and
-#                        r_ev2.event.write_access == 0):
-#                        continue
-#                    races.append((vc1, r_ev1, vc3, r_ev3))
-#                n += 1
-#
-#    return races
+def rank_races_of_resources(graph, race):
+    # TODO: priority may change?
+    # file data > path > exit > signal > file metadata > stdout
+    # basescores = {'file':400, 'path':300, 'exit-exit':200, 'signal':100}
 
-# YJF: dumb version of race detection; but seems to detect more races
-# than the optimized version, such as the mv race
-def __races_accesses_yjf(access):
+    def event_is_resource(event):
+        return \
+            event.is_a(scribe.EventResourceLockExtra) or \
+            event.is_a(scribe.EventResourceLockIntr)
+
+    # events closer in one of the resource access lists > farther
+    node1, node2 = race
+    index1 = node1.syscall_index
+    index2 = node2.syscall_index
+
+    # average distance of resource accesses
+    distance = 0
+    nresource = 0
+    for event1 in node1.children:
+        if not event_is_resource(event1):
+            continue
+        for event2 in node2.children:
+            if not event_is_resource(event2):
+                continue
+
+            if event1.resource == event2.resource:
+                assert event1 != event2
+                if event1.write_access == 0 and event2.write_access == 0:
+                    continue
+                distance += abs(event1.serial - event2.serial)
+                nresource += 1
+    if nresource != 0:
+        distance = float(distance) / nresource
+    else:
+        distance = 5 # why no common resources?
+    logging.debug('race %s,%s avg distance=%d' % (node1, node2, distance))
+    return distance;
+
+def find_races_of_resource(resource):
+    """Given a mapping proc:events for a resource, find racing events"""
     races = list()
 
-    for k1, k2 in combinations(access, 2):
-        q1, q2 = access[k1], access[k2]
-        for (vc1, r_ev1) in q1:
-            for (vc2, r_ev2) in q2:
-                if vc1.before(vc2):
+    events_of_proc = dict()
+    for node in resource.events:
+        if node.proc not in events_of_proc:
+            events_of_proc[node.proc] = list()
+        events_of_proc[node.proc].append(node)
+
+    for proc1, proc2 in combinations(events_of_proc, 2):
+        for node1 in events_of_proc[proc1]:
+            for node2 in events_of_proc[proc2]:
+                if node1.syscall.vclock.before(node2.syscall.vclock):
                     break
-                if vc2.before(vc1):
+                if node2.syscall.vclock.before(node1.syscall.vclock):
                     continue
-                if (r_ev1.event.write_access == 0 and
-                    r_ev2.event.write_access == 0):
+                if node1.write_access == 0 and node2.write_access == 0:
                     continue
-                races.append((vc1, r_ev1, vc2, r_ev2))
+                races.append((node1, node2))
     return races
 
-def races_resources(graph):
-    """Given vclocks of all syscalls, find resources races:
-    For each resource, iterate through its events and accumulate
-    them in a per-process list - stored in @access dictionary,
-    such that access[pid] is a list of (vclock, index) tuples of
-    the events and their vector-clocks belonging to that process.
-    This is passsed to __races_accesses() which returns a list of
-    actual races: (vclock1, index1, vclock2, index2)
+def races_of_resources(graph):
+    """Find resources races: for each resource, separate the events
+    per process, and find list of racing events (nodes).
     """
-    session = graph.session
-    vclocks = graph.vclocks
-
     races = list()
+
     resource_ignore = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
 
-    for resource in session.resource_list:
-        if resource.subtype in resource_ignore:
+    for resource in graph.resources.itervalues():
+
+        # ignore some resources
+        if resource.type in resource_ignore:
             continue
 
-        # YJF: FIXME: switch to random sampling if there are too many events
-        events = resource.events
-        thresh = 100  # threshold to switch to random
+        # (FIXME) ignore resource with too many events
+        thresh = 100
         if len(resource.events) > thresh:
-            # just drop such resources
             logging.info('resource %d has too many (%d) events; skip'
                          % (resource.id, len(resource.events)))
             continue
 
-        access = dict(map(lambda k: (k, list()), session.process_map.keys()))
+        races_of_resource = find_races_of_resource(resource)
+        races.extend(races_of_resource)
 
-        # track accesses per process
-        for r_ev in events:
-            proc, event = session.r_ev_to_proc(r_ev, sysind=True)
-            p_ev = proc.events[index]
-            node = graph.make_node(proc.pid, p_ev.syscnt)
-            vc = vclocks[(proc, p_ev.syscnt)]
-            access[proc.pid].append((vc, r_ev))
-
-        # YJF: exlude empty lists
-        for k in access.keys():
-            if len(access[k]) == 0:
-                del access[k]
-
-        races.extend(__races_accesses_yjf(access))
-
-    return [(vc1, r_ev1.index, vc2, r_ev2.index) for
-            vc1, r_ev1, vc2, r_ev2 in races]
+    return races
 
 def races_signals(graph):
     """Given vclocks of all syscalls, find signal races for both
@@ -131,20 +107,17 @@ def races_signals(graph):
 
     return graph.session.signals
 
-def races_exitwait(graph):
-    """Given vclocks of all syscalls, find exit-wait races:
-    For each exit() successfully waited for, find all the other
-    exit() calls that may be concurrent to this one and thus
-    could be waited for instead.
+def races_of_exitwait(graph):
+    """Find exit-wait races: for each exit() successfully waited for,
+    find all the other exit() calls that may be concurrent to this one
+    and thus could be waited for instead.
     """
-
-    session = graph.session
-    vclocks = graph.vclocks
 
     # step one: divide the exits() into per-parent lists, each
     # list ordered by vclocks: loop on waits to determine where
     # each exit (by pid) belongss and then add exits.
-    exit_events = dict([ (k, list()) for k in session.process_map ])
+
+    exit_events = dict()
     exit_to_wait = dict()
 
     # create mapping:  pid --> reaper

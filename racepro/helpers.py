@@ -1,5 +1,7 @@
-import scribe
 import logging
+
+import scribe
+from racepro import *
 
 def parse_syscall(session, i):
     """Parse a syscall event"""
@@ -67,7 +69,10 @@ def profile_process(session, pid):
 ################################################################################
 
 
-def save_events(session, bookmarks = None, injects = None, cutoff = None,
+def save_events(graph,
+                bookmarks = None,
+                injects = None,
+                cutoff = None,
                 replace = None):
     """Iterator that returns the (perhaps modified) scribe log.
 
@@ -76,233 +81,176 @@ def save_events(session, bookmarks = None, injects = None, cutoff = None,
     (per process) into the log , and "cutoff", which specifies
     locations (per process) to cut remaining log.
 
-    @bookmarks: array of bookmarks [{ pid: cnt1 }]
-    @injects: actions to inject { pid : {cnt1:act1},{cnt2:act2}, ...] }
-    @cutoff: where to cutoff queues { pid : cnt }
+    @bookmarks: array of bookmarks [{ proc:nodeloc }]
+    @injects: actions to inject { procf : {nodeloc:act1},{nodeloc:act2}, ...] }
+    @cutoff: where to cutoff queues { proc : nodeloc }
     @replace: (ordered) events to substitutee [(old1,new1),(old2,new2)..]
-
-    The 'cnt' value above specifies a system call:
-    cnt > 0: effect occurs post-syscall (before return to userspace)
-    cnt < 0: effect occufs pre-syscall
-    cnt == 0: no effect because process exited so leave log as is
-    else (if pid not a key) then process not started, ignore the log
     """
 
-    def check_bookmarks(pid, syscall, bookmarks):
+    def check_bookmarks(bookmarks, nl):
+        proc = nl.node.proc
         for n, bmark in enumerate(bookmarks):
-            if pid in bmark and syscall == bmark[pid]:
-                e = scribe.EventBookmark()
-                e.id = n
-                e.npr = len([b for b in bmark.values() if b != 0])
-                logging.debug('[%d] bookmark at syscall %d' % (pid, syscall))
-                yield e
+            try:
+                print('NL %s (bmark[proc] % s' % (nl, bmark[proc]))
+                if bmark[proc] == nl:
+                    event = scribe.EventBookmark()
+                    event.id = n
+                    event.npr = len([b for b in bmark.values() if b != 0])
+                    logging.debug('[%d] bookmark at syscall %s' %
+                                  (proc.pid, nl.node))
+                    yield event
+            except KeyError:
+                pass
 
-    def check_inject(pid, syscall, injects):
-        if syscall in injects[pid]:
-            for a in injects[pid].itervalues():
-                e = scribe.EventInjectAction()
-                e.action = a.action
-                e.arg1 = a.arg1
-                e.arg2 = a.arg2
-                logging.debug('[%d] inject at syscall %d' % (pid, syscall))
-                yield e
+    def check_inject(injects, nl):
+        proc = nl.node.proc
+        try:
+            for a in injects[proc][nl]:
+                event = scribe.EventInjectAction()
+                event.action = a.action
+                event.arg1 = a.arg1
+                event.arg2 = a.arg2
+                logging.debug('[%d] inject at syscall %s' % (proc.pid, node))
+                yield event
+        except KeyError:
+            pass
 
-    def check_cutoff(pid, syscall, cutoff):
-        if syscall == cutoff[pid]:
-            logging.debug('[%d] cutoff at syscall %d' % (pid, cutoff[pid]))
-            return True
-        else:
-            return False
+    def check_cutoff(cutoff, nl):
+        try:
+            if cutoff[proc] == nl:
+                logging.debug('[%d] cutoff at syscall %s' % (proc.pid, node))
+                return True
+        except KeyError:
+            pass
 
+    def consider_event(node, when):
+        # pid bookmark ?
+        for event in check_bookmarks(bookmarks, NodeLoc(node, when)):
+            yield event
 
-    active = dict()
-    syscall = dict()
-    relaxed = dict()
-    endofq = dict({0:False})
+        # pid inject ?
+        for event in check_inject(injects, NodeLoc(node, when)):
+            if event.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
+                if event.arg2 & scribe.SCRIBE_PS_ENABLE_RESOURCE:
+                    relaxed[proc]['resource'] = True
+                if event.arg2 & scribe.SCRIBE_PS_ENABLE_DATA:
+                    relaxed[proc]['data'] = True
+            yield event
 
-    # include all pids that belong to any bookmark; pid's not here
-     # should not yet be created, and their logs will be skipped
-    if not bookmarks is None:
-        include = reduce(lambda d1, d2: dict(d1, **d2), bookmarks)
-        drop_old_bookmarks = True
-    else:
-        include = dict([(k, k) for k in session.process_map.keys()])
-        drop_old_bookmarks = False
+        # pid cutoff ?
+        if check_cutoff(cutoff, NodeLoc(node, when)):
+            inactive[proc] = True
 
-    logging.debug('pids included in the log: %s' % include.keys())
+    def replace_event():
+        event = event_new
+        try:
+            event_old, event_new = replace.pop(0)
+        except IndexError:
+            event_old, event_new = None, None
+        return event
 
-    if bookmarks is None: bookmarks = dict()
-    if injects is None: injects = dict()
-    if cutoff is None: cutoff = dict()
-    if replace is None: replace = list()
+    def is_resource_event(node):
+        return node.is_a(scribe.EventResourceLockExtra) or \
+            node.is_a(scribe.EventResourceLockIntr) or \
+            node.is_a(scribe.EventResourceUnlock)
+
+    def is_data_event(node):
+        return node.is_a(scribe.EventData) or \
+            node.is_a(scribe.EventDataExtra)
+
+    def events_for_node(node, sys):
+        proc = node.proc
+
+        # not strictly needed here, but can expedite things
+        if proc in inactive:
+            return
+
+        # ignore old bookmarks
+        if node.is_a(scribe.EventBookmark):
+            return
+
+        # actions before a syscall
+        if node.is_a(scribe.EventSyscallExtra):
+            print('syscall start: %s' % node)
+            for event in consider_event(sys, 'before'):
+                yield event
+
+        if proc in relaxed:
+            # skip 'resource' events ?
+            if relaxed[proc]['resource'] and is_resource_event(node):
+                return
+            # skip 'data' events ?
+            if relaxed[proc]['data'] and is_data_event(node):
+                return
+
+        # replace this event ?
+        if node == event_old:
+            node = replace_event()
+
+        if node != proc.first_anchor and node != proc.last_anchor:
+            yield node
+
+        # actions after a syscall
+        if node.is_a(scribe.EventSyscallEnd):
+            print('syscall end %s' % node)
+            for event in consider_event(sys, 'after'):
+                yield event
+
+        if node.is_a(scribe.EventQueueEof):
+            endofq[proc] = True
+            inactive[proc] = True
+
+    if not bookmarks: bookmarks = dict()
+    if not injects: injects = dict()
+    if not cutoff: cutoff = dict()
+    if not replace: replace = list()
 
     try:
         event_old, event_new = replace.pop(0)
     except IndexError:
         event_old, event_new = None, None
 
-    for s_ev in session.events:
-        info = s_ev.info
-        event = s_ev.event
-        pid = info.pid
+    inactive = dict()
+    endofq = dict()
+    relaxed = dict()
 
-        # pid==0 is a special event
-        if pid == 0:
-            yield event
-            continue
+    for proc in graph.processes.itervalues():
+        relaxed[proc] = dict({'resource':False, 'data':False})
 
-        # pid's not in @include are ignored (not created yet)
-        if pid not in include:
-            continue
+    current = None
 
-        # first time we see this pid ?
-        # note: setting cutoff[pid] ensures no cutoff
-        if pid not in active:
-            active[pid] = True
-            syscall[pid] = 0
-            endofq[pid] = False
-            relaxed[pid] = dict({'resource':False, 'data':False})
-            if pid not in cutoff:
-                cutoff[pid] = 0
-            if pid not in injects:
-                injects[pid] = dict()
+    yield graph.events[0]
 
-        assert not endofq[pid] or pid == 0, \
-            'Event for pid %d after eoq' % (pid)
+    for node in networkx.algorithms.dag.topological_sort(graph):
+        proc = node.proc
 
-        # pid inactive ?
-        if not active[pid]:
-            continue
+        def node_and_after(node):
+            if node == proc.first_anchor:
+                return proc.events
+            elif node == proc.last_anchor:
+                return list()
+            else:
+                return itertools.chain([node], proc.events.after(node))
 
-        # ignore original bookmarks
-        if drop_old_bookmarks and isinstance(event, scribe.EventBookmark):
-            continue
-
-        #
-        # I would expect to remove the EventRegs already, but nico said
-        # it should stay, and remove from EventSyscallExtra nad on
-        #    if isinstance(event, scribe.EventRegs):
-        #
-        if isinstance(event, scribe.EventSyscallExtra):
-            syscall[pid] += 1
-
-            # pid bookmark ?
-            for e in check_bookmarks(pid, -syscall[pid], bookmarks):
-                yield e
-            # pid inject ?
-            for e in check_inject(pid, -syscall[pid], injects):
-                if e.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
-                    if e.arg2 & scribe.SCRIBE_PS_ENABLE_RESOURCE:
-                        relaxed[pid]['resource'] = True
-                    if e.arg2 & scribe.SCRIBE_PS_ENABLE_DATA:
-                        relaxed[pid]['data'] = True
-                yield e
-            # pid cutoff ?
-            if check_cutoff(pid, -syscall[pid], cutoff):
-                active[pid] = False
-                continue
-
-        # skip 'restource' events ?
-        if relaxed[pid]['resource'] and \
-                (isinstance(event, scribe.EventResourceLockExtra) or \
-                 isinstance(event, scribe.EventResourceLockIntr) or \
-                 isinstance(event, scribe.EventResourceUnlock)):
-            continue
-        # skip 'data' events ?
-        if relaxed[pid]['data'] and \
-                (isinstance(event, scribe.EventData) or \
-                 isinstance(event, scribe.EventDataExtra)):
-            continue
-
-        if isinstance(event, scribe.EventQueueEof):
-            endofq[pid] = True
-            active[pid] = False
-
-        # substitute for this event ?
-        if event == event_old:
-            event = event_new
-            try:
-                event_old, event_new = replace.pop(0)
-            except IndexError:
-                event_old, event_new = None, None
-            if not event:
-                continue
-
-        yield event
-
-        if isinstance(event, scribe.EventSyscallEnd):
-            # pid bookmark ?
-            for e in check_bookmarks(pid, syscall[pid], bookmarks):
-                yield e
-            # pid inject ?
-            for e in check_inject(pid, syscall[pid], injects):
-                if e.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
-                    relaxed[pid] = True
-                yield e
-            # pid cutoff ?
-            if check_cutoff(pid, syscall[pid], cutoff):
-                active[pid] = False
-                continue
+        for nd in itertools.takewhile(lambda e: e != node.next_node(),
+                                      node_and_after(node)):
+            for event in events_for_node(nd, node):
+                if not event:
+                    continue
+                if proc in inactive:
+                    continue
+                if proc != current:
+                    e = scribe.EventPid()
+                    e.pid = proc.pid
+                    current = proc
+                    yield e
+                yield event
 
     # indicate go-live where needed
-    for pid in active:
-        if not endofq[pid]:
+    for proc in graph.processes.itervalues():
+        if proc not in endofq:
             e = scribe.EventPid()
-            e.pid = pid
+            e.pid = proc.pid
             yield e
             e = scribe.EventQueueEof()
             yield e
-
-
-############################################################################
-
-
-
-def score_race(graph, race):
-    # TODO: priority may change?
-    # file data > path > exit > signal > file metadata > stdout
-    # basescores = {'file':400, 'path':300, 'exit-exit':200, 'signal':100}
-
-    session = graph.session
-
-    def syscall_events(proc, pindex):
-        assert isinstance(proc.events[pindex].event, scribe.EventSyscallExtra)
-
-        events = list()
-        while True:
-            p_ev = proc.events[pindex]
-            if isinstance(p_ev.event, scribe.EventSyscallEnd):
-                break
-            elif isinstance(p_ev.event, scribe.EventResourceLockExtra):
-                events.append(session.events[p_ev.index])
-            pindex += 1
-
-        return events
-
-    score = 0
-
-    # events closer in one of the resource access lists > farther
-    n1, n2 = race
-    i1 = int(graph.node[n1]['index'])
-    evl1 = syscall_events(session.events[i1].proc, session.events[i1].pindex)
-    i2 = int(graph.node[n2]['index'])
-    evl2 = syscall_events(session.events[i2].proc, session.events[i2].pindex)
-
-    # average distance of resource accesses
-    distance = 0
-    nresource = 0
-    for e1 in evl1:
-        for e2 in evl2:
-            if e1.resource == e2.resource:
-                assert e1 != e2
-                if(e1.event.write_access == 0 and
-                   e2.event.write_access == 0):
-                    continue
-                distance += abs(e1.event.serial-e2.event.serial)
-                nresource += 1
-    if nresource != 0:
-        distance = float(distance) / nresource
-    else:
-        distance = 5 # why no common resources?
-    logging.debug('race %s,%s avg distance=%d' % (n1, n2, distance))
-    return score - distance;
