@@ -14,13 +14,16 @@ class Node(Event):
         self.graph = graph
         self.vclock = None
 
+    def __str__(self):
+        return self.__repr__()
+
     def __repr__(self):
         if self.proc is None:
             return Event.__repr__(self)
         try:
-            return "%d:%d" % (self.proc.pid, self.syscall_index)
+            return "%d:%d %s" % (self.proc.pid, self.syscall_index, str(self._scribe_event))
         except:
-            return str(self)
+            return str(self._scribe_event)
 
     def prev_node(self):
         return (node for node in self.graph.predecessors_iter(self)
