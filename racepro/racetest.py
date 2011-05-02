@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import re
 import os
 import sys
 import time
@@ -9,6 +10,7 @@ import logging
 import argparse
 import datetime
 import subprocess
+import errno
 import pdb
 
 from itertools import *
@@ -49,8 +51,12 @@ def _wait(p, timeout=None):
         p.wait()
     return r if r else 0
 
+def _handle_toctou(toctou, context, string, id):
+    with open(toctou, 'r') as script:
+        exec(script)
+
 def _do_scribe(cmd, logfile, exe, stdout, flags,
-               deadlock=None, backtrace=15,
+               deadlock=None, backtrace=15, toctou=None,
                record=False, replay=False):
     context = None
     def do_check_deadlock(signum, stack):
@@ -63,18 +69,27 @@ def _do_scribe(cmd, logfile, exe, stdout, flags,
         signal.signal(signal.SIGALRM, do_check_deadlock)
         signal.setitimer(signal.ITIMER_REAL, deadlock, deadlock)
 
-    with open(logfile, 'w' if record else 'r') as out:
-        context = scribe.Context(out, backtrace_num_last_events = backtrace)
-        context.add_init_loader(lambda argv, envp: exe.prepare())
-        pscribe = scribe.Popen(context, cmd,
-                               record=record, replay=replay, flags=flags,
-                               stdin=_dev_null, stdout=subprocess.PIPE)
-        pcat = subprocess.Popen(['/bin/cat'],
-                                stdin=pscribe.stdout,
-                                stdout=stdout,
-                                stderr=subprocess.STDOUT)
-        context.wait()
-        pscribe.wait()
+    class RaceproContext(scribe.Context):
+        def on_bookmark(self, id, npr):
+            if toctou:
+                toctou_log_path = re.sub('\.log$', '.toctou', logfile.name)
+                toctou_lines = ''.join(open(toctou_log_path, 'r').readlines())
+                _handle_toctou(toctou, self, toctou_lines, id)
+            else:
+                self.resume()
+
+    context = RaceproContext(logfile, backtrace_num_last_events = backtrace)
+
+    context.add_init_loader(lambda argv, envp: exe.prepare())
+    pscribe = scribe.Popen(context, cmd,
+                           record=record, replay=replay, flags=flags,
+                           stdin=_dev_null, stdout=subprocess.PIPE)
+    pcat = subprocess.Popen(['/bin/cat'],
+                            stdin=pscribe.stdout,
+                            stdout=stdout,
+                            stderr=subprocess.STDOUT)
+    context.wait()
+    pscribe.wait()
 
     if deadlock:
         signal.setitimer(signal.ITIMER_REAL, 0, 0)
@@ -103,15 +118,17 @@ def _record(args, logfile=None, opts=''):
                 scribe.SCRIBE_RES_EXTRA | \
                 scribe.SCRIBE_DATA_EXTRA | \
                 scribe.SCRIBE_DATA_STRING_ALWAYS | \
+                scribe.SCRIBE_RES_ALWAYS | \
                 scribe.SCRIBE_REGS
 
-        try:
-            _do_scribe(cmd, logfile, exe, args.redirect, flags, record=True)
-        except Exception as e:
-            logging.error('failed recording: %s' % e)
-            success = False
-        else:
-            success = True
+        with open(logfile, 'w') as file:
+            try:
+                _do_scribe(cmd, file, exe, args.redirect, flags, record=True)
+            except Exception as e:
+                logging.error('failed recording: %s' % e)
+                success = False
+            else:
+                success = True
 
         if args._post:
             logging.info('    clean-up after recording...')
@@ -140,14 +157,15 @@ def _replay(args, logfile=None, opts=''):
                 return False
 
         logging.info('    replaying ...')
-        try:
-            _do_scribe(None, logfile, exe, args.redirect, 0,
-                       deadlock=1, replay=True)
-        except Exception as e:
-            logging.error('failed replaying: %s' % e)
-            success = False
-        else:
-            success = True
+        with open(logfile, 'r') as file:
+            try:
+                _do_scribe(None, file, exe, args.redirect, 0,
+                           deadlock=1, replay=True)
+            except Exception as e:
+                logging.error('failed replaying: %s' % e)
+                success = False
+            else:
+                success = True
 
         if args._post:
             logging.info('    clean-up after replaying...')
@@ -167,6 +185,7 @@ def _replay(args, logfile=None, opts=''):
         return success
 
 def _replay2(args, logfile, verbose, opts=''):
+    assert not args.parallel
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
         if args._pre:
@@ -182,32 +201,34 @@ def _replay2(args, logfile, verbose, opts=''):
                 return False
 
         logging.info('    replaying ...')
-        cmd = args.replay + ' %s %s' % (opts, logfile)
-        p = exe.execute_raw(cmd.split(), notty=True,
-                            stdin=_dev_null, stdout=args.redirect)
-
-        if args.parallel:
-            time.sleep(float(args.parallel))
-            ret = p.poll()
-        else:
-            ret = p.wait()
-
-        if ret is not None:
-            if ret == 35:
-                print(verbose + 'replay deadlock')
-            elif ret > 0:
-                print(verbose + 'replay failure (exit %d)' % ret)
+        with open(logfile, 'r') as file:
+            try:
+                _do_scribe(None, file, exe, args.redirect, 0,
+                           deadlock=1, toctou=args.toctou, replay=True)
+            except scribe.DivergeError as derr:
+                logging.info(str(derr))
+                if derr.err == 35:
+                    print(verbose + 'replay deadlock')
+                else:
+                    print(verbose + 'replay diverge (%d)' % derr.err)
+                success = False
+            except Exception as e:
+                logging.error('replay failure: %s' % e)
+                success = False
             else:
-                print(verbose + 'replay completed')
+                print('replay completed')
+                success = True
 
         # if non-parallel and ret==0, or parallel and ret==None:
-        if args._test and (ret == 0 or (args.parallel and ret == None)):
+        if args._test and success:
             logging.info('    running test script...')
             cmd = args._test \
                 if os.path.isabs(args._test) \
                 else './' + args._test
             r = exe.execute(cmd.split(), notty=True,
                             stdin=_dev_null, stdout=args.redirect)
+
+
             if r == 2 or r == 255:
                 print(verbose + 'BUG REPRODUCED')
                 ret = 0
@@ -217,17 +238,8 @@ def _replay2(args, logfile, verbose, opts=''):
             else:
                 print(verbose + 'BUG not triggered')
                 ret = 0
-        elif ret == 0:
+        elif success:
             print(verbose + 'BUG replayed but not tested')
-
-        # if parallel, then terminate the replay init
-        if args.parallel:
-            # process may be gone by now ?
-            try:
-                p.kill()
-            except OSError:
-                pass
-            p.wait()
 
         if args._post:
             logging.info('    clean-up after replaying...')
@@ -245,7 +257,7 @@ def _replay2(args, logfile, verbose, opts=''):
             _sudo('rm -rf %s' % logdir)
             _sudo('cp -ax %s %s' % (exe.scratch, logdir))
 
-    return True if ret == 0 else False
+    return success
 
 def _findraces(args, opts):
     cmd = args.racepro + '%s show-races -i %s -o %s' % \
@@ -421,6 +433,7 @@ def uninitialized(args):
     if 'skip_record' not in args: args.skip_record = None
     if 'skip_findrace' not in args: args.skip_findrace = None
     if 'skip_testrace' not in args: args.skip_testrace = None
+    if 'toctou' not in args: args.toctou = None
 
 def do_all_tests(args, tests):
     uninitialized(args)
