@@ -406,3 +406,40 @@ def test_signal_no_send():
              ]
 
     session = Session(events)
+
+def test_creators():
+    events = [
+               scribe.EventPid(pid=1),                        # 0
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=-1), # 1
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=2),  # 2
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=3),  # 3
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=-1), # 4
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=3),  # 5
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=2),  # 6
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=4),  # 7
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0),  # 8
+               scribe.EventPid(pid=2),                        # 9
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=4),  # 10
+               scribe.EventPid(pid=3),                        # 11
+               scribe.EventSyscallExtra(nr=NR_read,  ret=0),  # 12
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0),  # 13
+               scribe.EventPid(pid=4),                        # 14
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0)   # 15
+             ]
+    # p1: p1f e1 e2 e3 e4              e5     e6         e7 e8 p1l
+    #             \  \                 /      /          /
+    # p2:         p2f \               / e10 p2l         /
+    #                  \             /    \            /
+    # p3:              p3f e12 e13 p3l     \          /
+    #                                       \        /
+    # p4:                                   p4f e15 p4l
+
+
+    g = Session(events)
+    e = list(g.events)
+    p = g.processes
+
+    assert_equal(p[1].creator, None)
+    assert_equal(p[2].creator, p[1])
+    assert_equal(p[3].creator, p[1])
+    assert_equal(p[4].creator, p[2])

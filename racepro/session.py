@@ -103,9 +103,9 @@ class EventList:
             self._events[i].owners[self] = i
 
 class Process:
-    def __init__(self, pid, parent=None, name=None):
+    def __init__(self, pid, creator=None, name=None):
         self.pid = pid
-        self.parent = parent
+        self.creator = creator
         self.name = name
         self.events = EventList()
         self.syscalls = EventList()
@@ -281,6 +281,7 @@ class Session:
 
         self._add_events(events)
         self._sort_all_resources()
+        self._find_all_creators()
         self.fifos = Fifo.find_fifos(self.resources)
         self.signals = Signal.find_signals(self.events)
 
@@ -316,6 +317,13 @@ class Session:
     def _sort_all_resources(self):
         for res in self.resources.itervalues():
             res.sort_events_by_serial()
+
+    def _find_all_creators(self):
+        for proc in self.processes.itervalues():
+            for sys in proc.syscalls:
+                if sys.nr in unistd.SYS_fork and sys.ret > 0:
+                    child = self.processes[sys.ret]
+                    child.creator = proc
 
     @property
     def init_proc(self):
