@@ -64,13 +64,18 @@ def save_events(graph,
     event_new = None
 
     def check_bookmarks(bookmarks, nl):
+
+        def live_processes(bmark):
+            live_procs = filter(lambda p: bmark[p].node != p.last_anchor, bmark)
+            return live_procs
+
         proc = nl.node.proc
         for n, bmark in enumerate(bookmarks):
             try:
                 if bmark[proc] == nl:
                     event = scribe.EventBookmark()
                     event.id = n
-                    event.npr = len([b for b in bmark.values() if b != 0])
+                    event.npr = len(live_processes(bmark))
                     logging.debug('[%d] bookmark at syscall %s' %
                                   (proc.pid, nl.node))
                     yield session.Event(event)
