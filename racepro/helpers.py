@@ -40,32 +40,6 @@ def parse_syscall(session, i):
                    args[0], args[1], args[2]))
     out.write(' = %ld\n' % (ret))
 
-def syscalls_process(session, pid, vclocks=None):
-    """Print all the syscalls of a process"""
-    try:
-        proc = session.process_map[pid]
-    except KeyError:
-        logging.error('No such process with pid %d' % (pid))
-        return
-
-    for p_ev in proc.events:
-        if isinstance(p_ev.event, scribe.EventSyscallExtra):
-            sys.stdout.write('pid=%3d:cnt=%3d:' % (proc.pid, p_ev.syscnt))
-            sys.stdout.write('ind=%4d:' % (session.events[p_ev.index].pindex))
-            if vclocks is not None:
-                sys.stdout.write('vc=%s:' % vclocks[(proc, p_ev.syscnt)])
-            session.parse_syscall(p_ev.index)
-
-def profile_process(session, pid):
-    """Print profile of all the events of a process"""
-    proc = session.process_map[pid]
-    for p_ev in proc.events:
-        print("[%02d][%d] %s%s%s" %
-              (proc.pid, p_ev.syscnt,
-               ("", "    ")[p_ev.info.in_syscall],
-               "  " * p_ev.info.res_depth,
-               p_ev.event))
-
 ################################################################################
 
 
@@ -99,7 +73,7 @@ def save_events(graph,
                     event.npr = len([b for b in bmark.values() if b != 0])
                     logging.debug('[%d] bookmark at syscall %s' %
                                   (proc.pid, nl.node))
-                    yield event
+                    yield session.Event(event)
             except KeyError:
                 pass
 
@@ -112,7 +86,7 @@ def save_events(graph,
                 event.arg1 = a.arg1
                 event.arg2 = a.arg2
                 logging.debug('[%d] inject at syscall %s' % (proc.pid, node))
-                yield event
+                yield session.Event(event)
         except KeyError:
             pass
 
@@ -226,12 +200,12 @@ def save_events(graph,
                 if proc in inactive:
                     continue
                 if proc != current:
-                    yield scribe.EventPid(proc.pid)
+                    yield session.Event(scribe.EventPid(proc.pid))
                     current = proc
                 yield event
 
     # indicate go-live where needed
     for proc in graph.processes.itervalues():
         if proc not in endofq:
-            yield scribe.EventPid(proc.pid)
-            yield scribe.EventQueueEof()
+            yield session.Event(scribe.EventPid(proc.pid))
+            yield session.Event(scribe.EventQueueEof())
