@@ -47,18 +47,22 @@ def condense_events(events):
     # write_access: non zero if the event is a write
     serials = dict()  
     for e in events:
-        if isinstance(e, scribe.EventResourceLockExtra):
+        if e.is_a(scribe.EventResourceLockExtra):
             if e.id not in serials:
-                e.serial = 0
                 serials[e.id] = (0, 0, e.write_access)
+                serial = 0
             else:
                 (prev_serial, seq, prev_wr) = serials[e.id]
                 seq += 1
                 if e.write_access or prev_wr:
-                    e.serial = seq
+                    serial = seq
                 else:
-                    e.serial = prev_serial
-                serials[e.id] = (e.serial, seq, e.write_access)
+                    serial = prev_serial
+                serials[e.id] = (serial, seq, e.write_access)
+            if e.serial != serial:
+                ee = e.copy()
+                ee.serial = serial
+                e = session.Event(ee)
         yield e
 
 def save_session(logfile, events):
@@ -141,7 +145,7 @@ def show_syscalls(args):
     for proc in session.processes.itervalues():
         for sys in proc.syscalls:
             print('[%d][%3d] %s' %
-                  (proc.pid, sys.syscall_index, sys))
+                  (proc.pid, sys.syscall_index + 1, sys))
         print('')
     return 0
 
@@ -331,26 +335,33 @@ def prep_exitwait_race(graph, exit1, exit2, wait, n_race):
     action1 = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
                     0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
                        scribe.SCRIBE_PS_ENABLE_RET_CHECK)
-    injects[exit1.proc] = dict({NodeLoc(exit1.proc, 'before') : action1})
+    injects[exit1.proc] = dict({NodeLoc(exit1.proc, 'before') : [action1]})
     action2 = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
                     0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
                        scribe.SCRIBE_PS_ENABLE_RET_CHECK)
-    injects[wait.proc] = dict({NodeLoc(wait.proc, 'before') : action2})
+    injects[wait.proc] = dict({NodeLoc(wait, 'before') : [action2]})
 
     cutoff = dict(bookmark3)
 
     # get data (internal) event described wait() during replay
     sys_old = wait
-    event = scribe.EventSyscallExtra(nr=sys_old.nr, ret=sys_old.proc.pid)
+    event = sys_old.copy()
+    event.ret = exit1.proc.pid
     sys_new = session.Event(event)
+    print('sys_old: %s   sys_new: %s' % (sys_old, sys_new))
 
     datas = filter(lambda node: node.is_a(scribe.EventDataExtra), wait.children)
 
     data_old = datas.pop()
-    event = scribe.EventDataExtra(user_ptr = 0,
-                                  data_type = scribe.SCRIBE_DATA_INTERNAL,
-                                  data = struct.pack('i', exit1.proc.pid))
+    event = data_old.copy()
+    event.data_type = scribe.SCRIBE_DATA_INTERNAL
+    event.data = struct.pack('i', exit1.proc.pid)
+    event.user_ptr = 0
     data_new = session.Event(event)
+
+#    event = scribe.EventDataExtra(user_ptr = 0,
+#                                  data_type = scribe.SCRIBE_DATA_INTERNAL,
+#                                  data = struct.pack('i', exit1.proc.pid))
 
     replace = dict({sys_old:sys_new, data_old:data_new})
 
@@ -378,11 +389,11 @@ def prep_exitwait_race(graph, exit1, exit2, wait, n_race):
             # discard the 3rd bookmark, allow proc2 to also exit, and
             # finally extend the cut to occur after proc3's wait
 
-            bookmark2[exit2.proc] = NodeLoc(exit2.proc, 'after')
+            bookmark2[exit2.proc] = NodeLoc(exit2, 'after')
             bookmarks = [bookmark1, bookmark2]
 
             cutoff = dict(bookmark2)
-            cutoff[wait.proc] = NodeLoc(wait.proc, 'after')
+            cutoff[wait.proc] = NodeLoc(wait, 'after')
         else:
             print('exit-exit-wait race would deadlock .... ' +
                   '%s - %s - %s' % (exit1, exit2, wait))
