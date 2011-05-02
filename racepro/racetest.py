@@ -14,12 +14,13 @@ import pdb
 from itertools import *
 
 import execute
+import scribe
 
-_dummy = open('/dev/null', 'r')
+_dev_null = open('/dev/null', 'r')
 
 def _exec(cmd, redirect=None):
     p1 = subprocess.Popen(cmd.split(),
-                          stdin=_dummy,
+                          stdin=_dev_null,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT)
     p2 = subprocess.Popen(['/bin/cat'],
@@ -48,7 +49,39 @@ def _wait(p, timeout=None):
         p.wait()
     return r if r else 0
 
+def _do_scribe(cmd, logfile, exe, stdout, flags,
+               deadlock=None, backtrace=15,
+               record=False, replay=False):
+    context = None
+    def do_check_deadlock(signum, stack):
+        try:
+            context.check_deadlock()
+        except OSError as e:
+            if e.errno != errno.EPERM:
+                logging.error("Cannot check for deadlock (%s)" % str(e))
+    if deadlock:
+        signal.signal(signal.SIGALRM, do_check_deadlock)
+        signal.setitimer(signal.ITIMER_REAL, deadlock, deadlock)
+
+    with open(logfile, 'w' if record else 'r') as out:
+        context = scribe.Context(out, backtrace_num_last_events = backtrace)
+        context.add_init_loader(lambda argv, envp: exe.prepare())
+        pscribe = scribe.Popen(context, cmd,
+                               record=record, replay=replay, flags=flags,
+                               stdin=_dev_null, stdout=subprocess.PIPE)
+        pcat = subprocess.Popen(['/bin/cat'],
+                                stdin=pscribe.stdout,
+                                stdout=stdout,
+                                stderr=subprocess.STDOUT)
+        context.wait()
+        pscribe.wait()
+
+    if deadlock:
+        signal.setitimer(signal.ITIMER_REAL, 0, 0)
+
 def _record(args, logfile=None, opts=''):
+    assert not args.parallel
+
     if not logfile:
         logfile = args.path + '.log'
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
@@ -59,14 +92,26 @@ def _record(args, logfile=None, opts=''):
                 if os.path.isabs(args._pre) \
                 else './' + args._pre
             ret = exe.execute(cmd.split(), notty=True,
-                              stdin=_dummy, stdout=args.redirect,)
+                              stdin=_dev_null, stdout=args.redirect)
 
         logging.info('    recording ...')
         cmd = args._run if os.path.isabs(args._run) else './' + args._run
-        cmd = args.record + ' -o %s %s %s' % (opts, logfile, cmd)
-        p = exe.execute_raw(cmd.split(), notty=True,
-                            stdin=_dummy, stdout=args.redirect)
-        ret = _wait(p, args.parallel)
+
+        flags = scribe.SCRIBE_SYSCALL_RET | \
+                scribe.SCRIBE_SYSCALL_EXTRA | \
+                scribe.SCRIBE_SIG_COOKIE | \
+                scribe.SCRIBE_RES_EXTRA | \
+                scribe.SCRIBE_DATA_EXTRA | \
+                scribe.SCRIBE_DATA_STRING_ALWAYS | \
+                scribe.SCRIBE_REGS
+
+        try:
+            _do_scribe(cmd, logfile, exe, args.redirect, flags, record=True)
+        except Exception as e:
+            logging.error('failed recording: %s' % e)
+            success = False
+        else:
+            success = True
 
         if args._post:
             logging.info('    clean-up after recording...')
@@ -74,13 +119,9 @@ def _record(args, logfile=None, opts=''):
                 if os.path.isabs(args._post) \
                 else './' + args._post
             ret = exe.execute(cmd.split(), notty=True,
-                              stdin=_dummy, stdout=args.redirect)
+                              stdin=_dev_null, stdout=args.redirect)
 
-        if ret != 0:
-            logging.error('failed recording')
-            return False
-
-        return True
+        return success
 
 def _replay(args, logfile=None, opts=''):
     if not logfile:
@@ -93,17 +134,20 @@ def _replay(args, logfile=None, opts=''):
                 if os.path.isabs(args._pre) \
                 else './' + args._pre
             r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dummy, stdout=args.redirect)
+                            stdin=_dev_null, stdout=args.redirect)
             if r != 0:
                 logging.error('failed pre-script (exit %d)' % r)
                 return False
 
         logging.info('    replaying ...')
-        cmd = args.replay + ' %s %s' % (opts, logfile)
-        ret = exe.execute(cmd.split(), notty=True,
-                        stdin=_dummy, stdout=args.redirect)
-        if ret != 0:
-            logging.error('failed original replay (exit %d)' % ret)
+        try:
+            _do_scribe(None, logfile, exe, args.redirect, 0,
+                       deadlock=1, replay=True)
+        except Exception as e:
+            logging.error('failed replaying: %s' % e)
+            success = False
+        else:
+            success = True
 
         if args._post:
             logging.info('    clean-up after replaying...')
@@ -111,7 +155,7 @@ def _replay(args, logfile=None, opts=''):
                 if os.path.isabs(args._post) \
                 else './' + args._post
             r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dummy, stdout=args.redirect)
+                            stdin=_dev_null, stdout=args.redirect)
             if r != 0:
                 logging.error('failed post-script (exut %d)' % r)
 
@@ -120,7 +164,7 @@ def _replay(args, logfile=None, opts=''):
             _sudo('rm -rf %s' % logdir)
             _sudo('cp -ax %s %s' % (exe.scratch, logdir))
 
-        return True if ret == 0 else False
+        return success
 
 def _replay2(args, logfile, verbose, opts=''):
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
@@ -131,7 +175,7 @@ def _replay2(args, logfile, verbose, opts=''):
                 if os.path.isabs(args._pre) \
                 else './' + args._pre
             r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dummy, stdout=args.redirect)
+                            stdin=_dev_null, stdout=args.redirect)
             if r != 0:
                 logging.error('failed pre-script (exit %d)' % r)
                 print(verbose + 'bad exit code from pre-script: %d' % r)
@@ -140,7 +184,7 @@ def _replay2(args, logfile, verbose, opts=''):
         logging.info('    replaying ...')
         cmd = args.replay + ' %s %s' % (opts, logfile)
         p = exe.execute_raw(cmd.split(), notty=True,
-                            stdin=_dummy, stdout=args.redirect)
+                            stdin=_dev_null, stdout=args.redirect)
 
         if args.parallel:
             time.sleep(float(args.parallel))
@@ -163,7 +207,7 @@ def _replay2(args, logfile, verbose, opts=''):
                 if os.path.isabs(args._test) \
                 else './' + args._test
             r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dummy, stdout=args.redirect)
+                            stdin=_dev_null, stdout=args.redirect)
             if r == 2 or r == 255:
                 print(verbose + 'BUG REPRODUCED')
                 ret = 0
@@ -191,7 +235,7 @@ def _replay2(args, logfile, verbose, opts=''):
                 if os.path.isabs(args._post) \
                 else './' + args._post
             r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dummy, stdout=args.redirect)
+                            stdin=_dev_null, stdout=args.redirect)
             if r != 0:
                 logging.error('failed post-script (exit %d)' % r)
                 print(verbose + 'bad exit code from post-script: %d' % r)

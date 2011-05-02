@@ -42,6 +42,11 @@ def _sudo(cmd, **kwargs):
 #############################################################################
 
 class Execute:
+    def prepare(self):
+        if self.chroot:
+            os.chroot(self.chroot)
+            os.chdir('/')
+
     def execute(self, cmd, **kwargs):
         if self.chroot:
             cmd = ['chroot', self.chroot, '/bin/sh', '-c',
