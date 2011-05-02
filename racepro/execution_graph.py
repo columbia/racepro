@@ -173,12 +173,6 @@ class ExecutionGraph(networkx.DiGraph, Session):
         if len(cut) == 0:
             raise ValueError('Give me some nodes')
         cut = map(lambda n: n if isinstance(n, NodeLoc) else NodeLoc(n, 'before'), cut)
-
-        for nl1, nl2 in combinations(cut, 2):
-            if not nl1.node.vclock.race(nl2.node.vclock):
-                logging.warn('Cut nodes HB error: %s vs %s !' % (nl1, nl2))
-# FIXME         raise ValueError('Cut nodes HB error: %s vs %s !' % (nl1, nl2))
-
         vc = reduce(lambda vc, nl: vc.merge(nl.vclock), cut, VectorClock())
 
         def get_clock_node(proc):
