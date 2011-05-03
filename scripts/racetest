@@ -48,6 +48,9 @@ parser.add_argument('-r', '--root', dest='chroot',
 parser.add_argument('-c', '--conf', dest='config',
                     default=None, metavar='CONF',
                     help='Use a racepro config file')
+parser.add_argument('-T', '--toctou', dest='toctou',
+                    default=None, metavar='TOCTOU',
+                    help='Toctou generic attack script')
 parser.add_argument('-x', '--race-file', dest='race_file',
                     default=None, metavar='FILE',
                     help='Test those races whose number is specified here')
@@ -102,6 +105,8 @@ if args.config:
             elif k == 'script-post': args.post = v
             elif k == 'script-test': args.test = v
             elif k == 'jailed': args.jailed = bool_val(v)
+
+            elif k == 'toctou': args.toctou = bool_val(v)
 
             elif k == 'initproc': args.initproc = bool_val(v)
             elif k == 'parallel': args.parallel = v

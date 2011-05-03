@@ -417,6 +417,32 @@ def prep_exitwait_race(graph, exit1, exit2, wait, n_race):
 
     return bookmarks, injects, cutoff, replace
 
+def prep_toctou_race(graph, sys1, sys2, attack, n_toctou):
+    """prepare a toctou by computing bookmarks, injects, and cutoff"""
+    crosscut = graph.crosscut([sys2])
+    bookmark1 = crosscut_to_bookmark(crosscut)
+
+    if not bookmark1:
+        print('No consistent cut: node %s --> node %s' % (sys1, sys2))
+        return None
+
+    bookmarks = [bookmark1]
+
+    cutoff = dict(bookmark1)
+
+    print('TOCTOU %2d:  ' % (n_toctou + 1) +
+          'pid %d syscnt %d [sys(%d)=%d]' %
+          (sys1.proc.pid, sys1.syscall_index, sys1.nr, sys1.ret) +
+          '  -->   pid %d syscnt %d [sys(%d)=%d]' %
+          (sys2.proc.pid, sys2.syscall_index, sys2.nr, sys2.ret) +
+          ' (%s)' % attack)
+    print('          cut:  %s' % bookmark1.values())
+
+    logging.debug('   boobkmark1: %s' % (bookmark1))
+    logging.debug('       cutoff: %s' % (cutoff))
+
+    return bookmarks, None, cutoff, None
+
 def save_modify_log(graph, bookmarks, injects, cutoff, replace, output):
     """Generate and save a modified scribe log for a race"""
     event_iter = save_events(graph, bookmarks, injects, cutoff, replace)
@@ -601,23 +627,27 @@ def show_toctou(args):
 
     toctou_races = races_of_toctou(graph)
 
-    print('-' * 75)
-    print('TOCTOU RACES')
-
     n_toctou = 0
-    toctou_count = 1
+    n_fail = 0
     for pattern, races in toctou_races.iteritems():
         print('-' * 75)
-        print('%s toctou: Found %d potential races' % 
-                (pattern.desc, len(races)))
-        print('-' * 75)
-        n_toctou += len(races)
-        for sys1, sys2, attack in races:
-            print('RACE %d: Two racing syscalls are' % toctou_count)
-            print('    %s' % sys1)
-            print('    %s' % sys2)
-            print('    attacker: %s' % attack)
-            toctou_count += 1
+        print('TOCTOU %s:' % pattern.desc)
+        print('Found %d potential races' % len(races))
+
+        for (sys1, sys2, attack) in races:
+            ret = prep_toctou_race(graph, sys1, sys2, attack, n_toctou)
+            if not ret:
+                n_fail += 1
+                continue
+            n_toctou += 1
+
+            (bookmarks, injects, cutoff, replace) = ret
+            output = args.outfile + '.' + str(n_toctou) + '.log'
+            save_modify_log(graph, bookmarks, injects, cutoff, replace, output)
+
+            output_toctou = args.outfile + '.' + str(n_toctou) + '.toctou'
+            with open(output_toctou, 'w') as file_toctou:
+                file_toctou.write('%s\n' % attack)
 
     ######################################################################
     # 2. Stats

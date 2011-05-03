@@ -51,9 +51,8 @@ def _wait(p, timeout=None):
         p.wait()
     return r if r else 0
 
-def _handle_toctou(toctou, context, string, id):
-    with open(toctou, 'r') as script:
-        exec(script)
+def _handle_toctou(toctou, context, string, id, chroot):
+    exec(toctou)
 
 def _do_scribe(cmd, logfile, exe, stdout, flags,
                deadlock=None, backtrace=15, toctou=None,
@@ -74,7 +73,7 @@ def _do_scribe(cmd, logfile, exe, stdout, flags,
             if toctou:
                 toctou_log_path = re.sub('\.log$', '.toctou', logfile.name)
                 toctou_lines = ''.join(open(toctou_log_path, 'r').readlines())
-                _handle_toctou(toctou, self, toctou_lines, id)
+                _handle_toctou(toctou, self, toctou_lines, id, exe.chroot)
             else:
                 self.resume()
 
@@ -260,8 +259,12 @@ def _replay2(args, logfile, verbose, opts=''):
     return success
 
 def _findraces(args, opts):
-    cmd = args.racepro + '%s show-races -i %s -o %s' % \
-        (opts, args.path + '.log', args.path)
+    if args.toctou:
+        cmd = args.racepro + '%s show-toctou -i %s -o %s' % \
+            (opts, args.path + '.log', args.path)
+    else:
+        cmd = args.racepro + '%s show-races -i %s -o %s' % \
+            (opts, args.path + '.log', args.path)
     ret = _sudo(cmd)
     if ret != 0:
         logging.error('failed to generate races')
@@ -437,6 +440,10 @@ def uninitialized(args):
 
 def do_all_tests(args, tests):
     uninitialized(args)
+
+    if args.toctou:
+        args.toctou = ''.join(open(args.toctou, 'r').readlines())
+
     for t_name, t_exec in tests:
         print('=== TEST: %s' % t_name)
         if not do_one_test(args, t_name, t_exec):
