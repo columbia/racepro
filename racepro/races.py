@@ -1,7 +1,20 @@
 import logging
+import pdb
+
 import scribe
 from itertools import *
 from racepro import *
+import toctou
+
+def _events_per_proc(resource):
+    per_proc = dict()
+    for node in resource.events:
+        if node.proc not in per_proc:
+            per_proc[node.proc] = None
+    for proc in per_proc:
+        per_proc[proc] = filter(lambda n: n.proc == proc, resource.events)
+
+    return per_proc
 
 def rank_races_of_resources(graph, race):
     # TODO: priority may change?
@@ -45,15 +58,11 @@ def find_races_of_resource(resource):
     """Given a mapping proc:events for a resource, find racing events"""
     races = list()
 
-    events_of_proc = dict()
-    for node in resource.events:
-        if node.proc not in events_of_proc:
-            events_of_proc[node.proc] = list()
-        events_of_proc[node.proc].append(node)
+    events_per_proc = _events_per_proc(resource)
 
-    for proc1, proc2 in combinations(events_of_proc, 2):
-        for node1 in events_of_proc[proc1]:
-            for node2 in events_of_proc[proc2]:
+    for proc1, proc2 in combinations(events_per_proc, 2):
+        for node1 in events_per_proc[proc1]:
+            for node2 in events_per_proc[proc2]:
                 if node1.syscall.vclock.before(node2.syscall.vclock):
                     break
                 if node2.syscall.vclock.before(node1.syscall.vclock):
@@ -156,3 +165,48 @@ def races_of_exitwait(graph):
                         races.append((exit1, exit2, wait2))
 
     return races
+
+def races_of_toctou(graph):
+    races = dict()
+
+    for pattern in toctou.patterns:
+        races[pattern] = list()
+
+    for resource in graph.resources.itervalues():
+        syscalls_hists = dict()
+        for pattern in toctou.patterns:
+            syscalls_hists[pattern.sys1] = list()
+
+        events_per_proc = _events_per_proc(resource)
+
+        for proc in events_per_proc:
+            for node in events_per_proc[proc]:
+                sys_cur = node.syscall
+                for pattern in toctou.patterns:
+                    if pattern.sys2.has(sys_cur.nr):
+                        for sys_old in syscalls_hists[pattern.sys1]:
+                            israce, s1, s2 = pattern.check(sys_old, sys_cur)
+                            if not israce:
+                                continue
+                            at_cmd = pattern.generator(s1, s2)
+                            races[pattern].append((sys_old, sys_cur, at_cmd))
+
+                    if pattern.sys1.has(sys_cur.nr):
+                        if sys_cur not in syscalls_hists[pattern.sys1]:
+                            syscalls_hists[pattern.sys1].append(sys_cur)
+
+    return races
+
+def attack_toctou (pattern_name, args):
+    for pattern in toctou.patterns:
+        if pattern.desc == pattern_name:
+            print >> sys.stderr, "perform %s attack..." % pattern.desc
+            pattern.attack(args)
+            break
+
+def explain_toctou (pattern_name):
+    for pattern in toctou.patterns:
+        if pattern.desc == pattern_name:
+            print pattern.detail
+            return
+    print 'Unknown pattern'

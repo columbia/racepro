@@ -592,6 +592,45 @@ def test_races(args):
 
 ##############################################################################
 
+def show_toctou(args):
+    graph = ExecutionGraph(load_events(args.logfile))
+    logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
+
+    ######################################################################
+    # 1. Find toctou races
+
+    toctou_races = races_of_toctou(graph)
+
+    print('-' * 75)
+    print('TOCTOU RACES')
+
+    n_toctou = 0
+    toctou_count = 1
+    for pattern, races in toctou_races.iteritems():
+        print('-' * 75)
+        print('%s toctou: Found %d potential races' % 
+                (pattern.desc, len(races)))
+        print('-' * 75)
+        n_toctou += len(races)
+        for sys1, sys2, attack in races:
+            print('RACE %d: Two racing syscalls are' % toctou_count)
+            print('    %s' % sys1)
+            print('    %s' % sys2)
+            print('    attacker: %s' % attack)
+            toctou_count += 1
+
+    ######################################################################
+    # 2. Stats
+
+    print('-' * 75)
+    print('Generated %d potential toctou' % (n_toctou))
+    print('-' * 75)
+
+    return n_toctou
+
+##########################################################################
+
+
 parser_io = argparse.ArgumentParser(add_help=False)
 parser_io.add_argument('-i', '--input', dest='logfile',
                        metavar='FILE', required=True)
@@ -671,6 +710,11 @@ parser_test_races.add_argument('-d', '--detect', dest='detect',
 parser_test_races.add_argument('--exit-on-failed-replay', dest='exitiffail',
                                action='store_true', default=False,
                                help='Exit when there is a failed replay')
+
+parser_show_toctou = subparsers.add_parser(
+    'show-toctou', parents=[parser_io])
+parser_show_toctou.set_defaults(func=show_toctou)
+
 
 args = parser.parse_args()
 
