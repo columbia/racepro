@@ -84,14 +84,15 @@ def save_events(graph,
     @bookmarks: array of bookmarks [{ proc:nodeloc }]
     @injects: actions to inject { procf : {nodeloc:act1},{nodeloc:act2}, ...] }
     @cutoff: where to cutoff queues { proc : nodeloc }
-    @replace: (ordered) events to substitutee [(old1,new1),(old2,new2)..]
+    @replace: events to substitutee [{ old1:new1 },{ old2,new2 }..]
     """
+
+    event_new = None
 
     def check_bookmarks(bookmarks, nl):
         proc = nl.node.proc
         for n, bmark in enumerate(bookmarks):
             try:
-                print('NL %s (bmark[proc] % s' % (nl, bmark[proc]))
                 if bmark[proc] == nl:
                     event = scribe.EventBookmark()
                     event.id = n
@@ -141,14 +142,6 @@ def save_events(graph,
         if check_cutoff(cutoff, NodeLoc(node, when)):
             inactive[proc] = True
 
-    def replace_event():
-        event = event_new
-        try:
-            event_old, event_new = replace.pop(0)
-        except IndexError:
-            event_old, event_new = None, None
-        return event
-
     def is_resource_event(node):
         return node.is_a(scribe.EventResourceLockExtra) or \
             node.is_a(scribe.EventResourceLockIntr) or \
@@ -171,7 +164,6 @@ def save_events(graph,
 
         # actions before a syscall
         if node.is_a(scribe.EventSyscallExtra):
-            print('syscall start: %s' % node)
             for event in consider_event(sys, 'before'):
                 yield event
 
@@ -184,15 +176,14 @@ def save_events(graph,
                 return
 
         # replace this event ?
-        if node == event_old:
-            node = replace_event()
+        if node in replace:
+            node = replace[node]
 
         if node != proc.first_anchor and node != proc.last_anchor:
             yield node
 
         # actions after a syscall
         if node.is_a(scribe.EventSyscallEnd):
-            print('syscall end %s' % node)
             for event in consider_event(sys, 'after'):
                 yield event
 
@@ -203,12 +194,7 @@ def save_events(graph,
     if not bookmarks: bookmarks = dict()
     if not injects: injects = dict()
     if not cutoff: cutoff = dict()
-    if not replace: replace = list()
-
-    try:
-        event_old, event_new = replace.pop(0)
-    except IndexError:
-        event_old, event_new = None, None
+    if not replace: replace = dict()
 
     inactive = dict()
     endofq = dict()
@@ -240,17 +226,12 @@ def save_events(graph,
                 if proc in inactive:
                     continue
                 if proc != current:
-                    e = scribe.EventPid()
-                    e.pid = proc.pid
+                    yield scribe.EventPid(proc.pid)
                     current = proc
-                    yield e
                 yield event
 
     # indicate go-live where needed
     for proc in graph.processes.itervalues():
         if proc not in endofq:
-            e = scribe.EventPid()
-            e.pid = proc.pid
-            yield e
-            e = scribe.EventQueueEof()
-            yield e
+            yield scribe.EventPid(proc.pid)
+            yield scribe.EventQueueEof()

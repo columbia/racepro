@@ -89,7 +89,7 @@ def races_of_resources(graph):
 
     return races
 
-def races_signals(graph):
+def races_of_signals(graph):
     """Given vclocks of all syscalls, find signal races for both
     'internal' and 'external' signals (i.e. send by a process in
     or out of the recorded session, respectively).
@@ -105,7 +105,7 @@ def races_signals(graph):
     sending syscall (for each syscall, once pre-, once post-).
     """
 
-    return graph.session.signals
+    return graph.signals
 
 def races_of_exitwait(graph):
     """Find exit-wait races: for each exit() successfully waited for,
@@ -117,68 +117,42 @@ def races_of_exitwait(graph):
     # list ordered by vclocks: loop on waits to determine where
     # each exit (by pid) belongss and then add exits.
 
-    exit_events = dict()
-    exit_to_wait = dict()
+    reaper_wait_of = dict()
+    exits_by_reaper = dict()
 
     # create mapping:  pid --> reaper
-    for i in session.wait_e:
-        s_ev = session.events[i]
-        proc, event = s_ev.proc, s_ev.event
-
-        if event.ret > 0:
-            exit_to_wait[event.ret] = (proc, s_ev.pindex)
+    for node in graph.nodes_typed('wait'):
+        child = graph.processes[node.ret]
+        reaper_wait_of[child] = node
 
     # collect exit calls per reaper
-    for i in session.exit_e:
-        s_ev = session.events[i]
-        proc = s_ev.proc
-        try:
-            reaper, z = exit_to_wait[proc.pid]
-        except:
-            pass
+    for node in graph.nodes_typed('exit'):
+        if node.proc not in reaper_wait_of:    # not yet reaped
+            continue
+        wait_node = reaper_wait_of[node.proc]
+        if wait_node.proc not in exits_by_reaper:
+            exits_by_reaper[wait_node.proc] = [node]
         else:
-            exit_events[reaper.pid].append((proc, s_ev.pindex))
+            exits_by_reaper[wait_node.proc].append(node)
 
-    def vclock_cmp(exit_e1, exit_e2):
-        p1, i1 = exit_e1
-        p2, i2 = exit_e2
-        vc1 = vclocks[(p1, p1.events[i1].syscnt)]
-        vc2 = vclocks[(p2, p2.events[i2].syscnt)]
-        if vc1.before(vc2):
-            return -1
-        elif vc2.before(vc1):
-            return 1
-        else:
-            return 0
+    for exits in exits_by_reaper.values():
+        exits.sort(key=lambda node: node.vclock)
 
-    # sort the exit calls by their vclocks
-    for exit_l in exit_events.values():
-        exit_l.sort(cmp=vclock_cmp)
-
-    exitwait = list()
+    races = list()
 
     # find potential races: for each exit event, search ahead for
-    # races with other races that are concurrent with this exit
-    for pid in exit_events.keys():
-        exit_l = exit_events[pid]
-        for n, (ep1, ei1) in enumerate(exit_l):
-            vc1 = vclocks[ep1, ep1.events[ei1].syscnt]
-            for ep2, ei2 in exit_l[n + 1:]:
-                vc2 = vclocks[ep2, ep2.events[ei2].syscnt]
-                if vc1.race(vc2):
-                    wp1, wi1 = exit_to_wait[ep1.pid]
-                    wp2, wi2 = exit_to_wait[ep2.pid]
+    # races with other exits that are concurrent with this exit (and
+    # under the same reaper)
 
-                    w_vc1 = vclocks[wp1, wp1.events[wi1].syscnt]
-                    w_vc2 = vclocks[wp2, wp2.events[wi2].syscnt]
-
-                    if w_vc1.before(w_vc2):
-                        exitwait.append(((ep2, ei2),
-                                        (ep1, ei1),
-                                        (wp1, wi1)))
+    for proc in exits_by_reaper:
+        for n, exit1 in enumerate(exits_by_reaper[proc]):
+            for exit2 in exits_by_reaper[proc][n + 1:]:
+                if exit1.vclock.race(exit2.vclock):
+                    wait1 = reaper_wait_of[exit1.proc]
+                    wait2 = reaper_wait_of[exit2.proc]
+                    if wait1.vclock.before(wait2.vclock):
+                        races.append((exit2, exit1, wait1))
                     else:
-                        exitwait.append(((ep1, ei1),
-                                        (ep2, ei2),
-                                        (wp2, wi2)))
+                        races.append((exit1, exit2, wait2))
 
-    return exitwait
+    return races
