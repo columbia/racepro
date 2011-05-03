@@ -31,6 +31,9 @@ class VectorClock:
             return False
         return self._clocks == vc._clocks
 
+    def __lt__(self, vc):
+        return self.before(vc)
+
     def merge(self, vc):
         # we can do such things because VectorClock() is immutable
         assert isinstance(vc, VectorClock)
