@@ -1,0 +1,10 @@
+#/bin/bash
+
+script_path="$(readlink -f $0)"
+script_root="${script_path%/*}"
+cwd=`pwd`
+
+result=`ls -l /tmp/victim | grep rwxrwxrwx`
+if [ -n "$result" ]; then
+	return 255
+fi
