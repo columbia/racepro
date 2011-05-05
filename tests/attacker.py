@@ -9,7 +9,7 @@ from racepro import *
 
 if chroot:
     cwd = os.getcwd()
-    os.chdir(chroot)
+    os.chdir(chroot + '/' + cwd)
 
 args = string.split()
 assert args[0] == 'attack'

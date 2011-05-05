@@ -45,7 +45,7 @@ class Execute:
     def prepare(self):
         if self.chroot:
             os.chroot(self.chroot)
-            os.chdir('/')
+            os.chdir(os.getcwd())
 
     def execute(self, cmd, **kwargs):
         if self.chroot:
