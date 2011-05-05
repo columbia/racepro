@@ -11,7 +11,7 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
                                   stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT)
         except OSError as (e, s):
-            print("%s: %s" % (cmd.join(' '), s))
+            print("%s: %s" % (' '.join(cmd), s))
             raise
         p2 = subprocess.Popen(['/bin/cat'], stdin=p1.stdout, stdout=stdout,
                               stderr=subprocess.STDOUT)

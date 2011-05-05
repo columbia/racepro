@@ -28,8 +28,6 @@ def rank_races_of_resources(graph, race):
 
     # events closer in one of the resource access lists > farther
     node1, node2 = race
-    index1 = node1.syscall_index
-    index2 = node2.syscall_index
 
     # average distance of resource accesses
     distance = 0
@@ -201,7 +199,7 @@ def attack_toctou (pattern_name, args):
     for pattern in toctou.patterns:
         if pattern.desc == pattern_name:
             print >> sys.stderr, "perform %s attack..." % pattern.desc
-            pattern.attack(args)
+            pattern.attacker(args)
             break
 
 def explain_toctou (pattern_name):

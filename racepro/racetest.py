@@ -12,6 +12,7 @@ import datetime
 import subprocess
 import errno
 import pdb
+import traceback
 
 from itertools import *
 
@@ -71,9 +72,13 @@ def _do_scribe(cmd, logfile, exe, stdout, flags,
     class RaceproContext(scribe.Context):
         def on_bookmark(self, id, npr):
             if toctou:
-                toctou_log_path = re.sub('\.log$', '.toctou', logfile.name)
-                toctou_lines = ''.join(open(toctou_log_path, 'r').readlines())
-                _handle_toctou(toctou, self, toctou_lines, id, exe.chroot)
+                try:
+                    toctou_log_path = re.sub('\.log$', '.toctou', logfile.name)
+                    toctou_lines = ''.join(open(toctou_log_path, 'r').readlines())
+                    _handle_toctou(toctou, self, toctou_lines, id, exe.chroot)
+                except:
+                    traceback.print_exc(file=sys.stdout)
+
             else:
                 self.resume()
 

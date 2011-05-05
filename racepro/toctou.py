@@ -2,6 +2,7 @@ import scribe
 from racepro import *
 import syscalls
 import fcntl
+import os
 
 syscalls.declare_syscall_sets({
         "Check"      : ["stat", "stat64", "access"],
@@ -67,8 +68,8 @@ def cb_check_file_write_link (s1, s2):
 def at_check_file_write_link (p):
     if len(p) < 2:
         return
-    os.remove(p[1])
-    os.symlink(p[2], p[1])
+    os.remove(p[0])
+    os.symlink(p[1], p[0])
 
 def gn_check_file_write_link (s1, s2):
     return 'attack Check-FileWrite-Link %s /tmp/victim' % s1.path
@@ -153,7 +154,7 @@ def cb_file_create_file_write_link (s1, s2):
         return False
     return True
 
-def at_file_create_file_write_link (s1, s2):
+def at_file_create_file_write_link (p):
     if len(p) < 2:
         return
     os.remove(p[0])

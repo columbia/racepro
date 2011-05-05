@@ -1,6 +1,18 @@
 import scribe
 import unistd
 
+
+def int32(x):
+  if x>0xFFFFFFFF:
+    raise OverflowError
+  if x>0x7FFFFFFF:
+    x=int(0x100000000-x)
+    if x<2147483648:
+      return -x
+    else:
+      return -2147483648
+  return x
+
 class Syscall(object):
     def __init__(self, syscall):
         self.syscall = syscall
@@ -25,7 +37,7 @@ class Syscall(object):
                 e.data_type == scribe.SCRIBE_DATA_INPUT | \
                                scribe.SCRIBE_DATA_STRING:
                 for i, arg in enumerate(args):
-                    if args[i] == e.user_ptr:
+                    if int32(args[i]) == int32(e.user_ptr):
                         args[i] = e.data
 
         return args
