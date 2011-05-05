@@ -69,7 +69,7 @@ def _handle_toctou(context, string, id, exe):
     context.stop()
 
 def _do_scribe(cmd, logfile, exe, stdout, flags,
-               deadlock=None, backtrace=15, toctou=None,
+               deadlock=None, backtrace=2, toctou=False,
                record=False, replay=False):
     context = None
     def do_check_deadlock(signum, stack):
@@ -95,7 +95,9 @@ def _do_scribe(cmd, logfile, exe, stdout, flags,
             else:
                 self.resume()
 
-    context = RaceproContext(logfile, backtrace_num_last_events = backtrace)
+    context = RaceproContext(logfile,
+                             backtrace_len = 2,
+                             backtrace_num_last_events = backtrace)
 
     context.add_init_loader(lambda argv, envp: exe.prepare())
     pscribe = scribe.Popen(context, cmd,

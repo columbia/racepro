@@ -9,29 +9,28 @@ desc = 'perform TOCTOU attack or show TOCTOU details'
 parser = argparse.ArgumentParser(description = desc)
 
 subparsers = parser.add_subparsers(title='action', dest='action')
-parser_show = subparsers.add_parser('show', help='show TOCTOU details')
+parser_show = subparsers.add_parser('explain', help='explain TOCTOU details')
 parser_show.add_argument('type', nargs='+', help='pattern name')
 
 parser_attack = subparsers.add_parser('attack', help='perform attack')
-parser_attack.add_argument('-f', '--file', dest='file', nargs="*",
-                           help='pattern name and arguments in files')
-parser_attack.add_argument('type', nargs='?', help='patern name')
+parser_attack.add_argument('type', help='patern name')
+parser_attack.add_argument('args', nargs='*', help='arguments for attacker')
+
+parser_attack = subparsers.add_parser('test', help='perform generic test')
+parser_attack.add_argument('type', help='patern name')
 parser_attack.add_argument('args', nargs='*', help='arguments for attacker')
 
 args = vars(parser.parse_args())
 
-if args['action'] == 'show':
+if args['action'] == 'explain':
     for t in args['type']:
-        print '%s: ' % t
-        explain_toctou (t)
+        print('%s: ' % t)
+        print('    %s' % explain_toctou(t))
 
 if args['action'] == 'attack':
-    if args['file'] is not None:
-        for f in args['file']:
-            for c in open(f, 'r').read().split('\n'):
-                if len(c.strip()) == 0:
-                    continue
-                os.system('%s %s' % (sys.argv[0], c))
+    attack_toctou(args['type'], args['args'])
 
-    if args['type'] is not None:
-        attack_toctou (args['type'], args['args'])
+if args['action'] == 'test':
+    test_toctou(args['type'], args['args'])
+
+

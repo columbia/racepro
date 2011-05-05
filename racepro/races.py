@@ -199,12 +199,17 @@ def attack_toctou (pattern_name, args):
     for pattern in toctou.patterns:
         if pattern.desc == pattern_name:
             print >> sys.stderr, "perform %s attack..." % pattern.desc
-            pattern.attacker(args)
+            pattern.attack(args)
             break
+
+def test_toctou (pattern_name, args):
+    for pattern in toctou.patterns:
+        if pattern.desc == pattern_name:
+            print >> sys.stderr, "perform %s test..." % pattern.desc
+            pattern.test(args)
 
 def explain_toctou (pattern_name):
     for pattern in toctou.patterns:
         if pattern.desc == pattern_name:
-            print pattern.detail
-            return
-    print 'Unknown pattern'
+            return pattern.detail
+    return 'Unknown pattern'
