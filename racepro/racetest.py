@@ -53,18 +53,20 @@ def _wait(p, timeout=None):
         p.wait()
     return r if r else 0
 
-def _handle_toctou(context, string, id, chroot):
-    if chroot:
-        cwd = os.getcwd()
-        os.chdir(chroot + '/' + cwd)
-
-    args = string.split()
-    assert args[0] == 'attack'
-    races.attack_toctou(args[1], args[2:])
+def _handle_toctou(context, string, id, exe):
+    pid = os.fork()
+    if pid == 0:
+        try:
+            exe.prepare()
+            args = string.split()
+            assert args[0] == 'attack'
+            races.attack_toctou(args[1], args[2:])
+        except:
+            pass
+        os._exit(0)
+    else:
+        os.waitpid(pid, 0)
     context.stop()
-
-    if chroot:
-        os.chdir(cwd)
 
 def _do_scribe(cmd, logfile, exe, stdout, flags,
                deadlock=None, backtrace=15, toctou=None,
@@ -86,7 +88,7 @@ def _do_scribe(cmd, logfile, exe, stdout, flags,
                 try:
                     toctou_log_path = re.sub('\.log$', '.toctou', logfile.name)
                     toctou_lines = ''.join(open(toctou_log_path, 'r').readlines())
-                    _handle_toctou(self, toctou_lines, id, exe.chroot)
+                    _handle_toctou(self, toctou_lines, id, exe)
                 except:
                     traceback.print_exc(file=sys.stdout)
 
