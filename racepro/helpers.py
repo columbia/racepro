@@ -74,6 +74,10 @@ def save_events(graph,
             try:
                 if bmark[proc] == nl:
                     event = scribe.EventBookmark()
+                    if nl.after:
+                        event.type = scribe.SCRIBE_BOOKMARK_POST_SYSCALL
+                    else:
+                        event.type = scribe.SCRIBE_BOOKMARK_PRE_SYSCALL
                     event.id = n
                     event.npr = len(live_processes(bmark))
                     logging.debug('[%d] bookmark at syscall %s' %
