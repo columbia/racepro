@@ -186,8 +186,15 @@ def races_of_toctou(graph):
                             israce, s1, s2 = pattern.check(sys_old, sys_cur)
                             if not israce:
                                 continue
-                            at_cmd = pattern.generator(s1, s2)
-                            races[pattern].append((sys_old, sys_cur, at_cmd))
+                            at_cmd = pattern.generate(s1, s2)
+                            pair_exists = False
+                            for sys1, sys2, cmd in races[pattern]:
+                                if sys1 == sys_old and sys2 == sys_cur:
+                                    pair_exists = True
+                                    break
+
+                            if not pair_exists:
+                                races[pattern].append((sys_old, sys_cur, at_cmd))
 
                     if pattern.sys1.has(sys_cur.nr):
                         if sys_cur not in syscalls_hists[pattern.sys1]:

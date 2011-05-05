@@ -53,7 +53,7 @@ def _wait(p, timeout=None):
         p.wait()
     return r if r else 0
 
-def _handle_toctou(context, string, id, exe):
+def _handle_toctou(string, id, exe):
     pid = os.fork()
     if pid == 0:
         try:
@@ -66,7 +66,6 @@ def _handle_toctou(context, string, id, exe):
         os._exit(0)
     else:
         os.waitpid(pid, 0)
-    context.stop()
 
 def _do_scribe(cmd, logfile, exe, stdout, flags,
                deadlock=None, backtrace=2, toctou=False,
@@ -87,8 +86,10 @@ def _do_scribe(cmd, logfile, exe, stdout, flags,
             if toctou:
                 try:
                     toctou_log_path = re.sub('\.log$', '.toctou', logfile.name)
-                    toctou_lines = ''.join(open(toctou_log_path, 'r').readlines())
-                    _handle_toctou(self, toctou_lines, id, exe)
+                    toctou_lines = open(toctou_log_path, 'r').readlines()
+                    for toctou_line in toctou_lines:
+                        _handle_toctou(toctou_line, id, exe)
+                    self.stop()
                 except:
                     traceback.print_exc(file=sys.stdout)
 
@@ -239,6 +240,15 @@ def _replay2(args, logfile, verbose, opts=''):
                 success = True
 
         # if non-parallel and ret==0, or parallel and ret==None:
+        if args.toctou and success:
+            logging.info('    running generic TOCTOU test script...')
+            r = exe.execute(['toctou', 'test'], notty=True,
+                            stdin=_dev_null, stdout=args.redirect)
+            if r == 2 or r == 255:
+                print(verbose + 'BUG REPRODUCED')
+                ret = 0
+                success = False
+
         if args._test and success:
             logging.info('    running test script...')
             cmd = args._test \

@@ -17,7 +17,7 @@ parser_attack.add_argument('type', help='patern name')
 parser_attack.add_argument('args', nargs='*', help='arguments for attacker')
 
 parser_attack = subparsers.add_parser('test', help='perform generic test')
-parser_attack.add_argument('type', help='patern name')
+parser_attack.add_argument('type', nargs='?', help='patern name')
 parser_attack.add_argument('args', nargs='*', help='arguments for attacker')
 
 args = vars(parser.parse_args())
@@ -31,6 +31,14 @@ if args['action'] == 'attack':
     attack_toctou(args['type'], args['args'])
 
 if args['action'] == 'test':
-    test_toctou(args['type'], args['args'])
+    if args['type'] is None:
+        if os.path.exists('/.TEST'):
+            check_lines = open('/.TEST').readlines()
+            for check_line in check_lines:
+                p = check_line.strip().split()
+                if len(p) >= 2:
+                    test_toctou(p[1], p[2:])
+    else:
+        test_toctou(args['type'], args['args'])
 
 

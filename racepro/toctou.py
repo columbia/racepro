@@ -13,9 +13,9 @@ syscalls.declare_syscall_sets({
         "FileRemove" : ["unlink", "rename", "mknod", "rename"],
         "LinkRemove" : ["unlink", "rename"],
         "DirRemove"  : ["rmdir", "rename"],
-        "FileWrite"  : ["chmod", "chown", "truncate", "utime", "open"],
+        "FileWrite"  : ["chmod", "chown", "truncate", "open"],
         "FileRead"   : ["open", "execve"],
-        "DirWrite"   : ["chmod", "chown", "utime", "open"],
+        "DirWrite"   : ["chmod", "chown", "open"],
         "DirRead"    : ["mount", "chdir", "chroot", "open", "execve"],
         })
 
@@ -30,26 +30,28 @@ class Pattern:
         s1 = syscalls.Syscalls[e1.nr](e1)
         s2 = syscalls.Syscalls[e2.nr](e2)
         if s1 is None or s2 is None:
-            return False
+            return False, s1, s2
         for callback in self.callbacks:
             ret = callback(s1, s2)
             if ret is None: continue
             return ret, s1, s2
-        return False
+        return False, s1, s2
 
     def generate(self, s1, s2):
         string = ""
         for generator in self.generators:
-            string += 'attack %s %s %s %s\n' % (self.desc, s1.name, s2.name, 
+            string += 'attack %s %s %s %s\n' % (self.desc,
+                                                s1.name, s2.name,
                                                 generator(s1, s2))
         return string
 
     def attack(self, p):
-        if not os.path.exists("/.JAILED"):
+        if not os.path.exists('/.JAILED'):
             print >> sys.stderr, "The attacker is not jailed"
             return
         for attacker in self.attackers:
             attacker(p)
+        open('/.TEST', 'w').write('test %s %s' % (self.desc, ' '.join(p)))
 
     def test(self, p):
         if not os.path.exists("/.JAILED"):
@@ -86,7 +88,7 @@ def path_checker(s1, s2):
 # Generators
 
 def link_generator(s1, s2):
-    return '%s %s' % s1.path, '/tmp/victim'
+    return '%s %s' % (s1.path, '/tmp/victim')
 
 def deny_generator(s1, s2):
     return '%s' % s1.path
@@ -95,13 +97,50 @@ def deny_generator(s1, s2):
 # Attackers
 
 def link_attacker(p):
-    if len(p) >= 4:
-        os.remove(p[2])
-        os.symlink(p[3], p[2])
+    if len(p) == 4:
+        sys1, sys2, src, tgt = tuple(p)
+        if os.path.exists(tgt):
+            os.remove(tgt)
+        f = open(tgt, 'w')
+        if os.path.exists(src):
+            f.write(open(src, 'r').read())
+        f.close()
+        os.remove(src)
+        os.symlink(tgt, src)
+        if sys2 == 'open' or sys2 == 'truncate':
+            os.utime(tgt, (None, 0))
+            p.append(0)
+        elif sys2 == 'chmod':
+            os.chmod(tgt, 0)
+            p.append(str(os.stat(tgt).st_mode))
+        elif sys2 == 'chown':
+            os.chown(tgt, 0, 0)
+            p.append('%s:%s' % (str(os.stat(tgt).st_uid),
+                                str(os.stat(tgt).st_gid)))
+        elif sys2 == 'link':
+            p.append(str(os.stat(tgt).st_ino))
 
-def deny_attacker(p):
-    if len(p) >= 3:
-        os.remove(p[2])
+##############################################################
+# Testers
+
+def link_write_tester(p):
+    if len(p) == 5:
+        sys1, sys2, src, tgt, val = tuple(p)
+        if sys2 == 'open' or sys2 == 'truncate':
+            return val != str(os.stat(tgt).st_mtime)
+        elif sys2 == 'chmod':
+            return val != str(os.stat(tgt).st_mode)
+        elif sys2 == 'chown':
+            return val != '%s:%s' % (str(os.stat(tgt).st_uid),
+                                     str(os.stat(tgt).st_gid))
+        elif sys2 == 'link':
+            return val != str(os.stat(tgt).st_ino)
+
+def link_read_tester(p):
+    if len(p) == 5:
+        sys1, sys2, src, tgt, val = tuple(p)
+        if sys2 == 'open' or sys2 == 'execve':
+            return val != str(os.stat(tgt).st_atime)
 
 ##################################################################
 # Pattern 1
@@ -113,10 +152,13 @@ def cb_check_file_write_link (s1, s2):
         return False
     if s2.is_a(SYS_open):
         return (s2.mode & (fcntl.O_WRONLY | fcntl.O_RDWR)) != 0
+    return True
 
 Pattern(sys1=SYS_Check, sys2=SYS_FileWrite,
         callbacks=[path_checker, cb_check_file_write_link],
-        attackers=[link_attacker], generators=[link_generator],
+        attackers=[link_attacker], 
+        generators=[link_generator],
+        testers=[link_write_tester],
         desc='Check-FileWrite-Link',
         detail='\
 Check System Calls x File Writing System Calls, Attacked by Link \
@@ -132,10 +174,13 @@ def cb_check_file_read_link(s1, s2):
         return False
     if s2.is_a(SYS_open):
         return (s2.mode & (fcntl.O_RDONLY | fcntl.O_RDWR)) != 0
+    return True
 
 Pattern(sys1=SYS_Check, sys2=SYS_FileRead,
         callbacks=[path_checker, cb_check_file_read_link],
-        attackers=[link_attacker], generators=[link_generator],
+        attackers=[link_attacker], 
+        generators=[link_generator],
+        testers=[link_read_tester],
         desc='Check-FileRead-Link',
         detail='\
 Check System Calls x File Reading System Calls, Attacked by Link Creation \
@@ -143,27 +188,19 @@ System Calls')
 
 ########################################################################
 # Pattern 3
-
-def cb_check_file_write_file_read_deny (s1, s2):
-    return True
-
-Pattern(sys1=SYS_Check, sys2=SYS_FileWrite.union(SYS_FileRead),
-        callbacks=[path_checker, cb_check_file_write_file_read_deny],
-        attackers=[deny_attacker], generators=[deny_generator],
-        desc="Check-FileWrite-FileRead-Deny",
-        detail='\
-Check System Calls x File Usage System Calls, Attacked by Deny Access\
-System Calls')
-
-########################################################################
-# Pattern 4
-
 def cb_file_create_file_write_link (s1, s2):
+    if s1.is_a(SYS_open) and (s1.mode & fcntl.O_RDONLY) != 0:
+        return False
+    if s2.is_a(SYS_open) and (s2.mode & fcntl.O_RDONLY) != 0:
+        return False
     return True
+
 
 Pattern(sys1=SYS_FileCreate, sys2=SYS_FileWrite,
         callbacks=[path_checker, cb_file_create_file_write_link],
-        attackers=[link_attacker], generators=[link_generator],
+        attackers=[link_attacker], 
+        generators=[link_generator],
+        testers=[link_write_tester],
         desc='FileCreat-FileWrite-Link',
         detail='\
 File Creation System Calls x File Writing System Calls, Attacked by Link \

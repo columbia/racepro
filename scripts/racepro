@@ -630,6 +630,9 @@ def show_toctou(args):
     n_toctou = 0
     n_fail = 0
     for pattern, races in toctou_races.iteritems():
+        if len(races) == 0:
+            continue
+
         print('-' * 75)
         print('TOCTOU %s:' % pattern.desc)
         print('Found %d potential races' % len(races))

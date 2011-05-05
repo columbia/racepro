@@ -1,4 +1,4 @@
 #!/bin/sh
 
-rm -f /tmp/victim test.txt
-touch /tmp/victim test.txt
+rm -f test.txt
+touch test.txt
