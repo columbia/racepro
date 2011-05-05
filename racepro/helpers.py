@@ -61,13 +61,18 @@ def save_events(graph,
     @replace: events to substitutee [{ old1:new1 },{ old2,new2 }..]
     """
 
-    event_new = None
-
     def check_bookmarks(bookmarks, nl):
 
         def live_processes(bmark):
-            live_procs = filter(lambda p: bmark[p].node != p.last_anchor, bmark)
-            return live_procs
+            def proc_is_alive(p):
+                nl = bmark[p]
+                if nl.node == p.last_anchor:
+                    return False
+                if nl.node == p.first_anchor and nl.before:
+                    return False
+                return True
+
+            return filter(proc_is_alive, bmark)
 
         proc = nl.node.proc
         for n, bmark in enumerate(bookmarks):

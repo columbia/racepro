@@ -49,7 +49,7 @@ parser.add_argument('-c', '--conf', dest='config',
                     default=None, metavar='CONF',
                     help='Use a racepro config file')
 parser.add_argument('-T', '--toctou', dest='toctou',
-                    default=None, metavar='TOCTOU',
+                    default=False, action='store_true',
                     help='Toctou generic attack script')
 parser.add_argument('-x', '--race-file', dest='race_file',
                     default=None, metavar='FILE',

@@ -452,13 +452,10 @@ def uninitialized(args):
     if 'skip_record' not in args: args.skip_record = None
     if 'skip_findrace' not in args: args.skip_findrace = None
     if 'skip_testrace' not in args: args.skip_testrace = None
-    if 'toctou' not in args: args.toctou = None
+    if 'toctou' not in args: args.toctou = False
 
 def do_all_tests(args, tests):
     uninitialized(args)
-
-    if args.toctou:
-        args.toctou = ''.join(open(args.toctou, 'r').readlines())
 
     for t_name, t_exec in tests:
         print('=== TEST: %s' % t_name)
