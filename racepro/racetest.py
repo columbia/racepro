@@ -141,6 +141,11 @@ def _record(args, logfile=None, opts=''):
                 scribe.SCRIBE_RES_ALWAYS | \
                 scribe.SCRIBE_REGS
 
+        if args.initproc:
+            flags |= scribe.SCRIBE_CUSTOM_INIT
+        if args.netns:
+            flags |= scribe.SCRIBE_CLONE_NEWNET
+
         with open(logfile, 'w') as file:
             try:
                 _do_scribe(cmd, file, exe, args.redirect, flags, record=True)
