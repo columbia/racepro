@@ -6,15 +6,26 @@ from itertools import *
 from racepro import *
 import toctou
 
-def _events_per_proc(resource):
+def _split_events_per_proc(resource, in_syscall=False):
     per_proc = dict()
-    for node in resource.events:
-        if node.proc not in per_proc:
-            per_proc[node.proc] = None
-    for proc in per_proc:
-        per_proc[proc] = filter(lambda n: n.proc == proc, resource.events)
+
+    def filter_belong_to_syscalls(events):
+        return ifilter(lambda e: hasattr(e, 'syscall'), events)
+
+    def filter_belong_to_proc(events, proc):
+        return ifilter(lambda n: n.proc == proc, events)
+
+    for proc in set(e.proc for e in resource.events):
+        if not in_syscall:
+            events = resource.events
+        else:
+            events = filter_belong_to_syscalls(resource.events)
+        per_proc[proc] = filter_belong_to_proc(events, proc)
 
     return per_proc
+
+def dict_values_to_lists(d):
+    return dict((k, list(v)) for k,v in d.iteritems())
 
 def rank_races_of_resources(graph, race):
     # TODO: priority may change?
@@ -56,7 +67,8 @@ def find_races_of_resource(resource):
     """Given a mapping proc:events for a resource, find racing events"""
     races = list()
 
-    events_per_proc = _events_per_proc(resource)
+    ievents_per_proc = _split_events_per_proc(resource, in_syscall=True)
+    events_per_proc = dict_values_to_lists(ievents_per_proc)
 
     for proc1, proc2 in combinations(events_per_proc, 2):
         for node1 in events_per_proc[proc1]:
@@ -175,7 +187,7 @@ def races_of_toctou(graph):
         for pattern in toctou.patterns:
             syscalls_hists[pattern.sys1] = list()
 
-        events_per_proc = _events_per_proc(resource)
+        events_per_proc = _split_events_per_proc(resource, in_syscall=True)
 
         for proc in events_per_proc:
             for node in events_per_proc[proc]:
