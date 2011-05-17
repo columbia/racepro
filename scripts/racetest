@@ -32,9 +32,9 @@ parser.add_argument('-i', '--initproc', dest='initproc',
                     help='Record/replay using a designated init-process')
 parser.add_argument('-t', '--timeout', dest='timeout', type=int,
                     metavar='S', default=1,
-                    help='Timeout for deadlock detection')
-parser.add_argument('-p', '--parallel', dest='parallel', type=int,
-                    metavar='S', default=None,
+                    help='Interval for periodic deadlock detection')
+parser.add_argument('-m', '--max-runtime', dest='max_runtime', type=int,
+                    metavar='SEC', default=None,
                     help='Timeout for forced session termination')
 parser.add_argument('-a', '--archive', dest='archive',
                     action='store_true', default=False,

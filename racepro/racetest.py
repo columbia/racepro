@@ -101,22 +101,41 @@ def _do_scribe(cmd, logfile, exe, stdout, flags,
                              backtrace_num_last_events = backtrace)
 
     context.add_init_loader(lambda argv, envp: exe.prepare())
-    pscribe = scribe.Popen(context, cmd,
-                           record=record, replay=replay, flags=flags,
-                           stdin=_dev_null, stdout=subprocess.PIPE)
+    pinit = scribe.Popen(context, cmd,
+                         record=record, replay=replay, flags=flags,
+                         stdin=_dev_null, stdout=subprocess.PIPE)
     pcat = subprocess.Popen(['/bin/cat'],
-                            stdin=pscribe.stdout,
+                            stdin=pinit.stdout,
                             stdout=stdout,
                             stderr=subprocess.STDOUT)
     context.wait()
-    pscribe.wait()
 
     if deadlock:
         signal.setitimer(signal.ITIMER_REAL, 0, 0)
 
-def _record(args, logfile=None, opts=''):
-    assert not args.parallel
+    return pinit
 
+def _do_wait(p, timeout=None, kill=False):
+    if not timeout:
+        assert not kill
+        return p.wait()
+
+    time.sleep(float(timeout))
+
+    r = p.poll()
+    if r is not None:
+        return p.wait()
+
+    if kill:
+        try:
+            p.kill()
+        except OSError:
+            pass
+        return p.wait()
+
+    return None
+
+def _record(args, logfile=None, opts=''):
     if not logfile:
         logfile = args.path + '.log'
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
@@ -148,7 +167,9 @@ def _record(args, logfile=None, opts=''):
 
         with open(logfile, 'w') as file:
             try:
-                _do_scribe(cmd, file, exe, args.redirect, flags, record=True)
+                pinit = _do_scribe(cmd, file, exe,
+                                   args.redirect, flags, record=True)
+                _do_wait(pinit, args.max_runtime, kill=not not args.max_runtime)
             except Exception as e:
                 logging.error('failed recording: %s' % e)
                 success = False
@@ -184,8 +205,9 @@ def _replay(args, logfile=None, opts=''):
         logging.info('    replaying ...')
         with open(logfile, 'r') as file:
             try:
-                _do_scribe(None, file, exe, args.redirect, 0,
-                           deadlock=1, replay=True)
+                pinit =  _do_scribe(None, file, exe, args.redirect, 0,
+                                    deadlock=1, replay=True)
+                _do_wait(pinit)
             except Exception as e:
                 logging.error('failed replaying: %s' % e)
                 success = False
@@ -210,7 +232,6 @@ def _replay(args, logfile=None, opts=''):
         return success
 
 def _replay2(args, logfile, verbose, opts=''):
-    assert not args.parallel
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
         if args._pre:
@@ -227,9 +248,12 @@ def _replay2(args, logfile, verbose, opts=''):
 
         logging.info('    replaying ...')
         with open(logfile, 'r') as file:
+            pinit = None
+            ret = None
             try:
-                _do_scribe(None, file, exe, args.redirect, 0,
-                           deadlock=1, toctou=args.toctou, replay=True)
+                pinit = _do_scribe(None, file, exe, args.redirect, 0,
+                                   deadlock=1, toctou=args.toctou, replay=True)
+                ret = _do_wait(pinit, args.max_runtime)
             except scribe.DivergeError as derr:
                 logging.info(str(derr))
                 if derr.err == 35:
@@ -241,10 +265,16 @@ def _replay2(args, logfile, verbose, opts=''):
                 logging.error('replay failure: %s' % e)
                 success = False
             else:
-                print('replay completed')
-                success = True
+                if args.max_runtime:
+                    if ret is None:
+                        print('replay in-transit')
+                        success = True
+                    else:
+                        print('replay died early (%d)' % ret)
+                else:
+                    print('replay completed')
+                    success = True
 
-        # if non-parallel and ret==0, or parallel and ret==None:
         if args.toctou and success:
             logging.info('    running generic TOCTOU test script...')
             r = exe.execute(['toctou', 'test'], notty=True,
@@ -274,6 +304,9 @@ def _replay2(args, logfile, verbose, opts=''):
                 ret = 0
         elif success:
             print(verbose + 'BUG replayed but not tested')
+
+        if args.max_runtime:
+            _do_wait(pinit, 0, True)
 
         if args._post:
             logging.info('    clean-up after replaying...')
@@ -458,7 +491,7 @@ def uninitialized(args):
     if 'timeout' not in args: args.timeout = 1
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
-    if 'parallel' not in args: args.parallel = None
+    if 'max_runtime' not in args: args.max_runtime = None
     if 'archive' not in args: args.archive = False
     if 'netns' not in args: args.netns = False
     if 'outdir' not in args: args.outdir = None

@@ -22,7 +22,7 @@
 # initproc =    true|false
 #
 # test runs in parallel to replay, after specified delay
-# parallel =    SECONDS
+# max-runtime = SECONDS
 #
 # whether to start in a new network namespace
 # netns =       true|false
