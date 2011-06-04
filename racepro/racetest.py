@@ -135,7 +135,7 @@ def _do_wait(p, timeout=None, kill=False):
 
     return None
 
-def _record(args, logfile=None, opts=''):
+def _record(args, logfile=None):
     if not logfile:
         logfile = args.path + '.log'
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
@@ -186,7 +186,7 @@ def _record(args, logfile=None, opts=''):
 
         return success
 
-def _replay(args, logfile=None, opts=''):
+def _replay(args, logfile=None):
     if not logfile:
         logfile = args.path + '.log'
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
@@ -231,7 +231,7 @@ def _replay(args, logfile=None, opts=''):
 
         return success
 
-def _replay2(args, logfile, verbose, opts=''):
+def _replay2(args, logfile, verbose):
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
         if args._pre:
@@ -348,7 +348,7 @@ def _testlist(args, races):
             break
         v = 'RACE %d: ' % n
         o = '-c %d' % args.timeout
-        ret = _replay2(args, logfile, v, opts=o)
+        ret = _replay2(args, logfile, v)
         t_end = datetime.datetime.now()
         dt = t_end - t_start
         logging.info('    time:  %.2f' %
