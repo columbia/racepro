@@ -34,7 +34,7 @@ parser.add_argument('-t', '--timeout', dest='timeout', type=int,
                     metavar='S', default=1,
                     help='Interval for periodic deadlock detection')
 parser.add_argument('-m', '--max-runtime', dest='max_runtime', type=int,
-                    metavar='SEC', default=None,
+                    metavar='S', default=None,
                     help='Timeout for forced session termination')
 parser.add_argument('-a', '--archive', dest='archive',
                     action='store_true', default=False,
@@ -53,16 +53,10 @@ parser.add_argument('-T', '--toctou', dest='toctou',
                     help='Toctou generic attack script')
 parser.add_argument('-x', '--race-file', dest='race_file',
                     default=None, metavar='FILE',
-                    help='Test those races whose number is specified here')
+                    help='Use the test cases specified in FILE')
 parser.add_argument('-X', '--race-list', dest='race_list',
                     default=None, metavar='N[:N...]',
-                    help='Location for output files (default: /presist/TEST')
-parser.add_argument('-l', '--log-level', dest='logmask',
-                    default=None, metavar='LEVEL',
-                    help='Log mask argument, see record arguments.')
-parser.add_argument('-f', '--log-flags', dest='logflags',
-                    default=None, metavar='MASK',
-                    help='Log mask argument, see record arguments.')
+                    help='Indicate which race numbres to test')
 parser.add_argument('--skip-record', dest='skip_record',
                     action='store_true', default=False,
                     help='Skip record step - reuse existing logs')
