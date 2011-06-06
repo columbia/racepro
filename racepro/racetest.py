@@ -3,57 +3,19 @@
 import re
 import os
 import sys
-import time
-import shutil
-import signal
 import logging
-import argparse
 import datetime
-import subprocess
-import errno
-import pdb
+import itertools
 import traceback
+import pdb
 
-from itertools import *
-
+import scribewrap
 import execute
-import scribe
 import races
 
-_dev_null = open('/dev/null', 'r')
+##############################################################################
 
-def _exec(cmd, redirect=None):
-    p1 = subprocess.Popen(cmd.split(),
-                          stdin=_dev_null,
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT)
-    p2 = subprocess.Popen(['/bin/cat'],
-                          stdin=p1.stdout,
-                          stdout=redirect,
-                          stderr=subprocess.STDOUT)
-    p1.stdout.close()
-    return p1.wait()
-
-def _sudo(cmd, redirect=None):
-    if os.geteuid() != 0:
-        cmd = 'sudo ' + cmd
-    return _exec(cmd, redirect)
-
-def _wait(p, timeout=None):
-    if not timeout:
-        r = p.wait()
-    else:
-        time.sleep(float(timeout))
-        r = p.poll()
-        if r == None:
-            try:
-                _sudo('kill -TERM %d' % p.pid)
-            except OSError:
-                pass
-        p.wait()
-    return r if r else 0
-
-def _handle_toctou(string, id, exe):
+def _handle_toctou(exe, string):
     pid = os.fork()
     if pid == 0:
         try:
@@ -67,288 +29,45 @@ def _handle_toctou(string, id, exe):
     else:
         os.waitpid(pid, 0)
 
-def _do_scribe(cmd, logfile, exe, stdout, flags,
-               deadlock=None, backtrace=2, toctou=False,
-               record=False, replay=False):
-    context = None
-    def do_check_deadlock(signum, stack):
-        try:
-            context.check_deadlock()
-        except OSError as e:
-            if e.errno != errno.EPERM:
-                logging.error("Cannot check for deadlock (%s)" % str(e))
-    if deadlock:
-        signal.signal(signal.SIGALRM, do_check_deadlock)
-        signal.setitimer(signal.ITIMER_REAL, deadlock, deadlock)
+def on_bookmark_toctou(exe, logfile, scribe, id, npr):
+    try:
+        log = re.sub('\.log$', '.toctou', logfile.name)
+        for line in open(log, 'r').readlines():
+            _handle_toctou(exe, line)
+            scribe.stop()
+    except:
+        traceback.print_exc(file=sys.stdout)
 
-    class RaceproContext(scribe.Context):
-        def on_bookmark(self, id, npr):
-            if toctou:
-                try:
-                    toctou_log_path = re.sub('\.log$', '.toctou', logfile.name)
-                    toctou_lines = open(toctou_log_path, 'r').readlines()
-                    for toctou_line in toctou_lines:
-                        _handle_toctou(toctou_line, id, exe)
-                    self.stop()
-                except:
-                    traceback.print_exc(file=sys.stdout)
-
-            else:
-                self.resume()
-
-    context = RaceproContext(logfile,
-                             backtrace_len = 2,
-                             backtrace_num_last_events = backtrace)
-
-    context.add_init_loader(lambda argv, envp: exe.prepare())
-    pinit = scribe.Popen(context, cmd,
-                         record=record, replay=replay, flags=flags,
-                         stdin=_dev_null, stdout=subprocess.PIPE)
-    pcat = subprocess.Popen(['/bin/cat'],
-                            stdin=pinit.stdout,
-                            stdout=stdout,
-                            stderr=subprocess.STDOUT)
-    context.wait()
-
-    if deadlock:
-        signal.setitimer(signal.ITIMER_REAL, 0, 0)
-
-    return pinit
-
-def _do_wait(p, timeout=None, kill=False):
-    if not timeout:
-        assert not kill
-        return p.wait()
-
-    time.sleep(float(timeout))
-
-    r = p.poll()
-    if r is not None:
-        return p.wait()
-
-    if kill:
-        try:
-            p.kill()
-        except OSError:
-            pass
-        return p.wait()
-
-    return None
-
-def _record(args, logfile=None):
-    if not logfile:
-        logfile = args.path + '.log'
-    with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
-                      scratch=args.scratch, persist=args.pdir) as exe:
-        if args._pre:
-            logging.info('    clean-up before recording...')
-            cmd = args._pre \
-                if os.path.isabs(args._pre) \
-                else './' + args._pre
-            ret = exe.execute(cmd.split(), notty=True,
-                              stdin=_dev_null, stdout=args.redirect)
-
-        logging.info('    recording ...')
-        cmd = args._run if os.path.isabs(args._run) else './' + args._run
-
-        flags = scribe.SCRIBE_SYSCALL_RET | \
-                scribe.SCRIBE_SYSCALL_EXTRA | \
-                scribe.SCRIBE_SIG_COOKIE | \
-                scribe.SCRIBE_RES_EXTRA | \
-                scribe.SCRIBE_DATA_EXTRA | \
-                scribe.SCRIBE_DATA_STRING_ALWAYS | \
-                scribe.SCRIBE_RES_ALWAYS | \
-                scribe.SCRIBE_REGS
-
-        if args.initproc:
-            flags |= scribe.SCRIBE_CUSTOM_INIT
-        if args.netns:
-            flags |= scribe.SCRIBE_CLONE_NEWNET
-
-        with open(logfile, 'w') as file:
-            try:
-                pinit = _do_scribe(cmd, file, exe,
-                                   args.redirect, flags, record=True)
-                _do_wait(pinit, args.max_runtime, kill=not not args.max_runtime)
-            except Exception as e:
-                logging.error('failed recording: %s' % e)
-                success = False
-            else:
-                success = True
-
-        if args._post:
-            logging.info('    clean-up after recording...')
-            cmd = args._post \
-                if os.path.isabs(args._post) \
-                else './' + args._post
-            ret = exe.execute(cmd.split(), notty=True,
-                              stdin=_dev_null, stdout=args.redirect)
-
-        return success
-
-def _replay(args, logfile=None):
-    if not logfile:
-        logfile = args.path + '.log'
-    with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
-                      scratch=args.scratch, persist=args.pdir) as exe:
-        if args._pre:
-            logging.info('    clean-up before replaying...')
-            cmd = args._pre \
-                if os.path.isabs(args._pre) \
-                else './' + args._pre
-            r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dev_null, stdout=args.redirect)
-            if r != 0:
-                logging.error('failed pre-script (exit %d)' % r)
-                return False
-
-        logging.info('    replaying ...')
-        with open(logfile, 'r') as file:
-            try:
-                pinit =  _do_scribe(None, file, exe, args.redirect, 0,
-                                    deadlock=1, replay=True)
-                _do_wait(pinit)
-            except Exception as e:
-                logging.error('failed replaying: %s' % e)
-                success = False
-            else:
-                success = True
-
-        if args._post:
-            logging.info('    clean-up after replaying...')
-            cmd = args._post \
-                if os.path.isabs(args._post) \
-                else './' + args._post
-            r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dev_null, stdout=args.redirect)
-            if r != 0:
-                logging.error('failed post-script (exut %d)' % r)
-
-        if args.jailed and args.archive:
-            logdir = args.path + '.rw'
-            _sudo('rm -rf %s' % logdir)
-            _sudo('cp -ax %s %s' % (exe.scratch, logdir))
-
-        return success
-
-def _replay2(args, logfile, verbose):
-    with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
-                      scratch=args.scratch, persist=args.pdir) as exe:
-        if args._pre:
-            logging.info('    clean-up before replaying...')
-            cmd = args._pre \
-                if os.path.isabs(args._pre) \
-                else './' + args._pre
-            r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dev_null, stdout=args.redirect)
-            if r != 0:
-                logging.error('failed pre-script (exit %d)' % r)
-                print(verbose + 'bad exit code from pre-script: %d' % r)
-                return False
-
-        logging.info('    replaying ...')
-        with open(logfile, 'r') as file:
-            pinit = None
-            ret = None
-            try:
-                pinit = _do_scribe(None, file, exe, args.redirect, 0,
-                                   deadlock=1, toctou=args.toctou, replay=True)
-                ret = _do_wait(pinit, args.max_runtime)
-            except scribe.DivergeError as derr:
-                logging.info(str(derr))
-                if derr.err == 35:
-                    print(verbose + 'replay deadlock')
-                else:
-                    print(verbose + 'replay diverge (%d)' % derr.err)
-                success = False
-            except Exception as e:
-                logging.error('replay failure: %s' % e)
-                success = False
-            else:
-                if args.max_runtime:
-                    if ret is None:
-                        print('replay in-transit')
-                        success = True
-                    else:
-                        print('replay died early (%d)' % ret)
-                else:
-                    print('replay completed')
-                    success = True
-
-        if args.toctou and success:
-            logging.info('    running generic TOCTOU test script...')
-            r = exe.execute(['toctou', 'test'], notty=True,
-                            stdin=_dev_null, stdout=args.redirect)
-            if r == 2 or r == 255:
-                print(verbose + 'BUG REPRODUCED')
-                ret = 0
-                success = False
-
-        if args._test and success:
-            logging.info('    running test script...')
-            cmd = args._test \
-                if os.path.isabs(args._test) \
-                else './' + args._test
-            r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dev_null, stdout=args.redirect)
-
-
-            if r == 2 or r == 255:
-                print(verbose + 'BUG REPRODUCED')
-                ret = 0
-            elif r != 0:
-                print(verbose + 'bad exit code from test-script: %d' % r)
-                ret = r
-            else:
-                print(verbose + 'BUG not triggered')
-                ret = 0
-        elif success:
-            print(verbose + 'BUG replayed but not tested')
-
-        if args.max_runtime:
-            _do_wait(pinit, 0, True)
-
-        if args._post:
-            logging.info('    clean-up after replaying...')
-            cmd = args._post \
-                if os.path.isabs(args._post) \
-                else './' + args._post
-            r = exe.execute(cmd.split(), notty=True,
-                            stdin=_dev_null, stdout=args.redirect)
-            if r != 0:
-                logging.error('failed post-script (exit %d)' % r)
-                print(verbose + 'bad exit code from post-script: %d' % r)
-
-        if args.jailed and args.archive:
-            logdir = logfile.replace('.log', '.rw')
-            _sudo('rm -rf %s' % logdir)
-            _sudo('cp -ax %s %s' % (exe.scratch, logdir))
-
-    return success
-
-def _findraces(args, opts):
+def replay_test_script(exe, args):
     if args.toctou:
-        cmd = args.racepro + '%s show-toctou -i %s -o %s' % \
-            (opts, args.path + '.log', args.path)
+        logging.info('    running generic toctou script...')
     else:
-        cmd = args.racepro + '%s show-races -i %s -o %s' % \
-            (opts, args.path + '.log', args.path)
-    ret = _sudo(cmd)
-    if ret != 0:
-        logging.error('failed to generate races')
+        logging.info('    running specific test script...')
+
+    try:
+        scribewrap.def_test_script(exe, args)
+    except execute.ExecuteError as e:
+        if e.ret != 2:
+            print('unexpected exit code %d' % e.ret)
+        return True
+    else:
         return False
-    return True
 
 def _testlist(args, races):
+    if args.toctou:
+        on_bookmark = on_bookmark_toctou
+    else:
+        on_bookmark = None
 
     for n in races:
         t_start = datetime.datetime.now()
         logfile = '%s.%d.log' % (args.path, n)
         if not os.access(logfile, os.R_OK):
             break
-        v = 'RACE %d: ' % n
-        o = '-c %d' % args.timeout
-        ret = _replay2(args, logfile, v)
+        verbose = 'RACE %d: ' % n
+        ret = scribewrap.scribe_replay(args, logfile, verbose,
+                                       test_replay=replay_test_script,
+                                       on_bookmark=on_bookmark)
         t_end = datetime.datetime.now()
         dt = t_end - t_start
         logging.info('    time:  %.2f' %
@@ -358,7 +77,20 @@ def _testlist(args, races):
     return True
 
 def _testraces(args):
-    ret = _testlist(args, count(1))
+    _testlist(args, itertools.count(1))
+    return True
+
+def _findraces(args, opts):
+    if args.toctou:
+        cmd = 'racepro %s show-toctou -i %s -o %s' % \
+            (opts, args.path + '.log', args.path)
+    else:
+        cmd = 'racepro %s show-races -i %s -o %s' % \
+            (opts, args.path + '.log', args.path)
+    ret = execute.sudo(cmd.split())
+    if ret != 0:
+        logging.error('failed to generate races')
+        return False
     return True
 
 def do_one_test(args, t_name, t_exec):
@@ -366,20 +98,9 @@ def do_one_test(args, t_name, t_exec):
         os.mkdir(args.chroot)
 
     if args.scratch and os.access(args.scratch, os.F_OK):
-        ret = _sudo('rm -rf %s' % args.scratch)
+        cmd = 'rm -rf %s' % args.scratch
+        execute.sudo(cmd.split())
         os.mkdir(args.scratch)
-
-    if not args.logmask and not args.logflags:
-        args.logflags = 'sScrdgp'
-
-    args.record = 'record'
-    if args.logmask: args.record += ' -l %s' % args.logmask
-    if args.logflags: args.record += ' -f %s' % args.logflags
-    if args.initproc: args.record += ' -i'
-    if args.netns: args.record += ' -n'
-
-    args.replay = 'replay -l 15'
-    args.racepro = 'racepro'
 
     logging.info('Processing test: %s' % (t_name))
 
@@ -397,6 +118,8 @@ def do_one_test(args, t_name, t_exec):
     args._post = args.post \
         if 'post' in args else def_script_name('%s.post' % t_name)
 
+    logging.debug('%s %s' % (t_name, t_exec))
+
     if args._test and not os.access(args._test, os.X_OK):
         logging.error('%s: test script request but not found' % args._test)
         return False
@@ -407,6 +130,9 @@ def do_one_test(args, t_name, t_exec):
         logging.error('%s: post script request but not found' % args._post)
         return False
 
+    if args.toctou:
+        args._test = 'toctou test'
+
     opts = ''
     if args.debug: opts += ' -d'
     if args.verbose: opts += ' -v'
@@ -415,8 +141,10 @@ def do_one_test(args, t_name, t_exec):
 
     if not args.skip_record:
         if os.access(args.pdir, os.R_OK):
-            _sudo('rm -rf %s' % args.pdir)
-    _sudo('mkdir -p %s' % args.pdir)
+            cmd = 'rm -rf %s' % args.pdir
+            execute.sudo(cmd.split())
+    cmd = 'mkdir -p %s' % args.pdir
+    execute.sudo(cmd.split())
 
     if args.quiet:
         args.redirect = open(args.path + '.out', 'w')
@@ -427,15 +155,18 @@ def do_one_test(args, t_name, t_exec):
 
     if not args.skip_record:
         logging.info('  recording original exceution (twice)')
-        if not _record(args):
+        if not scribewrap.scribe_record(args):
             return True if args.keepgoing else False
-        if not _record(args):
+        if not scribewrap.scribe_record(args):
             return True if args.keepgoing else False
 
         t_replay = datetime.datetime.now()
 
+        # If args.max_runtimes was enabled, then recording may have stopped
+        # an "external" script; We expect replay to also stop similarly, so
+        # we don't need to temporarilty turn off args.max_runtime.
         logging.info('  replaying original execution')
-        if not _replay(args):
+        if not scribewrap.scribe_replay(args):
             return True if args.keepgoing else False
 
     else:
@@ -507,6 +238,10 @@ def uninitialized(args):
     if 'toctou' not in args: args.toctou = False
 
 def do_all_tests(args, tests):
+    if os.geteuid() != 0:
+        print('You must be root to use racetest')
+        exit(1)
+
     uninitialized(args)
 
     for t_name, t_exec in tests:
