@@ -2,7 +2,6 @@
 
 import os
 import sys
-import mmap
 import pdb
 import random
 import struct
@@ -15,72 +14,6 @@ from itertools import *
 
 import scribe
 from racepro import *
-
-def load_events(logfile):
-    """Load a scribe log from logfile"""
-    try:
-        f = open(logfile, 'r')
-    except:
-        print('Cannot open log file %s' % logfile)
-        exit(1)
-
-    m = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
-    events = list(scribe.EventsFromBuffer(m))
-    m.close()
-    f.close()
-
-    return events
-
-def load_session(logfile):
-    events = load_events(logfile)
-    return Session(events)
-
-# YJF: remove holes in serial number sequence.
-# NOTE: this method updates the event in place because we do not use event
-# serials anywhere in racepro
-# FIXME: this should really be in py-scribe because we essentially
-# reverse engineer the serial assignment logic here.
-def condense_events(events):
-    # map from resource id to the previou event's (serial, seq, write_access)
-    # serial: serial number
-    # seq: sequence number ignoring access type
-    # write_access: non zero if the event is a write
-    serials = dict()  
-    for e in events:
-        if e.is_a(scribe.EventResourceLockExtra):
-            if e.id not in serials:
-                serials[e.id] = (0, 0, e.write_access)
-                serial = 0
-            else:
-                (prev_serial, seq, prev_wr) = serials[e.id]
-                seq += 1
-                if e.write_access or prev_wr:
-                    serial = seq
-                else:
-                    serial = prev_serial
-                serials[e.id] = (serial, seq, e.write_access)
-            if e.serial != serial:
-                ee = e.copy()
-                ee.serial = serial
-                e = session.Event(ee)
-        yield e
-
-def save_session(logfile, events):
-    """Save modified scribe log to logfile"""
-    try:
-        f = open(logfile, 'w')
-    except:
-        print('Cannot open log file %s' % logfile)
-        exit(1)
-
-    for e in condense_events(events):
-        f.write(e.encode())
-
-    f.close()
-
-def _sudo(cmd):
-    cmd = cmd.split() if os.geteuid() == 0 else ['sudo'] + cmd.split()
-    return subprocess.call(cmd)
 
 ##############################################################################
 
@@ -151,303 +84,6 @@ def show_syscalls(args):
 
 ##############################################################################
 
-def filter_syscall(graph, node):
-
-    # getdents(): drop data* events to tolerate missing/unexpected
-    # pids in /proc, and mark SCRIBE_PS_ENABLE_DATA to be unset
-
-    if node.nr not in unistd.SYS_wait:
-#   if node.nr == unistd.NR_getdents:
-        replace = dict()
-        mask = (scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                scribe.SCRIBE_PS_ENABLE_RET_CHECK |
-                scribe.SCRIBE_PS_ENABLE_DATA)
-        for e in node.children:
-            if e.is_a(scribe.EventData) or e.is_a(scribe.EventDataExtra):
-                replace[session.Event(e)] = None
-
-    # otherwise: do nothing and use default flags to be unset
-    else:
-        replace = None
-        mask = (scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                scribe.SCRIBE_PS_ENABLE_RET_CHECK)
-
-    return replace, mask
-
-def crosscut_to_bookmark(crosscut):
-    bookmark = dict(map(lambda nl: (nl.node.proc, nl), crosscut))
-    return bookmark
-
-def find_pairwise_races(graph):
-    """Find all pairwise races and return in a list"""
-    all_races = races_of_resources(graph)
-    logging.debug('total resource races %d' % (len(all_races)))
-
-    sys_races = set()
-
-    for node1, node2 in all_races:
-        assert node1.serial != node2.serial, \
-            'Race between %s and %s with same serial' % (node1, node2)
-
-        if node1.serial < node2.serial:
-            node1, node2 = node2, node1
-
-        sys_races.add((node1.syscall, node2.syscall))
-        logging.info('\tadding %s --> %s to races' % (node1, node2))
-
-    print('RACES %s', sys_races)
-    return all_races, sys_races
-
-def prep_pairwise_race(graph, node1, node2, n_race):
-    """prepare a race by computing bookmarks, injects, and cutoff"""
-    crosscut = graph.crosscut([node1, node2])
-    bookmark1 = crosscut_to_bookmark(crosscut)
-
-    if not bookmark1:
-        print('No consistent cut: node %s --> node %s' % (node1, node2))
-        return None
-
-    bookmark2 = dict(bookmark1)
-    bookmark2[node1.proc] = NodeLoc(node1, 'after')
-    bookmarks = [bookmark1, bookmark2]
-
-    # for some syscalls replayed after a bookmark/inject we need to
-    # filter some events, mainly data, dataextra and fence.
-    replace, mask = filter_syscall(graph, node1)
-
-    action = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS, 0, mask)
-
-    injects = dict()
-    actions = list([action])
-    injects[node1.proc] = dict({NodeLoc(node1, 'before') : actions})
-
-    cutoff = dict(bookmark2)
-
-    print('RACE %2d:  ' % (n_race + 1) +
-          'pid %d syscnt %d [sys(%d)=%d]' %
-          (node1.proc.pid, node1.syscall_index, node1.nr, node1.ret) +
-          '  -->   pid %d syscnt %d [sys(%d)=%d]' %
-          (node2.proc.pid, node2.syscall_index, node2.nr, node2.ret))
-    print('          cut:  %s' % bookmark1.values())
-
-    logging.debug('   boobkmark1: %s' % (bookmark1))
-    logging.debug('   boobkmark2: %s' % (bookmark2))
-    logging.debug('      injects: %s' % (injects))
-    logging.debug('       cutoff: %s' % (cutoff))
-
-    return bookmarks, injects, cutoff, None  # replace
-
-def find_signal_races(graph):
-    """Find all signal races and return in a list"""
-    signal_races = races_of_signals(graph)
-    logging.debug('total signal races %d' % (len(signal_races)))
-    return signal_races
-
-def prep_signal_race(graph, signal, n_race):
-    """prepare a race by computing bookmarks, injects, and cutoff
-    If the signal interrupted the syscall, then make it not interrupt.
-    If the signal did not interrupt the syscall, then make it interrupt.
-    """
-    node = signal.handled
-
-    crosscut = graph.crosscut([node])
-    bookmark1 = crosscut_to_bookmark(crosscut)
-
-    if not bookmark1:
-        print('No consistent cut: pid %d syscnt %d' % proc.pid, cnt)
-        return None
-
-    bookmark2 = dict(bookmark1)
-    bookmark2[node.proc] = NodeLoc(node, 'after')
-    bookmarks = [bookmark1, bookmark2]
-
-    # we reverse the signal's effect by "reversing" the syscall return
-    # value (from interrupted to non-interrupted or vice versa)
-
-    injects = dict()
-
-    action = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                    0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                    scribe.SCRIBE_PS_ENABLE_RET_CHECK)
-    injects[node.proc] = dict({NodeLoc(node, 'before') : action})
-
-    cutoff = dict(bookmark2)
-
-    print('%s syscnt %d' % (node, node.syscall_index))
-
-    sys_old = node
-    sys.new = Session.Event(node)
-
-    if sys_old.ret in unistd.EINTERRUPTED:
-        sys_new.ret = 0
-    else:
-        # FIXME: choice of ERESTARTSYS is arbitrary and probably
-        # incorrect. specific error value should be syscall specific
-        logging.warn('"reverse" signal race may be incorrect...')
-        sys_new.ret = unistd.ERESTARTSYS
-
-    replace = dict({sys_old:sys_new})
-
-    print('RACE %2d:  ' % (n_race + 1) +
-          'pid %d syscnt %d [sys(%d)=%d/%d]' %
-          (node.proc.pid, node.syscall_index,
-           sys_old.nr, sys_old.ret, sys_new.ret))
-    print('          cut:  %s' % bookmark1.values())
-
-    logging.info('   boobkmark1: %s' % (bookmark1))
-    logging.info('   boobkmark2: %s' % (bookmark2))
-    logging.info('      injects: %s' % (injects))
-    logging.info('       cutoff: %s' % (cutoff))
-    logging.info('      replace: %s' % (replace))
-
-    return bookmarks, injects, cutoff, replace
-
-def find_exitwait_races(graph):
-    """Find all exit-wait races and return in a list"""
-    exit_races = races_of_exitwait(graph)
-    logging.debug('total exit-races %d' % (len(exit_races)))
-    return exit_races
-
-def prep_exitwait_race(graph, exit1, exit2, wait, n_race):
-    """prepare a race by computing bookmarks, injects, and cutoff"""
-
-    crosscut = graph.crosscut([exit1, exit2, wait])
-    bookmark1 = crosscut_to_bookmark(crosscut)
-
-    if not bookmark1:
-        print('No consistent cut: exit %s, exit %s, wait %s' %
-              (exit1, exit2, wait))
-        return None
-
-    bookmark2 = dict(bookmark1)
-    bookmark2[exit1.proc] = NodeLoc(exit1, 'after')
-
-    bookmark3 = dict(bookmark2)
-    bookmark3[wait.proc] = NodeLoc(wait, 'after')
-    del bookmark3[exit1.proc]
-    
-    bookmarks = [bookmark1, bookmark2, bookmark3]
-
-    injects = dict()
-
-    # we don't need scribe.SCRIBE_PS_ENABLE_DATA, because we know
-    # our syscalls are wait() and exit()
-    action1 = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                    0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                       scribe.SCRIBE_PS_ENABLE_RET_CHECK)
-    injects[exit1.proc] = dict({NodeLoc(exit1.proc, 'before') : [action1]})
-    action2 = Action(scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
-                    0, scribe.SCRIBE_PS_ENABLE_RESOURCE |
-                       scribe.SCRIBE_PS_ENABLE_RET_CHECK)
-    injects[wait.proc] = dict({NodeLoc(wait, 'before') : [action2]})
-
-    cutoff = dict(bookmark3)
-
-    # get data (internal) event described wait() during replay
-    sys_old = wait
-    event = sys_old.copy()
-    event.ret = exit1.proc.pid
-    sys_new = session.Event(event)
-    print('sys_old: %s   sys_new: %s' % (sys_old, sys_new))
-
-    datas = filter(lambda node: node.is_a(scribe.EventDataExtra), wait.children)
-
-    data_old = datas.pop()
-    event = data_old.copy()
-    event.data_type = scribe.SCRIBE_DATA_INTERNAL
-    event.data = struct.pack('i', exit1.proc.pid)
-    event.user_ptr = 0
-    data_new = session.Event(event)
-
-#    event = scribe.EventDataExtra(user_ptr = 0,
-#                                  data_type = scribe.SCRIBE_DATA_INTERNAL,
-#                                  data = struct.pack('i', exit1.proc.pid))
-
-    replace = dict({sys_old:sys_new, data_old:data_new})
-
-    # consider a exit-exit-wait race: C exited first, A collected and
-    # then B exited. To reorder B and C, we will (1) bookmark everyone
-    # prior to the respective syscall, (2) let C execute exit and then
-    # bookmark, (3) let A collect C and then another bookmark, and
-    # they all resume normal exeution.
-    #
-    # this is more complicated if the task that waits (A) is init. if
-    # we allow task A to attempt wait for C, then A may wait forever
-    # because C may remain a child of B (so cannot be reaped by A)...
-    # therefore A never reaches the third bookmark and the execution
-    # as a whole reaches a deadlock.
-    #
-    # to address this case, we change the details: we make B and C
-    # both run their respective exit calls before hitting, both, the
-    # second bookmark. and then let A collect C first, and all go live.
-
-    if wait.proc.pid == 1 and exit1.proc.creator != 1:
-        if exit1.proc.creator in cutoff and \
-                cutoff[exit1.proc.creator] == NodeLoc(exit1, 'after') or \
-                exit1.proc.creator == exit2.proc:
-
-            # discard the 3rd bookmark, allow proc2 to also exit, and
-            # finally extend the cut to occur after proc3's wait
-
-            bookmark2[exit2.proc] = NodeLoc(exit2, 'after')
-            bookmarks = [bookmark1, bookmark2]
-
-            cutoff = dict(bookmark2)
-            cutoff[wait.proc] = NodeLoc(wait, 'after')
-        else:
-            print('exit-exit-wait race would deadlock .... ' +
-                  '%s - %s - %s' % (exit1, exit2, wait))
-            return None
-
-    print('RACE %2d:  ' % (n_race + 1) +
-          'pid %s syscnt %d [sys(%d)=%d]' %
-          (exit1.proc.pid, exit1.syscall_index, exit1.nr, exit1.ret) +
-          '  -->   pid %d syscnt %d [sys(%d)=%d]' %
-          (wait.proc.pid, wait.syscall_index, wait.nr, wait.ret) +
-          '  -->   pid %d syscnt %d [sys(%d)=%d]' %
-          (exit2.proc.pid, exit2.syscall_index, exit2.nr, exit2.ret))
-    print('          cut:  %s' % bookmark1.values())
-
-    logging.info('   bookmark1: %s' % (bookmark1))
-    logging.info('   bookmark2: %s' % (bookmark2))
-    logging.info('   bookmark3: %s' % (bookmark3))
-    logging.info('     injects: %s' % (injects))
-    logging.info('      cutoff: %s' % (cutoff))
-    logging.info('     replace: %s' % (replace))
-
-    return bookmarks, injects, cutoff, replace
-
-def prep_toctou_race(graph, sys1, sys2, attack, n_toctou):
-    """prepare a toctou by computing bookmarks, injects, and cutoff"""
-    crosscut = graph.crosscut([sys2])
-    bookmark1 = crosscut_to_bookmark(crosscut)
-
-    if not bookmark1:
-        print('No consistent cut: node %s --> node %s' % (sys1, sys2))
-        return None
-
-    bookmarks = [bookmark1]
-
-    cutoff = dict(bookmark1)
-
-    print('TOCTOU %2d:  ' % (n_toctou + 1) +
-          'pid %d syscnt %d [sys(%d)=%d]' %
-          (sys1.proc.pid, sys1.syscall_index, sys1.nr, sys1.ret) +
-          '  -->   pid %d syscnt %d [sys(%d)=%d]' %
-          (sys2.proc.pid, sys2.syscall_index, sys2.nr, sys2.ret) +
-          ' (%s)' % attack)
-    print('          cut:  %s' % bookmark1.values())
-
-    logging.debug('   boobkmark1: %s' % (bookmark1))
-    logging.debug('       cutoff: %s' % (cutoff))
-
-    return bookmarks, None, cutoff, None
-
-def save_modify_log(graph, bookmarks, injects, cutoff, replace, output):
-    """Generate and save a modified scribe log for a race"""
-    event_iter = save_events(graph, bookmarks, injects, cutoff, replace)
-    save_session(output, event_iter)
-
 def show_races(args):
     graph = ExecutionGraph(load_events(args.logfile))
     logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
@@ -457,7 +93,7 @@ def show_races(args):
     # For each race generate a (bookmarks, injects, cutoff)
     # tuple. Finally, use those to write out a modified log.
 
-    all_races, sys_races = find_pairwise_races(graph)
+    all_races, sys_races = races.find_resource_races(graph)
 
     print('-' * 75)
     print('REGULAR RACES')
@@ -473,7 +109,7 @@ def show_races(args):
     n_race = 0
     n_fail = 0
     for (node1, node2) in sys_races:
-        ret = prep_pairwise_race(graph, node1, node2, n_race)
+        ret = races.prep_resource_race(graph, node1, node2, n_race)
         if not ret:
             n_fail += 1
             continue
@@ -494,7 +130,7 @@ def show_races(args):
     if(args.no_exit_races):
         exit_races = list()
     else:
-        exit_races = find_exitwait_races(graph)
+        exit_races = races.find_exitwait_races(graph)
 
     print('-' * 75)
     print('EXIT-WAIT RACES')
@@ -503,7 +139,7 @@ def show_races(args):
     print('-' * 75)
 
     for (exit1, exit2, wait) in exit_races:
-        ret = prep_exitwait_race(graph, exit1, exit2, wait, n_race)
+        ret = races.prep_exitwait_race(graph, exit1, exit2, wait, n_race)
         if not ret:
             n_fail += 1
             continue
@@ -524,7 +160,7 @@ def show_races(args):
     if(args.no_signal_races):
         signal_races = list()
     else:
-        signal_races = find_signal_races(graph)
+        signal_races = races.find_signal_races(graph)
 
     print('-' * 75)
     print('SIGNAL RACES')
@@ -539,7 +175,7 @@ def show_races(args):
     print('-' * 75)
 
     for signal in signal_races:
-        ret = prep_signal_race(graph, signal, n_race)
+        ret = races.prep_signal_race(graph, signal, n_race)
         if not ret:
             n_fail += 1
             continue
@@ -583,12 +219,14 @@ def test_races(args):
             break
 
         if args.script_pre:
-            r = _sudo(args.script_pre + cmd_suffix)
+            cmd = args.script_pre + cmd_suffix
+            r = execute.sudo(cmd.split())
             if r > 0:
                 print('RACE %d: bad exit code %d from pre-script' % (n, r))
                 continue
 
-        r = _sudo('%s %s %s' % (cmd_replay, logfile, cmd_suffix))
+        cmd = '%s %s %s' % (cmd_replay, logfile, cmd_suffix)
+        r = execute.sudo(cmd.split())
         if r == 35:
             print('REPLAY %2d: deadlock (exit %d)' % (n, r))
         if r > 0:
@@ -599,7 +237,8 @@ def test_races(args):
             print('REPLAY %2d: completed' % n)
 
         if r == 0 and args.script_test:
-            r = _sudo(args.script_test + cmd_suffix)
+            cmd = args.script_test + cmd_suffix
+            r = execute.sudo(cmd.split())
             if r == 2:
                 print('    BUG PRODUCED')
             elif r > 0:
@@ -610,7 +249,8 @@ def test_races(args):
             print('    BUG only replayed')
 
         if args.script_post:
-            r = _sudo(args.script_post + cmd_suffix)
+            cmd = args.script_post + cmd_suffix
+            r = _sudo(cmd.split())
             if r > 0:
                 print('RACE %d: nad exit code %d from post-script' % (n, r))
 
@@ -625,7 +265,7 @@ def show_toctou(args):
     ######################################################################
     # 1. Find toctou races
 
-    toctou_races = races_of_toctou(graph)
+    toctou_races = races.find_toctou_races(graph)
 
     n_toctou = 0
     n_fail = 0
@@ -638,7 +278,7 @@ def show_toctou(args):
         print('Found %d potential races' % len(races))
 
         for (sys1, sys2, attack) in races:
-            ret = prep_toctou_race(graph, sys1, sys2, attack, n_toctou)
+            ret = races.prep_toctou_race(graph, sys1, sys2, attack, n_toctou)
             if not ret:
                 n_fail += 1
                 continue

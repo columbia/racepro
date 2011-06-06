@@ -1,3 +1,5 @@
+import mmap
+import struct
 import logging
 
 import scribe
@@ -42,6 +44,20 @@ def parse_syscall(session, i):
 
 ################################################################################
 
+def load_events(logfile):
+    """Load a scribe log from logfile"""
+    try:
+        f = open(logfile, 'r')
+    except:
+        print('Cannot open log file %s' % logfile)
+        exit(1)
+
+    m = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
+    events = list(scribe.EventsFromBuffer(m))
+    m.close()
+    f.close()
+
+    return events
 
 def save_events(graph,
                 bookmarks = None,
@@ -223,3 +239,56 @@ def save_events(graph,
         if proc not in endofq:
             yield session.Event(scribe.EventPid(proc.pid))
             yield session.Event(scribe.EventQueueEof())
+
+################################################################################
+
+# YJF: remove holes in serial number sequence.
+def condense_events(events):
+    # map from resource id to the previou event's (serial, seq, write_access)
+    # serial: serial number
+    # seq: sequence number ignoring access type
+    # write_access: non zero if the event is a write
+    serials = dict()  
+    for e in events:
+        if e.is_a(scribe.EventResourceLockExtra):
+            if e.id not in serials:
+                serials[e.id] = (0, 0, e.write_access)
+                serial = 0
+            else:
+                (prev_serial, seq, prev_wr) = serials[e.id]
+                seq += 1
+                if e.write_access or prev_wr:
+                    serial = seq
+                else:
+                    serial = prev_serial
+                serials[e.id] = (serial, seq, e.write_access)
+            if e.serial != serial:
+                ee = e.copy()
+                ee.serial = serial
+                e = session.Event(ee)
+        yield e
+
+################################################################################
+
+def load_session(logfile):
+    events = load_events(logfile)
+    return Session(events)
+
+def save_session(logfile, events):
+    """Save modified scribe log to logfile"""
+    try:
+        f = open(logfile, 'w')
+    except:
+        print('Cannot open log file %s' % logfile)
+        exit(1)
+
+    for e in condense_events(events):
+        f.write(e.encode())
+
+    f.close()
+
+def save_modify_log(graph, bookmarks, injects, cutoff, replace, output):
+    """Generate and save a modified scribe log for a race"""
+    event_iter = save_events(graph, bookmarks, injects, cutoff, replace)
+    save_session(output, event_iter)
+
