@@ -1,5 +1,4 @@
 import os
-import sys
 import tempfile
 import subprocess
 import errno
@@ -27,17 +26,27 @@ def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
             raise
     return p1
 
-def _sudo_raw(cmd, **kwargs):
+def sudo_raw(cmd, **kwargs):
     if os.geteuid() != 0:
         cmd = ['sudo'] + cmd
     p = _popen(cmd, **kwargs)
     return p
 
-def _sudo(cmd, **kwargs):
+def sudo(cmd, **kwargs):
     if os.geteuid() != 0:
         cmd = ['sudo'] + cmd
     p = _popen(cmd, **kwargs)
     return p.wait()
+
+#############################################################################
+
+class ExecuteError(Exception):
+    def __init__(self, path, ret):
+        self.path = path
+        self.ret = ret
+
+    def __str__(self):
+        return "%s returned %d" % (self.path, self.ret)
 
 #############################################################################
 
@@ -51,13 +60,13 @@ class Execute:
         if self.chroot:
             cmd = ['chroot', self.chroot, '/bin/sh', '-c',
                    'cd %s; exec %s' % (os.getcwd(), ' '.join(cmd))]
-        return _sudo(cmd, **kwargs)
+        return sudo(cmd, **kwargs)
 
     def execute_raw(self, cmd, **kwargs):
         if self.chroot:
             cmd = ['chroot', self.chroot, '/bin/sh', '-c',
                    'cd %s; exec %s' % (os.getcwd(), ' '.join(cmd))]
-        return _sudo_raw(cmd, **kwargs)
+        return sudo_raw(cmd, **kwargs)
 
     def __exit__(self, type, value, tb):
         pass
@@ -82,13 +91,13 @@ class ExecuteJail(Execute):
     def bind(self, d):
         assert d[0] == '/'
         m = os.path.join(self.chroot, d[1:])
-        _sudo(['mount', '-o', 'bind', d, m])
+        sudo(['mount', '-o', 'bind', d, m])
         self._binded_dirs.append(d)
 
     def unbind(self, d):
         assert d[0] == '/'
         m = os.path.join(self.chroot, d[1:])
-        _sudo(['umount', '-l', m])
+        sudo(['umount', '-l', m])
         self._binded_dirs.remove(d)
 
     def open(self):
@@ -113,14 +122,14 @@ class ExecuteJail(Execute):
             self._rmdirs.append(self.chroot)
 
         # mark our scratch area as jailed ..
-        _sudo(['touch', os.path.join(self.scratch, '.JAILED')])
+        sudo(['touch', os.path.join(self.scratch, '.JAILED')])
 
         mount_dirs = '%s=rw:%s=ro' % \
             (os.path.abspath(self.scratch), os.path.abspath(self.root))
         mount_point = os.path.abspath(self.chroot)
 
-        _sudo(['unionfs-fuse', '-o', 'cow,allow_other,use_ino,suid,' + \
-                   'dev,nonempty,max_files=32768', mount_dirs, mount_point])
+        sudo(['unionfs-fuse', '-o', 'cow,allow_other,use_ino,suid,' + \
+                  'dev,nonempty,max_files=32768', mount_dirs, mount_point])
 
         self.bind('/proc')
         self.bind('/dev')
@@ -135,10 +144,10 @@ class ExecuteJail(Execute):
         for d in list(self._binded_dirs):
             self.unbind(d)
 
-        _sudo('fusermount -z -u'.split() + [self.chroot])
+        sudo('fusermount -z -u'.split() + [self.chroot])
 
         for d in self._rmdirs:
-            _sudo(['rm', '-rf', d])
+            sudo(['rm', '-rf', d])
 
         self.mounted = False
 
