@@ -287,7 +287,7 @@ def save_session(logfile, events):
 
     f.close()
 
-def save_modify_log(graph, bookmarks, injects, cutoff, replace, output):
+def save_modify_log(graph, output, bookmarks, injects, cutoff, replace):
     """Generate and save a modified scribe log for a race"""
     event_iter = save_events(graph, bookmarks, injects, cutoff, replace)
     save_session(output, event_iter)

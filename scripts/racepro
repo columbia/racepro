@@ -3,74 +3,12 @@
 import os
 import sys
 import pdb
-import random
-import struct
 import argparse
-import subprocess
 import logging
 import networkx
-import pygraphviz
 from itertools import *
 
-import scribe
 from racepro import *
-
-##############################################################################
-
-def show_graph(args):
-
-    def do_filter_graph(graph):
-
-        def convert(s):
-            pid = int(s[0])
-            s, e = map(int, s[1].split(':')) if len(s) > 1 else (0, sys.maxint)
-            return (pid, (s, e))
-
-        pids = dict(map(convert, [s.split('=') for s in args.pids.split(',')]))
-
-        for s, t in graph.edges_iter():
-            ps, ns = map(int, s.split(':'))
-            pt, nt = map(int, t.split(':'))
-            if (ps not in pids or ns < pids[ps][0] or ns > pids[ps][1] or
-                pt not in pids or nt < pids[pt][0] or nt > pids[pt][1]):
-                graph.remove_edge(s, t)
-        for n in graph.nodes_iter():
-            pn, nn = map(int, n.split(':'))
-            if pn not in pids or nn < pids[pn][0] or nn > pids[pn][1]:
-                graph.remove_node(n)
-
-    def diet_graph(graph):
-        for n in graph.nodes():
-            if graph.in_degree(n) != 1 or graph.out_degree(n) != 1:
-                continue
-            t = graph.successors(n)[0]
-            s = graph.predecessors(n)[0]
-            if s.split(':')[0] != n.split(':')[0]:
-                continue
-            if n.split(':')[0] != t.split(':')[0]:
-                continue
-            graph.remove_edge(s, n)
-            graph.remove_edge(n, t)
-            graph.remove_node(n)
-            graph.add_edge(s, t)
-
-    def do_show_graph(graph, output):
-        for node in graph.nodes():
-            print(node)
-        networkx.write_dot(graph, output + '.dot')
-        if args.pdf:
-            g = pygraphviz.AGraph(output + '.dot')
-            g.layout(prog='dot')
-            g.draw(output + '.pdf')
-
-    graph = ExecutionGraph(load_events(args.logfile))
-    if args.pids:
-        do_filter_graph(graph)
-    if args.thin:
-        diet_graph(graph)
-    do_show_graph(graph, args.outfile + '.hb')
-
-    return 0
 
 ##############################################################################
 def show_syscalls(args):
@@ -83,240 +21,87 @@ def show_syscalls(args):
     return 0
 
 ##############################################################################
-
 def show_races(args):
     graph = ExecutionGraph(load_events(args.logfile))
     logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
 
-    ######################################################################
-    # step 1: Find pairwise races;
-    # For each race generate a (bookmarks, injects, cutoff)
-    # tuple. Finally, use those to write out a modified log.
+    def output_races(race_list, desc, count, limit):
+        print('-' * 79)
+        print('%s' % desc)
+        print('  found %d potential races' % len(race_list))
+        logging.debug('Race list %s' % race_list)
+        print('-' * 79)
+        for race in race_list:
+            if count >= limit:
+                break;
+            if race.prepare(graph):
+                print('RACE %2d: %s' % (count + 1, race))
+                race.output(graph, args.outfile + '.' + str(count + 1))
+                count += 1
+        return count
 
-    all_races, sys_races = races.find_resource_races(graph)
+    total = 0
+    count = 0
 
-    print('-' * 75)
-    print('REGULAR RACES')
-    print('Found %d potential races (%d after duplicates removal)' %
-          (len(all_races), len(sys_races)))
+    # step 1: find resource races
+    race_list = RaceList(graph, RaceResource.find_races)
+    race_list = sorted(race_list, reverse=True, key=lambda race: race.rank)
+    total += len(race_list)
+    count = output_races(race_list, 'RESOURCE RACES', count, args.count)
 
-    sys_races = sorted(sys_races, reverse=True,
-                       key=lambda race: rank_races_of_resources(graph, race))
-    logging.debug('sorted race list %s' % sys_races)
-
-    print('-' * 75)
-
-    n_race = 0
-    n_fail = 0
-    for (node1, node2) in sys_races:
-        ret = races.prep_resource_race(graph, node1, node2, n_race)
-        if not ret:
-            n_fail += 1
-            continue
-        n_race += 1
-
-        (bookmarks, injects, cutoff, replace) = ret
-        output = args.outfile + '.' + str(n_race) + '.log'
-        save_modify_log(graph, bookmarks, injects, cutoff, replace, output)
-
-        if n_race == args.count:
-            break;
-
-    ######################################################################
-    # step 2: Find exit-exit-wait races, Then for each race try to
-    # generate a (bookmarks, injects, cutoff) tuple. Finally, use
-    # those to write out a modified log.
-
-    if(args.no_exit_races):
-        exit_races = list()
+    # step 2: find exit-exit-wait races
+    if args.no_exit_races:
+        race_list = list()
     else:
-        exit_races = races.find_exitwait_races(graph)
+        race_list = RaceList(graph, RaceExitWait.find_races)
+    total += len(race_list)
+    count = output_races(race_list, 'EXIT-WAIT RACES', count, args.count)
 
-    print('-' * 75)
-    print('EXIT-WAIT RACES')
-    print('Found %d potential races' % len(exit_races))
-
-    print('-' * 75)
-
-    for (exit1, exit2, wait) in exit_races:
-        ret = races.prep_exitwait_race(graph, exit1, exit2, wait, n_race)
-        if not ret:
-            n_fail += 1
-            continue
-        n_race += 1
-
-        (bookmarks, injects, cutoff, replace) = ret
-        output = args.outfile + '.' + str(n_race) + '.log'
-        save_modify_log(graph, bookmarks, injects, cutoff, replace, output)
-
-        if n_race == args.count:
-            break
-
-    ######################################################################
-    # step 3: Find signal races, Then for each race try to generate a
-    # (bookmarks, injects, cutoff) tuple. Finally, use those to write
-    # out a modified log.
-
-    if(args.no_signal_races):
-        signal_races = list()
+    # step 3: find signal races
+    if args.no_signal_races:
+        race_list = list()
     else:
-        signal_races = races.find_signal_races(graph)
+        race_list = RaceList(graph, RaceSignal.find_races)
+    total += len(race_list)
+    count = output_races(race_list, 'SIGNAL RACES', count, args.count)
 
-    print('-' * 75)
-    print('SIGNAL RACES')
-    print('Found %d potential races' % len(signal_races))
+    # step 4: statistics
+    print('Generated %d logs for races out of %d candidates' % (count, total))
+    print('-' * 79)
 
-    if args.random:
-        r = random.sample(signal_races, len(signal_races))
-        print('Random sample to generate up to %d races:' % (args.count))
-    else:
-        r = signal_races
-
-    print('-' * 75)
-
-    for signal in signal_races:
-        ret = races.prep_signal_race(graph, signal, n_race)
-        if not ret:
-            n_fail += 1
-            continue
-        n_race += 1
-
-        (bookmarks, injects, cutoff, replace) = ret
-        output = args.outfile + '.' + str(n_race) + '.log'
-        save_modify_log(graph, bookmarks, injects, cutoff, replace, output)
-
-        if n_race == args.count:
-            break
-
-    ######################################################################
-    # step 3: Statistics ..
-
-    print('-' * 75)
-    print('Generated %d logs out of total %d races examined' %
-          (n_race, n_race + n_fail))
-    print('-' * 75)
-
-    return n_race
+    return count
 
 ##############################################################################
-
-def test_races(args):
-    cmd_replay = 'replay -l 5 -c %d' % int(args.timeout)
-    cmd_suffix = ' > /dev/null 2>&1' if args.silent else ''
-
-    if args.detect:
-        total = show_races(args)
-    else:
-        total = -1
-
-    n = 0
-    while True:
-        n += 1
-        if total >= 0 and n > total:
-            break
-        logfile = '%s.%d.log' % (args.outfile, n)
-        if not os.access(logfile, os.R_OK):
-            break
-
-        if args.script_pre:
-            cmd = args.script_pre + cmd_suffix
-            r = execute.sudo(cmd.split())
-            if r > 0:
-                print('RACE %d: bad exit code %d from pre-script' % (n, r))
-                continue
-
-        cmd = '%s %s %s' % (cmd_replay, logfile, cmd_suffix)
-        r = execute.sudo(cmd.split())
-        if r == 35:
-            print('REPLAY %2d: deadlock (exit %d)' % (n, r))
-        if r > 0:
-            print('REPLAY %2d: failed (exit %d)' % (n, r))
-            if args.exitiffail:
-                return -1 
-        else:
-            print('REPLAY %2d: completed' % n)
-
-        if r == 0 and args.script_test:
-            cmd = args.script_test + cmd_suffix
-            r = execute.sudo(cmd.split())
-            if r == 2:
-                print('    BUG PRODUCED')
-            elif r > 0:
-                print('RACE %d: bad exit code %d from test-script' % (n, r))
-            else:
-                print('    BUG not triggered')
-        elif r == 0:
-            print('    BUG only replayed')
-
-        if args.script_post:
-            cmd = args.script_post + cmd_suffix
-            r = _sudo(cmd.split())
-            if r > 0:
-                print('RACE %d: nad exit code %d from post-script' % (n, r))
-
-    return 0
-
-##############################################################################
-
 def show_toctou(args):
     graph = ExecutionGraph(load_events(args.logfile))
     logging.debug('graph: %s' % networkx.convert.to_edgelist(graph))
 
-    ######################################################################
-    # 1. Find toctou races
+    total = 0
+    count = 1
 
-    toctou_races = races.find_toctou_races(graph)
+    # step 1: find toctou races
+    race_list = RaceList(graph, RaceToctou.find_races)
+    total += len(race_list)
+    count = output_races(race_list, 'TOCTOU RACES', count, args.count)
 
-    n_toctou = 0
-    n_fail = 0
-    for pattern, races in toctou_races.iteritems():
-        if len(races) == 0:
-            continue
+    # step 2: statistics
+    print('Generated %d logs for races of of %d candidates' % (count, total))
+    print('-' * 79)
 
-        print('-' * 75)
-        print('TOCTOU %s:' % pattern.desc)
-        print('Found %d potential races' % len(races))
-
-        for (sys1, sys2, attack) in races:
-            ret = races.prep_toctou_race(graph, sys1, sys2, attack, n_toctou)
-            if not ret:
-                n_fail += 1
-                continue
-            n_toctou += 1
-
-            (bookmarks, injects, cutoff, replace) = ret
-            output = args.outfile + '.' + str(n_toctou) + '.log'
-            save_modify_log(graph, bookmarks, injects, cutoff, replace, output)
-
-            output_toctou = args.outfile + '.' + str(n_toctou) + '.toctou'
-            with open(output_toctou, 'w') as file_toctou:
-                file_toctou.write('%s\n' % attack)
-
-    ######################################################################
-    # 2. Stats
-
-    print('-' * 75)
-    print('Generated %d potential toctou' % (n_toctou))
-    print('-' * 75)
-
-    return n_toctou
+    return count
 
 ##########################################################################
 
-
 parser_io = argparse.ArgumentParser(add_help=False)
-parser_io.add_argument('-i', '--input', dest='logfile',
-                       metavar='FILE', required=True)
-parser_io.add_argument('-o', '--output', dest='outfile',
-                       metavar='FILE', required=True)
+parser_io.add_argument('logfile', metavar='INPUT',
+                       help='File name of input log')
+parser_io.add_argument('-o', '--output', dest='outfile', metavar='PREFIX',
+                       help='Prefix for output files')
 
 parser_races = argparse.ArgumentParser(add_help=False)
 parser_races.add_argument('-c', '--count', dest='count',
                           metavar='COUNT', type=int, default=1000,
                           help='Limit results to COUNT races')
-parser_races.add_argument('-r', '--random', dest='random',
-                          action='store_true', default=False,
-                          help='List races in random order')
 parser_races.add_argument('--no-depend', dest='nodepend',
                           action='store_true', default=False,
                           help='Disregard happened-before dependencies')
@@ -338,19 +123,6 @@ parser.add_argument('-v', dest='verbose',
 
 subparsers = parser.add_subparsers(title='subcommands')
 
-parser_show_graph = subparsers.add_parser(
-    'show-graph', parents=[parser_io])
-parser_show_graph.set_defaults(func=show_graph)
-parser_show_graph.add_argument('-t', '--thin', dest='thin',
-                               action='store_true',
-                               help='Thin mode (minimal syscalls graph)')
-parser_show_graph.add_argument('-p', '--pids', dest='pids',
-                               metavar='PID[,PID...]', default='',
-                               help='Pid(s) to include in the graph')
-parser_show_graph.add_argument('--pdf', dest='pdf',
-                               action='store_true',
-                               help='Output graph in PDF format')
-
 parser_show_syscalls = subparsers.add_parser(
     'show-syscalls', parents=[parser_io])
 parser_show_syscalls.set_defaults(func=show_syscalls)
@@ -359,35 +131,9 @@ parser_show_races = subparsers.add_parser(
     'show-races', parents=[parser_io, parser_races])
 parser_show_races.set_defaults(func=show_races)
 
-parser_test_races = subparsers.add_parser(
-    'test-races', parents=[parser_io, parser_races])
-parser_test_races.set_defaults(func=test_races)
-parser_test_races.add_argument('--script-pre', dest='script_pre',
-                               default=None,
-                               help='Script to run before test')
-parser_test_races.add_argument('--timeout', dest='timeout',
-                               default=1,
-                               help='Log replay timeout')
-parser_test_races.add_argument('--script-post', dest='script_post',
-                               default=None,
-                               help='Script to run after test')
-parser_test_races.add_argument('--script-test', dest='script_test',
-                               default=None,
-                               help='Script to check success of test')
-parser_test_races.add_argument('-s', '--silent', dest='silent',
-                               action='store_true', default=False,
-                               help='Hide scribe/scripts/tests output')
-parser_test_races.add_argument('-d', '--detect', dest='detect',
-                               action='store_true', default=False,
-                               help='Detect races and generate logs')
-parser_test_races.add_argument('--exit-on-failed-replay', dest='exitiffail',
-                               action='store_true', default=False,
-                               help='Exit when there is a failed replay')
-
 parser_show_toctou = subparsers.add_parser(
     'show-toctou', parents=[parser_io])
 parser_show_toctou.set_defaults(func=show_toctou)
-
 
 args = parser.parse_args()
 
@@ -395,6 +141,9 @@ log = logging.ERROR
 if args.verbose: log = logging.INFO
 if args.debug: log = logging.DEBUG
 logging.basicConfig(level=log, stream=sys.stdout)
+
+if not args.outfile:
+    args.outfile = os.path.splitext(args.logfile)[0]
 
 ret = args.func(args)
 exit(0 if ret >= 0 else -ret)
