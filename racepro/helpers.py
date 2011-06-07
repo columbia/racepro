@@ -5,6 +5,7 @@ import logging
 import scribe
 from racepro import *
 
+###############################################################################
 def parse_syscall(session, i):
     """Parse a syscall event"""
 
@@ -42,8 +43,7 @@ def parse_syscall(session, i):
                    args[0], args[1], args[2]))
     out.write(' = %ld\n' % (ret))
 
-################################################################################
-
+###############################################################################
 def load_events(logfile):
     """Load a scribe log from logfile"""
     try:
@@ -59,11 +59,11 @@ def load_events(logfile):
 
     return events
 
-def save_events(graph,
-                bookmarks = None,
-                injects = None,
-                cutoff = None,
-                replace = None):
+def modify_events(graph,
+                  bookmarks = None,
+                  injects = None,
+                  cutoff = None,
+                  replace = None):
     """Iterator that returns the (perhaps modified) scribe log.
 
     Write out the scribe log while potentially modifying it. Two
@@ -240,14 +240,15 @@ def save_events(graph,
             yield session.Event(scribe.EventPid(proc.pid))
             yield session.Event(scribe.EventQueueEof())
 
-################################################################################
-
-# YJF: remove holes in serial number sequence.
+##############################################################################
 def condense_events(events):
+    """Remove holes in serial number sequence"""
+
     # map from resource id to the previou event's (serial, seq, write_access)
     # serial: serial number
     # seq: sequence number ignoring access type
     # write_access: non zero if the event is a write
+
     serials = dict()  
     for e in events:
         if e.is_a(scribe.EventResourceLockExtra):
@@ -268,8 +269,7 @@ def condense_events(events):
                 e = session.Event(ee)
         yield e
 
-################################################################################
-
+###############################################################################
 def load_session(logfile):
     events = load_events(logfile)
     return Session(events)
@@ -287,8 +287,9 @@ def save_session(logfile, events):
 
     f.close()
 
+###############################################################################
 def save_modify_log(graph, output, bookmarks, injects, cutoff, replace):
     """Generate and save a modified scribe log for a race"""
-    event_iter = save_events(graph, bookmarks, injects, cutoff, replace)
+    event_iter = modify_events(graph, bookmarks, injects, cutoff, replace)
     save_session(output, event_iter)
 
