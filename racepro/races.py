@@ -18,10 +18,10 @@ class Race:
         self.replace = None
 
     def __str__(self):
-        raise NotImplemetnedError('Subclasses should implement this')
+        raise NotImplementedError('Subclasses should implement this')
 
     def prepare(self, graph):
-        raise NotImplemetnedError('Subclasses should implement this')
+        raise NotImplementedError('Subclasses should implement this')
 
     def rank(self):
         return 0
@@ -300,7 +300,7 @@ class RaceSignal(Race):
 
     @staticmethod
     def find_races(graph):
-        """Return list of all exit-exit-wait races in @graph"""
+        """Return list of all signal races in @graph"""
 
         return [RaceSignal(signal) for signal in graph.signals]
 
@@ -461,9 +461,6 @@ class RaceExitWait(Race):
             else:
                 exits_by_reaper[wait_node.proc].append(node)
 
-        for exits in exits_by_reaper.values():
-            exits.sort(key=lambda node: node.vclock)
-
         races = list()
 
         # find potential races: for each exit event, search ahead for
@@ -471,18 +468,18 @@ class RaceExitWait(Race):
         # under the same reaper)
 
         for proc in exits_by_reaper:
-            for n, exit1 in enumerate(exits_by_reaper[proc]):
-                for exit2 in exits_by_reaper[proc][n + 1:]:
-                    if exit1.vclock.race(exit2.vclock):
-                        wait1 = reaper_wait_of[exit1.proc]
-                        wait2 = reaper_wait_of[exit2.proc]
-                        if wait1.vclock.before(wait2.vclock):
-                            races.append((exit2, exit1, wait1))
-                        else:
-                            races.append((exit1, exit2, wait2))
+            for exit1, exit2, in combinations(exits_by_reaper[proc], 2):
+                if exit1.vclock.race(exit2.vclock):
+                    wait1 = reaper_wait_of[exit1.proc]
+                    wait2 = reaper_wait_of[exit2.proc]
+                    assert not wait1.vclock.race(wait2.vclock)
+                    if wait1.vclock.before(wait2.vclock):
+                        races.append((exit2, exit1, wait1))
+                    else:
+                        races.append((exit1, exit2, wait2))
 
         return [RaceExitWait(exit1, exit2, wait)
-                for exti1, exit2, wait in races]
+                for exit1, exit2, wait in races]
 
 ##############################################################################
 # races of TOCTOU
@@ -591,3 +588,66 @@ def explain_toctou (pattern_name):
         if pattern.desc == pattern_name:
             return pattern.detail
     return 'Unknown pattern'
+
+##############################################################################
+def find_show_races(graph, args):
+    total = 0
+    count = 0
+
+    def output_races(race_list, desc, count, limit):
+        print('-' * 79)
+        print('%s' % desc)
+        print('  found %d potential races' % len(race_list))
+        logging.debug('Race list %s' % race_list)
+        print('-' * 79)
+        for race in race_list:
+            if count >= limit:
+                break;
+            if race.prepare(graph):
+                print('RACE %2d: %s' % (count + 1, race))
+                race.output(graph, args.outfile + '.' + str(count + 1))
+                count += 1
+        return count
+
+    # step 1: find resource races
+    race_list = RaceList(graph, RaceResource.find_races)
+    race_list = sorted(race_list, reverse=True, key=lambda race: race.rank)
+    total += len(race_list)
+    count = output_races(race_list, 'RESOURCE RACES', count, args.count)
+
+    # step 2: find exit-exit-wait races
+    if args.no_exit_races:
+        race_list = list()
+    else:
+        race_list = RaceList(graph, RaceExitWait.find_races)
+    total += len(race_list)
+    count = output_races(race_list, 'EXIT-WAIT RACES', count, args.count)
+
+    # step 3: find signal races
+    if args.no_signal_races:
+        race_list = list()
+    else:
+        race_list = RaceList(graph, RaceSignal.find_races)
+    total += len(race_list)
+    count = output_races(race_list, 'SIGNAL RACES', count, args.count)
+
+    # step 4: statistics
+    print('Generated %d logs for races out of %d candidates' % (count, total))
+    print('-' * 79)
+
+    return count
+
+def find_show_toctou(graph, args):
+    total = 0
+    count = 1
+
+    # step 1: find toctou races
+    race_list = RaceList(graph, RaceToctou.find_races)
+    total += len(race_list)
+    count = output_races(race_list, 'TOCTOU RACES', count, args.count)
+
+    # step 2: statistics
+    print('Generated %d logs for races of of %d candidates' % (count, total))
+    print('-' * 79)
+
+    return count
