@@ -1,0 +1,24 @@
+===============================================================================
+FIXES/BUGS
+
+- the test 'racetest -kT toctou' does not produce or find any races
+
+
+===============================================================================
+LOGIC/ALGORITMS
+
+- exit-exit-wait: consider 1 forks 2 forks 3 forks 4, then 2,3,4 exit,
+  and collected in that order by 1. the crosscut for the 1-2-4 race is
+  1 pre-wait, 2,4 pre-exit, and 3 post fork. but then, 4 is not yet
+  reparented to 1, so cannot be waited-for, so the race is skipped.
+  => solve: add HB due to reparenting ?
+
+
+===============================================================================
+REFACTOR/REWRITE
+
+- introduce class "mutator" to describe changes to the log file
+ (bookmarks, injecst, etc)
+
+
+
