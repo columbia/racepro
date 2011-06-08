@@ -1,11 +1,15 @@
+import networkx
 import logging
 import pdb
 
 from itertools import *
 
+import unistd
 import scribe
+import scribewrap
 import toctou
-from racepro import *
+from execgraph import NodeLoc
+from helpers import *
 
 ##############################################################################
 
@@ -571,50 +575,35 @@ class RaceToctou(Race):
 
         return [RaceResource(s1, s2, p, a) for s1, s2, p, a in nodes]
 
-def attack_toctou (pattern_name, args):
-    for pattern in toctou.patterns:
-        if pattern.desc == pattern_name:
-            print >> sys.stderr, "perform %s attack..." % pattern.desc
-            pattern.attack(args)
-            break
-
-def test_toctou (pattern_name, args):
-    for pattern in toctou.patterns:
-        if pattern.desc == pattern_name:
-            print >> sys.stderr, "perform %s test..." % pattern.desc
-            pattern.test(args)
-
-def explain_toctou (pattern_name):
-    for pattern in toctou.patterns:
-        if pattern.desc == pattern_name:
-            return pattern.detail
-    return 'Unknown pattern'
-
 ##############################################################################
+
+def output_races(race_list, path, desc, count, limit):
+    print('-' * 79)
+    print('%s' % desc)
+    print('  found %d potential races' % len(race_list))
+    print('-' * 79)
+
+    logging.debug('Race list %s' % race_list)
+
+    for race in race_list:
+        if count >= limit:
+            break;
+        if race.prepare(race_list.graph):
+            count += 1
+            print('RACE %2d: %s' % (count, race))
+            race.output(race_list.graph, path + '.' + str(count))
+
+    return count
+
 def find_show_races(graph, args):
     total = 0
     count = 0
 
-    def output_races(race_list, desc, count, limit):
-        print('-' * 79)
-        print('%s' % desc)
-        print('  found %d potential races' % len(race_list))
-        logging.debug('Race list %s' % race_list)
-        print('-' * 79)
-        for race in race_list:
-            if count >= limit:
-                break;
-            if race.prepare(graph):
-                print('RACE %2d: %s' % (count + 1, race))
-                race.output(graph, args.path + '.' + str(count + 1))
-                count += 1
-        return count
-
     # step 1: find resource races
     race_list = RaceList(graph, RaceResource.find_races)
-    race_list = sorted(race_list, reverse=True, key=lambda race: race.rank)
+    race_list._races.sort(reverse=True, key=lambda race: race.rank)
     total += len(race_list)
-    count = output_races(race_list, 'RESOURCE RACES', count, args.count)
+    count = output_races(race_list, args.path, 'RESOURCE', count, args.count)
     races = race_list
 
     # step 2: find exit-exit-wait races
@@ -623,7 +612,7 @@ def find_show_races(graph, args):
     else:
         race_list = RaceList(graph, RaceExitWait.find_races)
     total += len(race_list)
-    count = output_races(race_list, 'EXIT-WAIT RACES', count, args.count)
+    count = output_races(race_list, args.path, 'EXIT-WAIT', count, args.count)
     races.extend(race_list)
 
     # step 3: find signal races
@@ -632,7 +621,7 @@ def find_show_races(graph, args):
     else:
         race_list = RaceList(graph, RaceSignal.find_races)
     total += len(race_list)
-    count = output_races(race_list, 'SIGNAL RACES', count, args.count)
+    count = output_races(race_list, args.path, 'SIGNAL', count, args.count)
     races.extend(race_list)
 
     # step 4: statistics
@@ -641,14 +630,63 @@ def find_show_races(graph, args):
 
     return races
 
+def replay_for_toctou(graph, args):
+
+    toctou_syscalls = set([
+        unistd.NR_open,
+        unistd.NR_access,
+        unistd.NR_stat,
+        unistd.NR_lstat
+        ])
+
+    bookmarks = list()
+
+    for node in networkx.algorithms.dag.topological_sort(graph):
+        if not node.is_a(scribe.EventSyscallExtra):
+            continue
+        if node.nr in toctou_syscalls:
+            bookmarks.append(dict({node.proc: NodeLoc(node, 'after')}))
+
+    out = args.path + '.toctou.log'
+    save_modify_log(graph, out, bookmarks, None, None, None)
+
+    def toctou_bookmark_cb(**kargs):
+        bookmarks = kargs['bookmarks']
+        exe = kargs['exe']
+        logfile = kargs['logfile']
+        scribe = kargs['scribe']
+        id = kargs['id']
+        npr = kargs['npr']
+
+        assert npr == 1
+
+        for nl in bookmarks[id].values():
+            node = nl.node
+
+            # CHIA-CHE - this is where you call you handler
+            # @exe is the execution environment
+            # @node is the node/event
+            # you'll need to add the info to node
+
+        return True
+
+    bookmark_cb = scribewrap.Callback(toctou_bookmark_cb, bookmarks=bookmarks)
+
+    print('ABOUT TO REPLAY TOCTOU')
+    if not scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb):
+        raise execute.ExecuteError('toctou replay', ret)
+
 def find_show_toctou(graph, args):
     total = 0
-    count = 1
+    count = 0
+
+    # step 0: controlled replay to get extra info on special syscalls
+    replay_for_toctou(graph, args)
 
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
     total += len(race_list)
-    count = output_races(race_list, 'TOCTOU RACES', count, args.count)
+    count = output_races(race_list, args.path, 'TOCTOU', count, args.count)
 
     # step 2: statistics
     print('Generated %d logs for races of of %d candidates' % (count, total))

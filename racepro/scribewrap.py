@@ -35,9 +35,9 @@ class Callback:
         self.function = function
         self.private = private
 
-    def call(self, **args):
-        newargs = dict(self.private.items(), args.items())
-        return self.function(**newargs)
+    def call(self, **kargs):
+        newkargs = dict(self.private.items() + kargs.items())
+        return self.function(**newkargs)
 
 def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
                     deadlock=None, backtrace=2,
@@ -59,8 +59,10 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
     class RaceproContext(scribe.Context):
         def on_bookmark(self, id, npr):
             if bookmark_cb:
-                bookmark_cb.call(self, id, npr)
+                resume = bookmark_cb.call(scribe=self, id=id, npr=npr)
             else:
+                resume = True
+            if resume:
                 self.resume()
 
     context = RaceproContext(logfile,
@@ -172,7 +174,7 @@ def scribe_record(args, logfile=None,
 
         return success
 
-def scribe_replay(args, logfile=None, verbose='', on_bookmark=None,
+def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
                   pre_replay=def_pre_script,
                   post_replay=def_post_script,
                   test_replay=None):
@@ -180,10 +182,9 @@ def scribe_replay(args, logfile=None, verbose='', on_bookmark=None,
         logfile = args.path + '.log'
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
-        if on_bookmark:
-            bookmark_cb = Callback(on_bookmark, exe, logfile)
-        else:
-            bookmark_cb = None
+        if bookmark_cb:
+            bookmark_cb.private['exe'] = exe
+            bookmark_cb.private['logfile'] = logfile
 
         if pre_replay:
             logging.info('    running pre-replay callback...')
@@ -228,7 +229,7 @@ def scribe_replay(args, logfile=None, verbose='', on_bookmark=None,
                 print(verbose + 'BUG REPRODUCED')
             else:
                 print(verbose + 'BUG not triggered')
-        elif success:
+        elif success and verbose:
             print(verbose + 'BUG replayed but not tested')
 
         if args.max_runtime:

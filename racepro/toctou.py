@@ -205,3 +205,26 @@ Pattern(sys1=SYS_FileCreate, sys2=SYS_FileWrite,
         detail='\
 File Creation System Calls x File Writing System Calls, Attacked by Link \
 Creation System Calls')
+
+########################################################################
+# helpers to attack, test, explain
+
+def attack_toctou (pattern_name, args):
+    for pattern in toctou.patterns:
+        if pattern.desc == pattern_name:
+            print >> sys.stderr, "perform %s attack..." % pattern.desc
+            pattern.attack(args)
+            break
+
+def test_toctou (pattern_name, args):
+    for pattern in toctou.patterns:
+        if pattern.desc == pattern_name:
+            print >> sys.stderr, "perform %s test..." % pattern.desc
+            pattern.test(args)
+
+def explain_toctou (pattern_name):
+    for pattern in toctou.patterns:
+        if pattern.desc == pattern_name:
+            return pattern.detail
+    return 'Unknown pattern'
+

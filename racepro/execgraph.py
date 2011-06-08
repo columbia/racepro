@@ -1,12 +1,13 @@
-from racepro import unistd
 from vectorclock import *
 from session import *
 from itertools import *
 from collections import *
 import networkx
-import scribe
 import logging
 import sys
+
+import scribe
+from racepro import unistd
 
 class Node(Event):
     def __init__(self, graph, scribe_event):

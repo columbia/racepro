@@ -13,33 +13,9 @@ import scribewrap
 import eventswrap
 import execgraph
 import execute
-import races
+import racecore
 
 ##############################################################################
-
-def _handle_toctou(exe, string):
-    pid = os.fork()
-    if pid == 0:
-        try:
-            exe.prepare()
-            args = string.split()
-            assert args[0] == 'attack'
-            races.attack_toctou(args[1], args[2:])
-        except:
-            pass
-        os._exit(0)
-    else:
-        os.waitpid(pid, 0)
-
-def on_bookmark_toctou(exe, logfile, scribe, id, npr):
-    try:
-        log = re.sub('\.log$', '.toctou', logfile.name)
-        for line in open(log, 'r').readlines():
-            _handle_toctou(exe, line)
-            scribe.stop()
-    except:
-        traceback.print_exc(file=sys.stdout)
-
 def replay_test_script(exe, args):
     if args.toctou:
         logging.info('    running generic toctou script...')
@@ -56,10 +32,35 @@ def replay_test_script(exe, args):
         return False
 
 def _testlist(args, races):
+
+    def toctou_handle(exe, string):
+        pid = os.fork()
+        if pid == 0:
+            try:
+                exe.prepare()
+                args = string.split()
+                assert args[0] == 'attack'
+                toctou.attack_toctou(args[1], args[2:])
+            except:
+                pass
+            os._exit(0)
+        else:
+            os.waitpid(pid, 0)
+
+    def toctou_bookmark_cb(exe, logfile, scribe, id, npr):
+        try:
+            log = re.sub('\.log$', '.toctou', logfile.name)
+            for line in open(log, 'r').readlines():
+                toctou_handle(exe, line)
+            scribe.stop()
+        except:
+            traceback.print_exc(file=sys.stdout)
+        return False
+
     if args.toctou:
-        on_bookmark = on_bookmark_toctou
+        bookmark_cb = scribewrap.Callback(toctou_bookmark_cb)
     else:
-        on_bookmark = None
+        bookmark_cb = None
 
     for n in races:
         t_start = datetime.datetime.now()
@@ -69,7 +70,7 @@ def _testlist(args, races):
         verbose = 'RACE %d: ' % n
         ret = scribewrap.scribe_replay(args, logfile, verbose,
                                        test_replay=replay_test_script,
-                                       on_bookmark=on_bookmark)
+                                       bookmark_cb=bookmark_cb)
         t_end = datetime.datetime.now()
         dt = t_end - t_start
         logging.info('    time:  %.2f' %
@@ -88,9 +89,9 @@ def _findraces(args, opts):
     events = eventswrap.load_events(args.logfile)
     graph = execgraph.ExecutionGraph(events)
     if args.toctou:
-        races.find_show_toctou(graph, args)
+        racecore.find_show_toctou(graph, args)
     else:
-        races.find_show_races(graph, args)
+        racecore.find_show_races(graph, args)
     return True
 
 def do_one_test(args, t_name, t_exec):
