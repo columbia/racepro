@@ -10,6 +10,8 @@ import traceback
 import pdb
 
 import scribewrap
+import eventswrap
+import execgraph
 import execute
 import races
 
@@ -81,16 +83,14 @@ def _testraces(args):
     return True
 
 def _findraces(args, opts):
+    args.logfile = args.path + '.log'
+
+    events = eventswrap.load_events(args.logfile)
+    graph = execgraph.ExecutionGraph(events)
     if args.toctou:
-        cmd = 'racepro %s show-toctou -i %s -o %s' % \
-            (opts, args.path + '.log', args.path)
+        races.find_show_toctou(graph, args)
     else:
-        cmd = 'racepro %s show-races -i %s -o %s' % \
-            (opts, args.path + '.log', args.path)
-    ret = execute.sudo(cmd.split())
-    if ret != 0:
-        logging.error('failed to generate races')
-        return False
+        races.find_show_races(graph, args)
     return True
 
 def do_one_test(args, t_name, t_exec):
@@ -225,6 +225,8 @@ def uninitialized(args):
     if 'max_runtime' not in args: args.max_runtime = None
     if 'archive' not in args: args.archive = False
     if 'netns' not in args: args.netns = False
+    if 'count' not in args: args.count = 5000
+    if 'keepgoing' not in args: args.keepgoing = False
     if 'outdir' not in args: args.outdir = None
     if 'redirect' not in args: args.redirect = None
     if 'root' not in args: args.root = None

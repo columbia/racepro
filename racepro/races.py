@@ -47,6 +47,9 @@ class RaceList:
     def __getitem__(self, index):
         return self._races[index]
 
+    def extend(self, race_list):
+        self._races.extend(race_list._races)
+
 ##############################################################################
 
 def _split_events_per_proc(resource, in_syscall=False):
@@ -217,7 +220,7 @@ class RaceResource(Race):
                 nodes.add((node1.syscall, node2.syscall))
                 logging.debug('\tadding %s -> %s to races' % (node1, node2))
 
-        return [RaceResource(node1, node2) for node1, node2 in nodes]
+        return [RaceResource(n1, n2) for n1, n2 in nodes]
 
 ##############################################################################
 # races of SIGNALS
@@ -302,7 +305,7 @@ class RaceSignal(Race):
     def find_races(graph):
         """Return list of all signal races in @graph"""
 
-        return [RaceSignal(signal) for signal in graph.signals]
+        return [RaceSignal(s) for s in graph.signals]
 
 ##############################################################################
 # races of EXIT-WAIT
@@ -478,8 +481,7 @@ class RaceExitWait(Race):
                     else:
                         races.append((exit1, exit2, wait2))
 
-        return [RaceExitWait(exit1, exit2, wait)
-                for exit1, exit2, wait in races]
+        return [RaceExitWait(e1, e2, w) for e1, e2, w in races]
 
 ##############################################################################
 # races of TOCTOU
@@ -567,8 +569,7 @@ class RaceToctou(Race):
                         if pattern.sys2.has(node.syscall.nr):
                             check_pattern(pattern, node.syscall)
 
-        return [RaceResource(sys1, sys2, pattern, attack)
-                for sys1, sys2, pattern, attack in nodes]
+        return [RaceResource(s1, s2, p, a) for s1, s2, p, a in nodes]
 
 def attack_toctou (pattern_name, args):
     for pattern in toctou.patterns:
@@ -605,7 +606,7 @@ def find_show_races(graph, args):
                 break;
             if race.prepare(graph):
                 print('RACE %2d: %s' % (count + 1, race))
-                race.output(graph, args.outfile + '.' + str(count + 1))
+                race.output(graph, args.path + '.' + str(count + 1))
                 count += 1
         return count
 
@@ -614,6 +615,7 @@ def find_show_races(graph, args):
     race_list = sorted(race_list, reverse=True, key=lambda race: race.rank)
     total += len(race_list)
     count = output_races(race_list, 'RESOURCE RACES', count, args.count)
+    races = race_list
 
     # step 2: find exit-exit-wait races
     if args.no_exit_races:
@@ -622,6 +624,7 @@ def find_show_races(graph, args):
         race_list = RaceList(graph, RaceExitWait.find_races)
     total += len(race_list)
     count = output_races(race_list, 'EXIT-WAIT RACES', count, args.count)
+    races.extend(race_list)
 
     # step 3: find signal races
     if args.no_signal_races:
@@ -630,12 +633,13 @@ def find_show_races(graph, args):
         race_list = RaceList(graph, RaceSignal.find_races)
     total += len(race_list)
     count = output_races(race_list, 'SIGNAL RACES', count, args.count)
+    races.extend(race_list)
 
     # step 4: statistics
     print('Generated %d logs for races out of %d candidates' % (count, total))
     print('-' * 79)
 
-    return count
+    return races
 
 def find_show_toctou(graph, args):
     total = 0
@@ -650,4 +654,4 @@ def find_show_toctou(graph, args):
     print('Generated %d logs for races of of %d candidates' % (count, total))
     print('-' * 79)
 
-    return count
+    return race_list

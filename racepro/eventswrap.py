@@ -1,9 +1,11 @@
 import mmap
-import struct
 import logging
+import networkx
+import itertools
 
 import scribe
-from racepro import *
+import session
+from execgraph import NodeLoc
 
 def load_events(logfile):
     """Load a scribe log from logfile"""
