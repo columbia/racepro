@@ -41,7 +41,7 @@ class Callback:
 
 def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
                     deadlock=None, backtrace=2,
-                    record=False, replay=False,
+                    record=False, replay=False, wait=True,
                     bookmark_cb=None):
 
     context = None
@@ -78,7 +78,8 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
                             stdout=stdout,
                             stderr=subprocess.STDOUT)
 
-    context.wait()
+    if wait:
+        context.wait()
         
     if deadlock:
         signal.setitimer(signal.ITIMER_REAL, 0, 0)
@@ -158,7 +159,8 @@ def scribe_record(args, logfile=None,
             try:
                 pinit = _do_scribe_exec(cmd, file, exe,
                                         args.redirect, flags,
-                                        record=True)
+                                        record=True,
+                                        wait = not args.max_runtime)
                 _do_scribe_wait(pinit, args.max_runtime,
                                 kill=not not args.max_runtime)
             except Exception as e:
@@ -197,8 +199,9 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
             try:
                 pinit =  _do_scribe_exec(None, file, exe, args.redirect, 0,
                                          deadlock=1, replay=True,
-                                         bookmark_cb=bookmark_cb)
-                ret = _do_scribe_wait(pinit, args.max_runtime)
+                                         bookmark_cb=bookmark_cb,
+                                         wait = not args.max_runtime)
+                ret = _do_scribe_wait(pinit, not not args.max_runtime)
             except scribe.DeadlockError as derr:
                 logging.info(str(derr))
                 if verbose:

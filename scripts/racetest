@@ -112,7 +112,7 @@ if args.config:
             elif k == 'toctou': args.toctou = bool_val(v)
 
             elif k == 'initproc': args.initproc = bool_val(v)
-            elif k == 'parallel': args.parallel = v
+            elif k == 'max-runtime': args.max_runtime = v
             elif k == 'archive': args.archive = bool_val(v)
             elif k == 'netns': args.netns = bool_val(v)
 
