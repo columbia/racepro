@@ -203,12 +203,14 @@ def mutate_events(graph,
             yield session.Event(scribe.EventPid(proc.pid))
             yield session.Event(scribe.EventQueueEof())
 
-# YJF: remove holes in serial number sequence.
 def condense_events(events):
+    """Remove holes in serial number sequence"""
+
     # map from resource id to the previou event's (serial, seq, write_access)
     # serial: serial number
     # seq: sequence number ignoring access type
     # write_access: non zero if the event is a write
+
     serials = dict()
     for e in events:
         if e.is_a(scribe.EventResourceLockExtra):
@@ -228,3 +230,20 @@ def condense_events(events):
                 ee.serial = serial
                 e = session.Event(ee)
         yield e
+
+def load_session(logfile):
+    events = load_events(logfile)
+    return Session(events)
+
+def save_session(logfile, events):
+    """Save modified scribe log to logfile"""
+    try:
+        f = open(logfile, 'w')
+    except:
+        print('Cannot open log file %s' % logfile)
+        exit(1)
+
+    for e in condense_events(events):
+        f.write(e.encode())
+
+    f.close()

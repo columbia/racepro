@@ -1,5 +1,6 @@
 import networkx
 import logging
+import struct
 import pdb
 
 from itertools import *
