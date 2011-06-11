@@ -37,6 +37,9 @@ def parse_syscall(session, i):
     elif event.nr == unistd.Syscalls.NR_stat64:
         out.write('stat64("%s", %#x, %#x)' %
                   (e_data.data, args[1], args[2]))
+    elif event.nr == unistd.Syscalls.NR_unlink:
+        out.write('unlink("%s")' %
+                  (e_data.data))
     else:
         out.write('%s(%#x, %#x, %#x)' %
                   (unistd.syscall_str(event.nr),
