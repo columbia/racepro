@@ -201,7 +201,8 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
                                          deadlock=1, replay=True,
                                          bookmark_cb=bookmark_cb,
                                          wait = not args.max_runtime)
-                ret = _do_scribe_wait(pinit, not not args.max_runtime)
+                ret = _do_scribe_wait(pinit, args.max_runtime,
+                                      not not args.max_runtime)
             except scribe.DeadlockError as derr:
                 logging.info(str(derr))
                 if verbose:
@@ -236,7 +237,7 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
             print(verbose + 'BUG replayed but not tested')
 
         if args.max_runtime:
-            _do_scribe_wait(pinit, 0, True)
+            _do_scribe_wait(pinit, 0.01, True)
 
         if post_replay:
             logging.info('    running post-replay callback...')
