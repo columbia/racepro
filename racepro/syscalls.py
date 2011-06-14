@@ -3,25 +3,26 @@ import unistd
 
 
 def int32(x):
-  if x>0xFFFFFFFF:
-    raise OverflowError
-  if x>0x7FFFFFFF:
-    x=int(0x100000000-x)
-    if x<2147483648:
-      return -x
-    else:
-      return -2147483648
-  return x
+    if x > 0xFFFFFFFF:
+        raise OverflowError
+
+    if x > 0x7FFFFFFF:
+        x = int(0x100000000-x)
+        if x < 2147483648:
+            return -x
+        else:
+            return -2147483648
+    return x
 
 class Syscall(object):
-    def __init__(self, syscall):
-        self.syscall = syscall
+    def __init__(self, node):
+        self.node = node
         self.args = self._getargs()
 
     def _getargs(self):
         # Put arguments of a single system call into a list. Be careful when
         # trying to place the string argument at the right place
-        syscall = self.syscall
+        syscall = self.node
 
         args = None
         for e in syscall.children:
@@ -45,7 +46,7 @@ class Syscall(object):
     def is_a(self, klass):
         return isinstance(self, klass)
 
-    def belong_a(self, klass_list):
+    def belongs_to(self, klass_list):
         for klass in klass_list:
             if isinstance(self, klass):
                 return True
@@ -58,7 +59,7 @@ SyscallDefs = {
 'fork'                   : [],
 'read'                   : ['fd', 'buf', 'count'],
 'write'                  : ['fd', 'buf', 'count'],
-'open'                   : ['path', 'flags', 'mode'],
+'open'                   : ['path', 'flag', 'mode'],
 'close'                  : ['fd'],
 'waitpid'                : ['pid', 'stat_addr', 'options'],
 'creat'                  : ['path', 'mode'],
@@ -74,8 +75,8 @@ SyscallDefs = {
 'oldstat'                : [],
 'lseek'                  : ['fd', 'offset', 'origin'],
 'getpid'                 : [],
-'mount'                  : ['dev', 'dir', 'type', 'flags', 'data'],
-'umount'                 : ['name', 'flags'],
+'mount'                  : ['dev', 'dir', 'type', 'flag', 'data'],
+'umount'                 : ['name', 'flag'],
 'setuid'                 : ['uid'],
 'getuid'                 : [],
 'stime'                  : ['tptr'],
@@ -136,11 +137,11 @@ SyscallDefs = {
 'getgroups'              : ['gidsetsize', 'grouplist'],
 'setgroups'              : ['gidsetsize', 'grouplist'],
 'select'                 : ['fd', 'inp', 'outp', 'exp', 'tvp'],
-'symlink'                : ['old', 'new'],
+'symlink'                : ['oldname', 'newname'],
 'oldlstat'               : [],
 'readlink'               : ['path', 'buf', 'bufsiz'],
 'uselib'                 : ['library'],
-'swapon'                 : ['specialfile', 'swap_flags'],
+'swapon'                 : ['specialfile', 'flag'],
 'reboot'                 : ['magic1', 'magic2', 'cmd', 'arg'],
 'readdir'                : [],
 'mmap'                   : [],
@@ -181,8 +182,8 @@ SyscallDefs = {
 'mprotect'               : ['start', 'len', 'prot'],
 'sigprocmask'            : ['how', 'set', 'oset'],
 'create_module'          : [],
-'init_module'            : ['umod', 'len', 'uargs'],
-'delete_module'          : ['name_user', 'flags'],
+'init_module'            : ['umod', 'len', 'uarg'],
+'delete_module'          : ['name_user', 'flag'],
 'get_kernel_syms'        : [],
 'quotactl'               : ['cmd', 'special', 'id', 'addr'],
 'getpgid'                : ['pid'],
@@ -197,7 +198,7 @@ SyscallDefs = {
 'getdents'               : ['fd', 'dirent', 'count'],
 '_newselect'             : [],
 'flock'                  : ['fd', 'cmd'],
-'msync'                  : ['start', 'len', 'flags'],
+'msync'                  : ['start', 'len', 'flag'],
 'readv'                  : ['fd', 'vec', 'vlen'],
 'writev'                 : ['fd', 'vec', 'vlen'],
 'getsid'                 : ['pid'],
@@ -205,7 +206,7 @@ SyscallDefs = {
 '_sysctl'                : [],
 'mlock'                  : ['start', 'len'],
 'munlock'                : ['start', 'len'],
-'mlockall'               : ['flags'],
+'mlockall'               : ['flag'],
 'munlockall'             : [],
 'sched_setparam'         : ['pid', 'param'],
 'sched_getparam'         : ['pid', 'param'],
@@ -277,9 +278,9 @@ SyscallDefs = {
 'fcntl64'                : ['fd', 'cmd', 'arg'],
 'gettid'                 : [],
 'readahead'              : ['fd', 'offset', 'count'],
-'setxattr'               : ['path', 'name', 'value', 'size', 'flags'],
-'lsetxattr'              : ['path', 'name', 'value', 'size', 'flags'],
-'fsetxattr'              : ['fd', 'name', 'value', 'size', 'flags'],
+'setxattr'               : ['path', 'name', 'value', 'size', 'flag'],
+'lsetxattr'              : ['path', 'name', 'value', 'size', 'flag'],
+'fsetxattr'              : ['fd', 'name', 'value', 'size', 'flag'],
 'getxattr'               : ['path', 'name', 'value', 'size'],
 'lgetxattr'              : ['path', 'name', 'value', 'size'],
 'fgetxattr'              : ['fd', 'name', 'value', 'size'],
@@ -307,25 +308,25 @@ SyscallDefs = {
 'epoll_create'           : ['size'],
 'epoll_ctl'              : ['epfd', 'op', 'fd', 'event'],
 'epoll_wait'             : ['epfd', 'events', 'maxevents', 'timeout'],
-'remap_file_pages'       : ['start', 'size', 'prot', 'pgoff', 'flags'],
+'remap_file_pages'       : ['start', 'size', 'prot', 'pgoff', 'flag'],
 'set_tid_address'        : ['tidptr'],
 'timer_create'           : ['which_clock', 'timer_event_spec', 'created_timer_id'],
-'timer_settime'          : ['timer_id', 'flags', 'new_setting', 'old_setting'],
+'timer_settime'          : ['timer_id', 'flag', 'new_setting', 'old_setting'],
 'timer_gettime'          : ['timer_id', 'setting'],
 'timer_getoverrun'       : ['timer_id'],
 'timer_delete'           : ['timer_id'],
 'clock_settime'          : ['which_clock', 'tp'],
 'clock_gettime'          : ['which_clock', 'tp'],
 'clock_getres'           : ['which_clock', 'tp'],
-'clock_nanosleep'        : ['which_clock', 'flags', 'rqtp', 'rmtp'],
+'clock_nanosleep'        : ['which_clock', 'flag', 'rqtp', 'rmtp'],
 'statfs64'               : ['path', 'sz', 'buf'],
 'fstatfs64'              : ['fd', 'sz', 'buf'],
 'tgkill'                 : ['tgid', 'pid', 'sig'],
 'utimes'                 : ['path', 'utimes'],
 'fadvise64_64'           : ['fd', 'offset', 'len', 'advice'],
 'vserver'                : [],
-'mbind'                  : ['start', 'len', 'mode', 'nmask', 'maxnode', 'flags'],
-'get_mempolicy'          : ['policy', 'nmask', 'maxnode', 'addr', 'flags'],
+'mbind'                  : ['start', 'len', 'mode', 'nmask', 'maxnode', 'flag'],
+'get_mempolicy'          : ['policy', 'nmask', 'maxnode', 'addr', 'flag'],
 'set_mempolicy'          : ['mode', 'nmask', 'maxnode'],
 'mq_open'                : ['name', 'oflag', 'mode', 'attr'],
 'mq_unlink'              : ['name'],
@@ -333,7 +334,7 @@ SyscallDefs = {
 'mq_timedreceive'        : ['mqdes', 'msg_ptr', 'msg_len', 'msg_prio', 'abs_timeout'],
 'mq_notify'              : ['mqdes', 'notification'],
 'mq_getsetattr'          : ['mqdes', 'mqstat', 'omqstat'],
-'kexec_load'             : ['entry', 'nr_segments', 'segments', 'flags'],
+'kexec_load'             : ['entry', 'nr_segments', 'segments', 'flag'],
 'waitid'                 : ['which', 'pid', 'infop', 'options', 'ru'],
 'add_key'                : ['_type', '_description', '_payload', 'plen', 'destringid'],
 'request_key'            : ['_type', '_description', '_callout_info', 'destringid'],
@@ -344,7 +345,7 @@ SyscallDefs = {
 'inotify_add_watch'      : ['fd', 'path', 'mask'],
 'inotify_rm_watch'       : ['fd', 'wd'],
 'migrate_pages'          : ['pid', 'maxnode', 'from', 'to'],
-'openat'                 : ['dfd', 'path', 'flags', 'mode'],
+'openat'                 : ['dfd', 'path', 'flag', 'mode'],
 'mkdirat'                : ['dfd', 'path', 'mode'],
 'mknodat'                : ['dfd', 'path', 'mode', 'dev'],
 'fchownat'               : ['dfd', 'path', 'user', 'group', 'flag'],
@@ -352,36 +353,36 @@ SyscallDefs = {
 'fstatat64'              : ['dfd', 'path', 'statbuf', 'flag'],
 'unlinkat'               : ['dfd', 'path', 'flag'],
 'renameat'               : ['olddfd', 'oldname', 'newdfd', 'newname'],
-'linkat'                 : ['olddfd', 'oldname', 'newdfd', 'newname', 'flags'],
+'linkat'                 : ['olddfd', 'oldname', 'newdfd', 'newname', 'flag'],
 'symlinkat'              : ['oldname', 'newdfd', 'newname'],
 'readlinkat'             : ['dfd', 'path', 'buf', 'bufsiz'],
 'fchmodat'               : ['dfd', 'path', 'mode'],
 'faccessat'              : ['dfd', 'path', 'mode'],
 'pselect6'               : [],
 'ppoll'                  : [],
-'unshare'                : ['unshare_flags'],
+'unshare'                : ['flag'],
 'set_robust_list'        : ['head', 'len'],
 'get_robust_list'        : ['pid', 'head_ptr', 'len_ptr'],
-'splice'                 : ['fd_in', 'off_in', 'fd_out', 'off_out', 'len', 'flags'],
-'sync_file_range'        : ['fd', 'offset', 'nbytes', 'flags'],
-'tee'                    : ['fdin', 'fdout', 'len', 'flags'],
+'splice'                 : ['fd_in', 'off_in', 'fd_out', 'off_out', 'len', 'flag'],
+'sync_file_range'        : ['fd', 'offset', 'nbytes', 'flag'],
+'tee'                    : ['fdin', 'fdout', 'len', 'flag'],
 'vmsplice'               : ['fd', 'iov', 'nr_segs', 'flags'],
-'move_pages'             : ['pid', 'nr_pages', 'pages', 'nodes', 'status', 'flags'],
+'move_pages'             : ['pid', 'nr_pages', 'pages', 'nodes', 'status', 'flag'],
 'getcpu'                 : ['cpu', 'node', 'cache'],
 'epoll_pwait'            : ['epfd', 'events', 'maxevents', 'timeout', 'sigmask', 'sigsetsize'],
 'utimensat'              : ['dfd', 'path', 'utimes', 'flags'],
 'signalfd'               : ['ufd', 'user_mask', 'sizemask'],
-'timerfd_create'         : ['clockid', 'flags'],
+'timerfd_create'         : ['clockid', 'flag'],
 'eventfd'                : ['count'],
 'fallocate'              : ['fd', 'mode', 'offset', 'len'],
 'timerfd_settime'        : ['ufd', 'flags', 'utmr', 'otmr'],
 'timerfd_gettime'        : ['ufd', 'otmr'],
-'signalfd4'              : ['ufd', 'user_mask', 'sizemask', 'flags'],
-'eventfd2'               : ['count', 'flags'],
+'signalfd4'              : ['ufd', 'user_mask', 'sizemask', 'flag'],
+'eventfd2'               : ['count', 'flag'],
 'epoll_create1'          : ['flags'],
-'dup3'                   : ['oldfd', 'newfd', 'flags'],
-'pipe2'                  : ['fildes', 'flags'],
-'inotify_init1'          : ['flags'],
+'dup3'                   : ['oldfd', 'newfd', 'flag'],
+'pipe2'                  : ['fildes', 'flag'],
+'inotify_init1'          : ['flag'],
 'preadv'                 : ['fd', 'vec', 'vlen', 'pos_l', 'pos_h'],
 'pwritev'                : ['fd', 'vec', 'vlen', 'pos_l', 'pos_h'],
 'rt_tgsigqueueinfo'      : ['tgid', 'pid', 'sig', 'uinfo'],
@@ -415,24 +416,8 @@ for name, arglist in SyscallDefs.iteritems():
     __builtins__[klass_name] = klass
 
 
-class SyscallSet:
-    def __init__(self, desc, syscalls = set()):
-        self.desc = desc
-        self.syscalls = syscalls
-        __builtins__[desc] = self
-
-    def has (self, nr):
-        return nr in self.syscalls
-
-    def union(self, s):
-        return SyscallSet(desc = '%s_%s' % (self.desc, s.desc),
-                          syscalls = self.syscalls.union(s.syscalls))
-
 def declare_syscall_sets(sets):
     for name, syslist in sets.iteritems():
-        sysset_name = 'SYS_%s' % name
-        syscalls = set()
-        for s in syslist:
-            syscalls.add(getattr(unistd, 'NR_%s' % s))
-        sysset = SyscallSet (desc = name, syscalls = syscalls)
-        __builtins__[sysset_name] = sysset
+        syscallset_name = 'SYS_%s' % name
+        syscalls = [getattr(unistd, 'NR_%s' % s) for s in syslist]
+        __builtins__[syscallset_name] = frozenset(syscalls)
