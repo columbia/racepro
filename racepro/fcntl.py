@@ -23,4 +23,14 @@ O_NOFOLLOW  = 0400000
 O_CLOEXEC   = 02000000
 O_NOATIME   = 01000000
 
+def is_R(flag):
+    return (flag & (O_WRONLY | O_RDWR)) == 0
 
+def is_W(flag):
+    return (flag & O_WRONLY) != 0
+
+def has_R(flag):
+    return (flag & O_WRONLY) == 0
+
+def has_W(flag):
+    return (flag & (O_WRONLY | O_RDWR)) != 0
