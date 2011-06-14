@@ -279,8 +279,8 @@ class RaceSignal(Race):
         sys_old = node
         sys.new = Session.Event(node)
 
-        # If: signal interrupted the syscall -> make it not interrupt
-        # If: signal did not interrupt the syscall -> make it interrupt
+        # If signal interrupted the syscall -> make it not interrupt
+        # If signal did not interrupt the syscall -> make it interrupt
         # We reverse the signal's effect by "reversing" the syscall
         # retval (from interrupted to non-interrupted or vice versa)
 
@@ -512,7 +512,7 @@ class RaceToctou(Race):
             ' (%s)' % attack
 
         if self._prepared:
-            logging.debug('   boobkmark1: %s' % (self.bookmark[0]))
+            logging.debug('   boobkmark1: %s' % (self.bookmarks[0]))
             logging.debug('       cutoff: %s' % (self.cutoff))
 
         return s
