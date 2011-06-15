@@ -14,13 +14,35 @@ import eventswrap
 import execgraph
 import execute
 import racecore
+import toctou
 
 ##############################################################################
 def replay_test_script(exe, args):
+    logging.info('    running test script...')
+
+    def toctou_handle_test(exe):
+        pid = os.fork()
+        if pid == 0:
+            result = False
+
+            exe.prepare()
+            logging.info('    running generic test script...')
+
+            for line in open('/.TEST', 'r').readlines():
+                args = line.split()
+                if toctou.test_toctou(args[1], args[2:]):
+                    result = True
+
+            if result:
+                os._exit(2)
+            else:
+                os._exit(0)
+        else:
+            return os.waitpid(pid, 0)[1] >> 8
+
     if args.toctou:
-        logging.info('    running generic toctou script...')
-    else:
-        logging.info('    running specific test script...')
+        if toctou_handle_test(exe) == 2:
+            return True
 
     try:
         scribewrap.def_test_script(exe, args)
@@ -33,25 +55,23 @@ def replay_test_script(exe, args):
 
 def _testlist(args, races):
 
-    def toctou_handle(exe, string):
+    def toctou_handle_attack(exe, string):
         pid = os.fork()
         if pid == 0:
-            try:
-                exe.prepare()
-                args = string.split()
-                assert args[0] == 'attack'
-                toctou.attack_toctou(args[1], args[2:])
-            except:
-                pass
+            exe.prepare()
+            args = string.split()
+            assert args[0] == 'attack'
+            toctou.attack_toctou(args[1], args[2:])
             os._exit(0)
         else:
             os.waitpid(pid, 0)
 
     def toctou_bookmark_cb(exe, logfile, scribe, id, npr):
+        logging.info('    running generic attack script...')
         try:
-            log = re.sub('\.log$', '.toctou', logfile.name)
+            log = re.sub('\.log$', '.toctou', logfile)
             for line in open(log, 'r').readlines():
-                toctou_handle(exe, line)
+                toctou_handle_attack(exe, line)
             scribe.stop()
         except:
             traceback.print_exc(file=sys.stdout)
@@ -130,9 +150,6 @@ def do_one_test(args, t_name, t_exec):
     if args._post and not os.access(args._post, os.X_OK):
         logging.error('%s: post script request but not found' % args._post)
         return False
-
-    if args.toctou:
-        args._test = 'toctou test'
 
     opts = ''
     if args.debug: opts += ' -d'
@@ -220,7 +237,7 @@ def do_one_test(args, t_name, t_exec):
     return True
 
 def uninitialized(args):
-    if 'timeout' not in args: args.timeout = 1
+    if 'timeout' not in args: args.timeout = 0
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
     if 'max_runtime' not in args: args.max_runtime = None
