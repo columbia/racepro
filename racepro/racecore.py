@@ -549,32 +549,47 @@ class RaceToctou(Race):
 
         nodes = set()
 
-        for resource in graph.resources.itervalues():
-            syscalls_hists = dict()
-            for pattern in toctou.patterns:
-                syscalls_hists[pattern.sys1] = list()
-
-            def check_pattern(pattern, sys_cur):
-                for sys_old in syscalls_hists[pattern.sys1]:
-                    israce, s1, s2 = pattern.check(sys_old, sys_cur)
-                    if not israce:
-                        continue
-                    at_cmd = pattern.generate(s1, s2)
-                    nodes.add((sys_old, sys_cur, pattern, at_cmd))
-
-                    if pattern.sys1.has(sys_cur.nr):
-                        if sys_cur not in syscalls_hists[pattern.sys1]:
-                            syscalls_hists[pattern.sys1].append(sys_cur)
-
+        def find_races_resource(resource):
             events_per_proc = _split_events_per_proc(resource, in_syscall=True)
 
             for proc in events_per_proc:
-                for node in events_per_proc[proc]:
-                    for pattern in toctou.patterns:
-                        if pattern.sys2.has(node.syscall.nr):
-                            check_pattern(pattern, node.syscall)
+                syscalls = dict()
 
-        return [RaceResource(s1, s2, p, a) for s1, s2, p, a in nodes]
+                for pattern in toctou.patterns:
+                    syscalls[pattern.syscallset1] = list()
+
+                def check_pattern(racing_syscalls, sys_cur):
+                    for pattern in toctou.patterns:
+                        if sys_cur.nr not in pattern.syscallset2:
+                            continue
+                        for sys_old in syscalls[pattern.syscallset1]:
+                            if sys_old.vclock.after(sys_cur.vclock):
+                                continue
+                            if pattern.check(sys_old, sys_cur):
+                                nodes.add((sys_old, sys_cur, pattern,
+                                           pattern.generate(sys_old, sys_cur)))
+
+                for node in events_per_proc[proc]:
+                    check_pattern(racing_syscalls, node.syscall)
+                    for pattern in toctou.patterns:
+                        if node.syscall.nr in pattern.syscallset1:
+                            syscalls[pattern.syscallset1].append(node.syscall)
+
+                for other in filter(lambda p: p != proc, events_per_proc):
+                    for node in events_per_proc[other]:
+                        check_pattern(syscalls, node.syscall)
+
+        candidate_resources = [
+            scribe.SCRIBE_RES_TYPE_FILE,
+            scribe.SCRIBE_RES_TYPE_FILES_STRUCT,
+            scribe.SCRIBE_RES_TYPE_INODE,
+            ]
+
+        for resource in graph.resources.itervalues():
+            if resource.type in candidate_resources:
+                find_races_resource(resource)
+
+        return [RaceToctou(s1, s2, p, a) for s1, s2, p, a in nodes]
 
 ##############################################################################
 
@@ -633,20 +648,21 @@ def find_show_races(graph, args):
 
 def replay_for_toctou(graph, args):
 
-    toctou_syscalls = set([
-        unistd.NR_open,
-        unistd.NR_access,
-        unistd.NR_stat,
-        unistd.NR_lstat
-        ])
-
     bookmarks = list()
 
     for node in networkx.algorithms.dag.topological_sort(graph):
         if not node.is_a(scribe.EventSyscallExtra):
             continue
-        if node.nr in toctou_syscalls:
-            bookmarks.append(dict({node.proc: NodeLoc(node, 'after')}))
+
+        node.queriers = list()
+
+        for querier in toctou.queriers:
+            if querier.need_bookmark(node, before=True):
+                node.queriers.append(querier)
+                bookmarks.append(dict({node.proc: NodeLoc(node, 'before')}))
+            if querier.need_bookmark(node, after=True):
+                node.queriers.append(querier)
+                bookmarks.append(dict({node.proc: NodeLoc(node, 'after')}))
 
     out = args.path + '.toctou.log'
     save_modify_log(graph, out, bookmarks, None, None, None)
@@ -654,28 +670,27 @@ def replay_for_toctou(graph, args):
     def toctou_bookmark_cb(**kargs):
         bookmarks = kargs['bookmarks']
         exe = kargs['exe']
-        logfile = kargs['logfile']
-        scribe = kargs['scribe']
         id = kargs['id']
-        npr = kargs['npr']
-
-        assert npr == 1
 
         for nl in bookmarks[id].values():
-            node = nl.node
-
-            # CHIA-CHE - this is where you call you handler
-            # @exe is the execution environment
-            # @node is the node/event
-            # you'll need to add the info to node
+            for querier in node.queriers:
+                querier.upon_bookmark(nl.node, exe,
+                                      before=nl.before,
+                                      after=nl.after)
 
         return True
 
     bookmark_cb = scribewrap.Callback(toctou_bookmark_cb, bookmarks=bookmarks)
 
     print('ABOUT TO REPLAY TOCTOU')
-    if not scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb):
+    ret = scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb)
+    if not ret:
         raise execute.ExecuteError('toctou replay', ret)
+
+    for bookmark in bookmarks:
+        for nl in bookmark.values():
+            for querier in nl.node.queriers:
+                querier.debug(nl.node)
 
 def find_show_toctou(graph, args):
     total = 0
