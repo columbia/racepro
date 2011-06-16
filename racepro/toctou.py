@@ -3,6 +3,7 @@ import pwd
 import sys
 import stat
 import logging
+import tempfile
 
 import syscalls
 import execute
@@ -85,7 +86,7 @@ class Attacker:
     def generate(self, s1, s2):
         """To be run by the attacker"""
         a = '%s' % self.generator(s1, s2)
-        return 'attack %s %s %s %s' % (self.desc, s1.name, s2.name, a)
+        return 'attack %s %s' % (self.desc, a)
 
     def pre_attack(self, params):
         """To be run pre-attacker callback"""
@@ -245,77 +246,80 @@ def dir_checker(s1, s2):
 ############################################################################
 
 def link_attack_generator(s1, s2):
-    return '%s %s' % (get_resource_path(s1), '/tmp/victim')
+    if (s2.is_a(SYS_open) and fcntl.has_W(s2.flag)) or s2.is_a(SYS_truncate):
+        key = 'mtime'
+    elif (s2.is_a(SYS_open) and fcntl.has_R(s2.flag)) or s2.is_a(SYS_execve):
+        key = 'atime'
+    elif s2.is_a(SYS_chmod):
+        key = 'mode'
+    elif s2.is_a(SYS_chown):
+        key = 'owner'
+    elif s2.is_a(SYS_link):
+        key = 'ino'
+    else:
+        assert False, 'The system call is not handled'
 
-def link_pre_attacker(p):
-    if len(p) == 4:
-        sys1, sys2, src, tgt = tuple(p)
-        if os.path.exists(tgt):
-            os.remove(tgt)
-        f = open(tgt, 'w')
-        if os.path.exists(src):
-            f.write(open(src, 'r').read())
-        f.close()
-        if sys2 == 'open' or sys2 == 'truncate':
-            os.utime(tgt, (0, 0))
-            p.append('0')
-        elif sys2 == 'chmod':
-            os.chmod(tgt, 0)
-            p.append(str(os.stat(tgt).st_mode))
-        elif sys2 == 'chown':
-            os.chown(tgt, 0, 0)
-            p.append('%s:%s' % (str(os.stat(tgt).st_uid),
-                                str(os.stat(tgt).st_gid)))
-        elif sys2 == 'link':
-            p.append(str(os.stat(tgt).st_ino))
+    return '%s %s' % (get_resource_path(s1), key)
 
-def link_attacker(p):
-    if len(p) == 4:
-        sys1, sys2, src, tgt = tuple(p)
-        os.remove(src)
-        os.symlink(tgt, src)
+def link_pre_attacker(param):
+    assert len(param) == 2
 
+    src, key = param
+    tgt = os.path.join(tempfile.mkdtemp(dir='/tmp'), 'victiom')
+
+    f = open(tgt, 'w')
+    if os.path.exists(src):
+        f.write(open(src, 'r').read())
+    f.close()
+    param.append(tgt)
+
+    if key == 'mtime' or key == 'atime':
+        os.utime(tgt, (0, 0))
+    elif key == 'mode':
+        os.chmod(tgt, 0)
+    elif key == 'owner':
+        os.chown(tgt, 0, 0)
+    elif key == 'ino':
+        param.append(str(os.stat(tgt).st_ino))
+
+def link_attacker(param):
+    assert len(param) == 3
+    src, key, tgt = param
+
+    os.remove(src)
+    os.symlink(tgt, src)
+
+def link_tester(param):
+    assert len(param) >= 3
+
+    src, key, tgt = param[:3]
+
+    if key == 'atime':
+        return os.stat(tgt).st_atime != 0
+    if key == 'mtime':
+        return os.stat(tgt).st_mtime != 0
+    if key == 'mode':
+        return os.stat(tgt).st_mode != 0
+    if key == 'owner':
+        return os.stat(tgt).st_uid !=0 or os.stat(tgt).st_gid != 0
+    if key == 'ino':
+        return param[3] != str(os.stat(tgt).st_ino)
+
+    assert False, 'The system call is not handled'
 
 ################################################################
 # Attackers
 # Naming rules: <Action>-<Cutoff Syscall>
 
-#################################################################
-# Attacker 1: LinkCreat-FileRead
+# Attacker 1: LinkCreate
 
-def link_for_read_tester(p):
-    if len(p) == 5:
-        sys1, sys2, src, tgt, val = tuple(p)
-        if sys2 == 'open' or sys2 == 'execve':
-            return val != str(os.stat(tgt).st_atime)
+attacker_LinkCreate = Attacker(desc="LinkCreate",
+                               generator = link_attack_generator,
+                               pre_attacker = link_pre_attacker,
+                               attacker = link_attacker,
+                               tester = link_tester)
 
-attacker_LinkCreat_FileRead = Attacker(desc="LinkCreat-FileRead",
-    generator = link_attack_generator, pre_attacker = link_pre_attacker,
-    attacker = link_attacker, tester = link_for_read_tester)
-
-attackers.append(attacker_LinkCreat_FileRead)
-
-#################################################################
-# Attacker 2: LinkCreat-FileWrite
-
-def link_for_write_tester(p):
-    if len(p) == 5:
-        sys1, sys2, src, tgt, val = tuple(p)
-        if sys2 == 'open' or sys2 == 'truncate':
-            return val != str(os.stat(tgt).st_mtime)
-        elif sys2 == 'chmod':
-            return val != str(os.stat(tgt).st_mode)
-        elif sys2 == 'chown':
-            return val != '%s:%s' % (str(os.stat(tgt).st_uid),
-                                     str(os.stat(tgt).st_gid))
-        elif sys2 == 'link':
-            return val != str(os.stat(tgt).st_ino)
-
-attacker_LinkCreat_FileWrite = Attacker(desc="LinkCreat-FileWrite",
-    generator = link_attack_generator, pre_attacker = link_pre_attacker,
-    attacker = link_attacker, tester = link_for_write_tester)
-
-attackers.append(attacker_LinkCreat_FileWrite)
+attackers.append(attacker_LinkCreate)
 
 #################################################################
 # Patterns
@@ -336,7 +340,7 @@ def cb_check_file_write_link (s1, s2):
 
 patterns.append(Pattern(desc='Check-FileWrite', syscallset1=SYS_Check,
     syscallset2=SYS_FileWrite, callbacks=[perm_checker, file_checker,
-    cb_check_file_write_link], attackers=[attacker_LinkCreat_FileWrite]))
+    cb_check_file_write_link], attackers=[attacker_LinkCreate]))
 
 #######################################################################
 # Pattern 2: Check-FileRead
@@ -353,7 +357,7 @@ def cb_check_file_read_link(s1, s2):
 
 patterns.append(Pattern(desc='Check-FileRead', syscallset1=SYS_Check,
     syscallset2=SYS_FileRead, callbacks=[perm_checker, file_checker,
-    cb_check_file_read_link], attackers=[attacker_LinkCreat_FileRead]))
+    cb_check_file_read_link], attackers=[attacker_LinkCreate]))
 
 ########################################################################
 # Pattern 3: FileCreat-FileWrite
@@ -367,7 +371,7 @@ def cb_file_create_file_write_link (s1, s2):
 
 patterns.append(Pattern(desc='FileCreat-FileWrite', syscallset1=SYS_FileCreate,
     syscallset2=SYS_FileWrite, callbacks=[perm_checker, file_checker,
-    cb_file_create_file_write_link], attackers=[attacker_LinkCreat_FileWrite]))
+    cb_file_create_file_write_link], attackers=[attacker_LinkCreate]))
 
 ########################################################################
 # Pattern 4: FileCreat-FileRead
@@ -381,7 +385,7 @@ def cb_file_create_file_read_link (s1, s2):
 
 patterns.append(Pattern(desc='FileCreat-FileRead', syscallset1=SYS_FileCreate,
     syscallset2=SYS_FileRead, callbacks=[perm_checker, file_checker,
-    cb_file_create_file_read_link], attackers=[attacker_LinkCreat_FileRead]))
+    cb_file_create_file_read_link], attackers=[attacker_LinkCreate]))
 
 ########################################################################
 # Pattern 5: LinkRead-FileRead
@@ -393,7 +397,7 @@ def cb_link_read_file_read_link (s1, s2):
 
 patterns.append(Pattern(desc='LinkRead-FileRead', syscallset1=SYS_LinkRead,
     syscallset2=SYS_FileRead, callbacks=[perm_checker, file_checker,
-    cb_link_read_file_read_link], attackers=[attacker_LinkCreat_FileWrite]))
+    cb_link_read_file_read_link], attackers=[attacker_LinkCreate]))
 
 ########################################################################
 # Pattern 6: LinkRead-FileWrite
@@ -405,7 +409,7 @@ def cb_link_read_file_write_link (s1, s2):
 
 patterns.append(Pattern(desc='LinkRead-FileWrite', syscallset1=SYS_LinkRead,
     syscallset2=SYS_FileWrite, callbacks=[perm_checker, file_checker,
-    cb_link_read_file_write_link], attackers=[attacker_LinkCreat_FileWrite]))
+    cb_link_read_file_write_link], attackers=[attacker_LinkCreate]))
 
 ########################################################################
 # helpers to attack, test, explain
