@@ -170,7 +170,24 @@ class NodeBookmarkFile(NodeBookmark):
             SYS_DirRead)
 
         if before:
-            return event.nr in syscalls_node_file
+            if event.nr in syscalls_node_file:
+                ignored_prefixes = ['/proc', '/dev', '/tmp/isolate']
+  
+                try: 
+                    syscall = event_to_syscall(event)
+                except AssertionError: return False
+
+                path = get_resource_path(syscall)
+                if path is None:
+                    return False
+
+                for prefix in ignored_prefixes:
+                    if path.startswith(prefix):
+                        return False
+
+                return True
+            else:
+                return False
         else:
             return False
 
