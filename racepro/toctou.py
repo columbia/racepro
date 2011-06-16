@@ -418,8 +418,8 @@ def _attack(attacker, params):
 
     try:
         attacker.pre_attack(params)
-    except:
-        print >> sys.stderr, "Unable to attack:", sys.exc_info()[1]
+    except OSError:
+        print >> sys.stderr, "Unable to pre-attack:", sys.exc_info()[1]
         return
 
     pid = os.fork()
@@ -427,12 +427,12 @@ def _attack(attacker, params):
         try:
             pw = pwd.getpwnam("racepro")
             os.seteuid(pw.pw_uid)
-        except:
+        except OSError:
             print >> sys.stderr, "Unable to run non-root:", sys.exc_info()[1]
 
         try:
             attacker.attack(params)
-        except:
+        except OSError:
             print >> sys.stderr, "Unable to attack:", sys.exc_info()[1]
         else:
             print >> sys.stderr, "Attack succeeds"
