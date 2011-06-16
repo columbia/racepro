@@ -70,7 +70,7 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
                 bookmark_cb.private['exe'].pids[scribe_pid] = real_pid
 
     context = RaceproContext(logfile,
-                             backtrace_len = 2,
+                             backtrace_len = 100,
                              backtrace_num_last_events = backtrace)
 
     context.add_init_loader(lambda argv, envp: exe.prepare())

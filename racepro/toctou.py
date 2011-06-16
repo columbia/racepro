@@ -199,7 +199,7 @@ class NodeBookmarkFile(NodeBookmark):
         except AssertionError: return
 
         path = get_resource_path(syscall)
-        
+       
         assert path is not None
         assert before
 
@@ -308,7 +308,8 @@ def link_attacker(param):
 
     src, key, tgt = param
 
-    os.remove(src)
+    if os.path.exists(src):
+        os.remove(src)
     os.symlink(tgt, src)
 
 def link_tester(param):
