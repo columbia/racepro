@@ -6,6 +6,7 @@ import pdb
 from itertools import *
 
 import unistd
+import syscalls
 import scribe
 import scribewrap
 import toctou
@@ -82,6 +83,9 @@ def crosscut_to_bookmark(crosscut):
     bookmark = dict(map(lambda nl: (nl.node.proc, nl), crosscut))
     return bookmark
 
+def syscall_name(nr):
+    return syscalls.Syscalls[nr].name
+
 ##############################################################################
 # races of RESOURCES
 
@@ -94,10 +98,10 @@ class RaceResource(Race):
     def __str__(self):
         node1 = self.node1
         node2 = self.node2
-        s = 'pid %d #%d [sys(%d)=%d]' % \
-            (node1.proc.pid, node1.syscall_index, node1.nr, node1.ret) + \
-            ' -> pid %d #%d [sys(%d)=%d]' % \
-            (node2.proc.pid, node2.syscall_index, node2.nr, node2.ret)
+        s = 'pid %d #%d [%s()=%d]' % \
+            (node1.proc.pid, node1.syscall_index, syscall_name(node1.nr), node1.ret) + \
+            ' -> pid %d #%d [%s()=%d]' % \
+            (node2.proc.pid, node2.syscall_index, syscall_name(node2.nr), node2.ret)
 
         if self._prepared:
             for n, bookmark in enumerate(self.bookmarks):
@@ -237,9 +241,9 @@ class RaceSignal(Race):
 
     def __str__(self):
         node = self.node
-        s = 'pid %d #%d [sys(%d)= %d->%d]' % \
+        s = 'pid %d #%d [%s()= %d->%d]' % \
             (node.proc.pid, node.syscall_index,
-             node.syscall.nr, self.old_ret, self.new_ret)
+             syscall_name(node.syscall.nr), self.old_ret, self.new_ret)
 
         if self._prepared:
             for n, bookmark in enumerate(self.bookmarks):
@@ -326,12 +330,12 @@ class RaceExitWait(Race):
         exit1 = self.exit1
         exit2 = self.exit2
         wait = self.wait
-        s = 'pid %s #%d [sys(%d)=%d]' % \
-            (exit1.proc.pid, exit1.syscall_index, exit1.nr, exit1.ret) + \
-            ' -> pid %d #%d [sys(%d)=%d]' % \
-            (wait.proc.pid, wait.syscall_index, wait.nr, wait.ret) + \
-            ' -> pid %d #%d [sys(%d)=%d]' % \
-            (exit2.proc.pid, exit2.syscall_index, exit2.nr, exit2.ret)
+        s = 'pid %s #%d [%s()=%d]' % \
+            (exit1.proc.pid, exit1.syscall_index, syscall_name(exit1.nr), exit1.ret) + \
+            ' -> pid %d #%d [%s()=%d]' % \
+            (wait.proc.pid, wait.syscall_index, syscall_name(wait.nr), wait.ret) + \
+            ' -> pid %d #%d [%s()=%d]' % \
+            (exit2.proc.pid, exit2.syscall_index, syscall_name(exit2.nr), exit2.ret)
 
         if self._prepared:
             for n, bookmark in enumerate(self.bookmarks):
@@ -505,10 +509,10 @@ class RaceToctou(Race):
         attack = self.attack
 
         s = 'pattern: %s ' % self.pattern.desc + \
-            ', pid %d #%d [sys(%d)=%d]' % \
-            (sys1.proc.pid, sys1.syscall_index, sys1.nr, sys1.ret) + \
-            ' -> pid %d #%d [sys(%d)=%d]' % \
-            (sys2.proc.pid, sys2.syscall_index, sys2.nr, sys2.ret) + \
+            ', pid %d #%d [%s()=%d]' % \
+            (sys1.proc.pid, sys1.syscall_index, syscall_name(sys1.nr), sys1.ret) + \
+            ' -> pid %d #%d [%s()=%d]' % \
+            (sys2.proc.pid, sys2.syscall_index, syscall_name(sys2.nr), sys2.ret) + \
             ' (%s)' % attack
 
         if self._prepared:
