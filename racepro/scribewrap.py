@@ -67,12 +67,7 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
                 self.resume()
 
         def on_attach(self, real_pid, scribe_pid):
-<<<<<<< HEAD
-            if bookmark_cb:
-                bookmark_cb.private['exe'].pids[scribe_pid] = real_pid
-=======
             exe.pids[scribe_pid] = real_pid
->>>>>>> toctou
 
     context = RaceproContext(logfile,
                              backtrace_len = 100,
@@ -194,13 +189,7 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
         if bookmark_cb:
-<<<<<<< HEAD
-            exe.pids = dict()
-            bookmark_cb.private['exe'] = exe
-            bookmark_cb.private['logfile'] = logfile
-=======
             bookmark_cb = Callback(bookmark_cb, exe=exe, logfile=logfile)
->>>>>>> toctou
 
         if pre_replay:
             logging.info('    running pre-replay callback...')

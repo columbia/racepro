@@ -2,16 +2,11 @@ import os
 import pwd
 import sys
 import stat
-<<<<<<< HEAD
 import pwd
 import os
-import tempfile
-import logging
-=======
 import logging
 import tempfile
 
->>>>>>> toctou
 import syscalls
 import execute
 import fcntl
@@ -172,12 +167,11 @@ class NodeBookmarkFile(NodeBookmark):
     def need_bookmark(self, event, before=False, after=False):
         assert (before and not after) or (after and not before)
 
-        syscalls_node_file = set([
+        syscalls_node_file = set().union(
             SYS_Check, SYS_FileCreate, SYS_LinkCreate, SYS_DirCreate,
             SYS_FileRemove, SYS_LinkRemove, SYS_DirRemove, SYS_FileWrite,
             SYS_FileRead, SYS_LinkWrite, SYS_LinkRead, SYS_DirWrite,
-            SYS_DirRead
-            ])
+            SYS_DirRead)
 
         def consider_path(path):
             bad_prefix = ['/proc', '/dev', '/tmp/isolate']
