@@ -186,29 +186,33 @@ class NodeBookmarkFile(NodeBookmark):
         assert path, 'Path expected for syscall %s ?' % syscall
         assert before
 
-        proc_info_init(event, exe)
-        event.file_info['root'] = exe.proc_info[event.proc.pid]['root']
-        event.file_info['cwd'] = exe.proc_info[event.proc.pid]['cwd']
-        chroot = event.file_info['root']
-        if exe.chroot:
-            chroot = os.path.normpath(exe.chroot + '/' + chroot)
-        cwd = event.file_info['cwd']
+        def get_real_pid(event, exe):
+            return exe.pids[event.proc.pid]
+
+        def get_proc_info(proc, pid, key, callback):
+            return callback('%s/%d/%s' % (proc, pid, key))
+
+        pid = get_real_pid(event, exe)
+        proc = exe.chroot + '/proc'
+
+        file_info = dict()
+        file_info['cwd'] = get_proc_info(proc, pid, 'cwd', os.readlink)
+        file_info['root'] = get_proc_info(proc, pid, 'root', os.readlink)
 
         def set_event_file_info(path, prefix):
-            realpath = os.path.normpath(chroot + '/' + path)
-            file_stat = os.stat(realpath)
-            for attr in dir(file_stat):
-                if attr.startswith('st_'):
-                    event.file_info[prefix + attr] = getattr(file_stat, attr)
+            if os.path.exists(path):
+                file_stat = os.stat(path)
+                for attr in dir(file_stat):
+                    if attr.startswith('st_'):
+                        file_info[prefix + attr] = getattr(file_stat, attr)
 
-        path = os.path.normpath(get_resource_path(syscall))
-        path = os.path.join(cwd, path)
-        event.file_info['path'] = path
-        set_event_file_info(path, '')
+        path = os.path.join(file_info['cwd'], get_resource_path(syscall))
+        set_event_file_info(os.path.normpath(path), '')
 
         path = os.path.dirname(path)
-        event.file_info['dir_path'] = path
-        set_evemt_file_info(path, 'dir_')
+        set_event_file_info(os.path.normpath(path), 'dir_')
+
+        event.file_info = file_info
 
     def debug(self, event):
         if hasattr(event, 'file_info'):
