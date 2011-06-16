@@ -170,10 +170,20 @@ class NodeBookmarkFile(NodeBookmark):
             SYS_DirRead
             ])
 
+        def consider_path(path):
+            bad_prefix = ['/proc', '/dev', '/tmp/isolate']
+            for prefix in bad_prefix:
+                if path.startswith(prefix):
+                    return False
+            return True
+
         if before:
-            return event.nr in syscalls_node_file
-        else:
-            return False
+            if event.nr in syscalls_node_file:
+                syscall = event_to_syscall(event)
+                path = get_resource_path(syscall)
+                return consider_path(path)
+
+        return False
 
     def upon_bookmark(self, event, exe, before=False, after=False):
         assert (before and not after) or (after and not before)
