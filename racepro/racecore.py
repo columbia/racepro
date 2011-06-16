@@ -563,14 +563,14 @@ class RaceToctou(Race):
                         if sys_cur.nr not in pattern.syscallset2:
                             continue
                         for sys_old in syscalls[pattern.syscallset1]:
-                            if sys_old.vclock.after(sys_cur.vclock):
+                            if sys_cur.vclock.before(sys_old.vclock):
                                 continue
                             if pattern.check(sys_old, sys_cur):
                                 nodes.add((sys_old, sys_cur, pattern,
                                            pattern.generate(sys_old, sys_cur)))
 
                 for node in events_per_proc[proc]:
-                    check_pattern(racing_syscalls, node.syscall)
+                    check_pattern(syscalls, node.syscall)
                     for pattern in toctou.patterns:
                         if node.syscall.nr in pattern.syscallset1:
                             syscalls[pattern.syscallset1].append(node.syscall)
@@ -673,6 +673,7 @@ def replay_for_toctou(graph, args):
         id = kargs['id']
 
         for nl in bookmarks[id].values():
+            node = nl.node
             for querier in node.queriers:
                 querier.upon_bookmark(nl.node, exe,
                                       before=nl.before,
