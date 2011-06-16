@@ -195,18 +195,24 @@ class NodeBookmarkFile(NodeBookmark):
         pid = get_real_pid(event, exe)
         proc = exe.chroot + '/proc'
 
+        cwd = get_proc_info(proc, pid, 'cwd', os.readlink)
+        root = get_proc_info(proc, pid, 'root', os.readlink)
+        cwd = os.path.join('/', os.path.relpath(cwd, root))
+        root = os.path.join('/', os.path.relpath(root, exe.chroot))
+
         file_info = dict()
-        file_info['cwd'] = get_proc_info(proc, pid, 'cwd', os.readlink)
-        file_info['root'] = get_proc_info(proc, pid, 'root', os.readlink)
+        file_info['cwd'] = os.path.normpath(cwd)
+        file_info['root'] = os.path.normpath(root)
 
         def set_event_file_info(path, prefix):
-            if os.path.exists(path):
-                file_stat = os.stat(path)
+            file_info[prefix + 'path'] = os.path.normpath(path)
+            if os.path.exists(exe.chroot + path):
+                file_stat = os.stat(exe.chroot + path)
                 for attr in dir(file_stat):
                     if attr.startswith('st_'):
                         file_info[prefix + attr] = getattr(file_stat, attr)
 
-        path = os.path.join(file_info['cwd'], get_resource_path(syscall))
+        path = os.path.join(cwd, get_resource_path(syscall))
         set_event_file_info(os.path.normpath(path), '')
 
         path = os.path.dirname(path)
@@ -226,18 +232,15 @@ queriers.append(NodeBookmarkFile())
 
 def perm_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
-        if not s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
-            return False
+        return not not (s2.node.file_info['dir_st_mode'] & stat.S_IWOTH)
 
 def file_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
-        if s2.node.file_info['st_flags'] & stat.stat.S_IFDIR:
-            return False
+        return not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR)
 
 def dir_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
-        if not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR):
-            return False
+        return not not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR)
 
 ############################################################################
 
