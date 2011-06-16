@@ -221,84 +221,23 @@ class NodeBookmarkFile(NodeBookmark):
             for key, value in event.file_info.items():
                 logging.debug('        %s : %s' % (key, value))
 
-queriers.append(NodeBookmarkFile)
+queriers.append(NodeBookmarkFile())
 
 #############################################################################
 
-def NodeBookmarkProc(NodeBookmark):
-    def need_bookmark(self, event, before=False, after=False):
-        assert (before and not after) or (after and not before)
-
-        syscalls_node_proc = [
-            SYS_ProcCreat,  SYS_DirChange,
-            ]
-
-        if before:
-            return event.nr in syscalls_node_proc
-        else:
-            return False
-
-    def _proc_info_init(event, exe):
-        if not hasattr(exe, 'proc_info'):
-            setattr(exe, 'proc_info', dict())
-
-        if event.proc.pid not in exe.proc_info:
-            exe.proc_info[event.proc.pid] = dict({'root': '/',
-                                                  'cwd': os.getcwd()})
-
-    def upon_bookmark(self, event, exe, before=False, after=False):
-        assert (before and not after) or (after and not before)
-
-        _proc_info_init(event, exe)
-
-        assert before
-
-        syscall = syscalls.Syscalls[event.nr](event)
-        path = get_resource_path(syscall)
-
-        if event.nr in SYS_ProcCreat:
-            exe.proc_info[event.ret] = exe.proc_info[event.proc.pid]
-
-        if syscall.is_a(SYS_chdir):
-            old_path = exe.proc_info[event.proc.pid]['cwd']
-            path = os.path.join(old_path, path)
-            exe.proc_info[event.proc.pid]['cwd'] = path
-
-        if syscall.is_a(SYS_chroot):
-            old_path = exe.proc_info[event.proc.pid]['root']
-            cwd = exe.proc_info[event.proc.pid]['cwd']
-            path = os.path.join(cwd, path)
-            path = os.path.normpath(old_path + '/' + path)
-            exe.proc_info[event.proc.pid]['root'] = path
-
-queriers.append(NodeBookmarkProc)
-
-#############################################################################
-
-ignored_prefixs = ['/dev', '/proc', '/lib', '/usr/lib', '/bin', '/usr/bin',
-                   '/sbin', '/usr/sbin', '/etc/ld.so.cache']
-
-def path_checker(s1, s2):
-    path1 = get_resource_path(s1)
-    path2 = get_resource_path(s2)
-    if not path1 or not path2 or path1 != path2:
-        return False
-    for prefix in ignored_prefixs:
-        if os.path.normpath(path1).startswith(prefix):
-            return False
-
+def perm_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
         if not s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
             return False
 
 def file_checker(s1, s2):
-    if hasattr(s1.node, 'file_info') and 'st_flags' in s1.node.file_info:
-        if s1.node.file_info['st_flags'] & stat.stat.S_IFDIR:
+    if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
+        if s2.node.file_info['st_flags'] & stat.stat.S_IFDIR:
             return False
 
 def dir_checker(s1, s2):
-    if hasattr(s1.node, 'file_info') and 'st_flags' in s1.node.file_info:
-        if not (s1.node.file_info['st_flags'] & stat.stat.S_IFDIR):
+    if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
+        if not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR):
             return False
 
 ############################################################################
@@ -394,7 +333,7 @@ def cb_check_file_write_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='Check-FileWrite', syscallset1=SYS_Check,
-    syscallset2=SYS_FileWrite, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileWrite, callbacks=[perm_checker, file_checker,
     cb_check_file_write_link], attackers=[attacker_LinkCreat_FileWrite]))
 
 #######################################################################
@@ -411,7 +350,7 @@ def cb_check_file_read_link(s1, s2):
     return True
 
 patterns.append(Pattern(desc='Check-FileRead', syscallset1=SYS_Check,
-    syscallset2=SYS_FileRead, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileRead, callbacks=[perm_checker, file_checker,
     cb_check_file_read_link], attackers=[attacker_LinkCreat_FileRead]))
 
 ########################################################################
@@ -425,7 +364,7 @@ def cb_file_create_file_write_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='FileCreat-FileWrite', syscallset1=SYS_FileCreate,
-    syscallset2=SYS_FileWrite, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileWrite, callbacks=[perm_checker, file_checker,
     cb_file_create_file_write_link], attackers=[attacker_LinkCreat_FileWrite]))
 
 ########################################################################
@@ -439,7 +378,7 @@ def cb_file_create_file_read_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='FileCreat-FileRead', syscallset1=SYS_FileCreate,
-    syscallset2=SYS_FileRead, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileRead, callbacks=[perm_checker, file_checker,
     cb_file_create_file_read_link], attackers=[attacker_LinkCreat_FileRead]))
 
 ########################################################################
@@ -451,7 +390,7 @@ def cb_link_read_file_read_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='LinkRead-FileRead', syscallset1=SYS_LinkRead,
-    syscallset2=SYS_FileRead, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileRead, callbacks=[perm_checker, file_checker,
     cb_link_read_file_read_link], attackers=[attacker_LinkCreat_FileWrite]))
 
 ########################################################################
@@ -463,7 +402,7 @@ def cb_link_read_file_write_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='LinkRead-FileWrite', syscallset1=SYS_LinkRead,
-    syscallset2=SYS_FileWrite, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileWrite, callbacks=[perm_checker, file_checker,
     cb_link_read_file_write_link], attackers=[attacker_LinkCreat_FileWrite]))
 
 ########################################################################
