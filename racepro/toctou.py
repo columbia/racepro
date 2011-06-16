@@ -37,6 +37,7 @@ queriers  = list()
 def event_to_syscall(event):
     """Convert a syscall event to Syscall object"""
     syscall = syscalls.Syscalls[event.nr](event)
+    assert(syscall is not None)
     return syscall
 
 ###############################################################################
@@ -44,27 +45,31 @@ def event_to_syscall(event):
 class Pattern:
     def check(self, event1, event2):
         """Check if the event pair causes toctou racing"""
-        s1 = event_to_syscall(event1)
-        s2 = event_to_syscall(event2)
-        if s1 is None or s2 is None:
-            return False
+        try:
+            s1 = event_to_syscall(event1)
+            s2 = event_to_syscall(event2)
+        except AssertionError: return False
+
         for callback in self.callbacks:
             ret = callback(s1, s2)
-            if ret is None: continue
-            return ret
+            if ret is not None:
+                return ret
+
         return False
 
     def generate(self, event1, event2):
         """Generate string to run in the attacker"""
-        s1 = event_to_syscall(event1)
-        s2 = event_to_syscall(event2)
-        if s1 is None or s2 is None:
-            return False
+        try:
+            s1 = event_to_syscall(event1)
+            s2 = event_to_syscall(event2)
+        except AssertionError: return ''
+
         attack_strings = list()
         for attacker in self.attackers:
             string = attacker.generate(s1, s2)
             if string != "":
                 attack_strings.append(string)
+
         return '\n'.join(attack_strings)
 
     def __init__(self, desc, syscallset1, syscallset2,
