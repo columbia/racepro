@@ -65,6 +65,10 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
             if resume:
                 self.resume()
 
+        def on_attach(self, real_pid, scribe_pid):
+            if bookmark_cb:
+                bookmark_cb.private['exe'].pids[scribe_pid] = real_pid
+
     context = RaceproContext(logfile,
                              backtrace_len = 2,
                              backtrace_num_last_events = backtrace)
@@ -185,6 +189,7 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
         if bookmark_cb:
+            exe.pids = dict()
             bookmark_cb.private['exe'] = exe
             bookmark_cb.private['logfile'] = logfile
 
