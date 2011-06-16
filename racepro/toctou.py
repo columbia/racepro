@@ -46,25 +46,29 @@ class Pattern:
         """Check if the event pair causes toctou racing"""
         s1 = event_to_syscall(event1)
         s2 = event_to_syscall(event2)
-        if s1 is None or s2 is None:
+        if not (s1 and s1):
             return False
+
         for callback in self.callbacks:
             ret = callback(s1, s2)
-            if ret is None: continue
-            return ret
+            if ret is not None:
+                return ret
+
         return False
 
     def generate(self, event1, event2):
         """Generate string to run in the attacker"""
         s1 = event_to_syscall(event1)
         s2 = event_to_syscall(event2)
-        if s1 is None or s2 is None:
+        if not (s1 and s1):
             return False
+
         attack_strings = list()
         for attacker in self.attackers:
             string = attacker.generate(s1, s2)
             if string != "":
                 attack_strings.append(string)
+
         return '\n'.join(attack_strings)
 
     def __init__(self, desc, syscallset1, syscallset2,
@@ -173,13 +177,13 @@ class NodeBookmarkFile(NodeBookmark):
     def upon_bookmark(self, event, exe, before=False, after=False):
         assert (before and not after) or (after and not before)
 
-        if not hasattr(event, 'file_info'):
-            setattr(event, 'file_info', dict())
+        syscall = event_to_syscall(event)
+        if not syscall:
+            return
 
-        syscall = syscalls.Syscalls[event.nr](event)
         path = get_resource_path(syscall)
 
-        assert not path, 'Path expected ?'
+        assert path, 'Path expected for syscall %s ?' % syscall
         assert before
 
         proc_info_init(event, exe)
