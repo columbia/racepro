@@ -45,6 +45,7 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
                     bookmark_cb=None):
 
     context = None
+    exe.pids = dict()
 
     def do_check_deadlock(signum, stack):
         try:
@@ -64,6 +65,9 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
                 resume = True
             if resume:
                 self.resume()
+
+        def on_attach(self, real_pid, scribe_pid):
+            exe.pids[scribe_pid] = real_pid
 
     context = RaceproContext(logfile,
                              backtrace_len = 2,
