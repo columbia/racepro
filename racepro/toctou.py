@@ -224,30 +224,19 @@ queriers.append(NodeBookmarkFile())
 
 #############################################################################
 
-ignored_prefixs = ['/dev', '/proc', '/lib', '/usr/lib', '/bin', '/usr/bin',
-                   '/sbin', '/usr/sbin', '/etc/ld.so.cache']
-
-def path_checker(s1, s2):
-    path1 = get_resource_path(s1)
-    path2 = get_resource_path(s2)
-    if not path1 or not path2 or path1 != path2:
-        return False
-    for prefix in ignored_prefixs:
-        if os.path.normpath(path1).startswith(prefix):
-            return False
-
+def perm_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
         if not s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
             return False
 
 def file_checker(s1, s2):
-    if hasattr(s1.node, 'file_info') and 'st_flags' in s1.node.file_info:
-        if s1.node.file_info['st_flags'] & stat.stat.S_IFDIR:
+    if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
+        if s2.node.file_info['st_flags'] & stat.stat.S_IFDIR:
             return False
 
 def dir_checker(s1, s2):
-    if hasattr(s1.node, 'file_info') and 'st_flags' in s1.node.file_info:
-        if not (s1.node.file_info['st_flags'] & stat.stat.S_IFDIR):
+    if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
+        if not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR):
             return False
 
 ############################################################################
@@ -343,7 +332,7 @@ def cb_check_file_write_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='Check-FileWrite', syscallset1=SYS_Check,
-    syscallset2=SYS_FileWrite, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileWrite, callbacks=[perm_checker, file_checker,
     cb_check_file_write_link], attackers=[attacker_LinkCreat_FileWrite]))
 
 #######################################################################
@@ -360,7 +349,7 @@ def cb_check_file_read_link(s1, s2):
     return True
 
 patterns.append(Pattern(desc='Check-FileRead', syscallset1=SYS_Check,
-    syscallset2=SYS_FileRead, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileRead, callbacks=[perm_checker, file_checker,
     cb_check_file_read_link], attackers=[attacker_LinkCreat_FileRead]))
 
 ########################################################################
@@ -374,7 +363,7 @@ def cb_file_create_file_write_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='FileCreat-FileWrite', syscallset1=SYS_FileCreate,
-    syscallset2=SYS_FileWrite, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileWrite, callbacks=[perm_checker, file_checker,
     cb_file_create_file_write_link], attackers=[attacker_LinkCreat_FileWrite]))
 
 ########################################################################
@@ -388,7 +377,7 @@ def cb_file_create_file_read_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='FileCreat-FileRead', syscallset1=SYS_FileCreate,
-    syscallset2=SYS_FileRead, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileRead, callbacks=[perm_checker, file_checker,
     cb_file_create_file_read_link], attackers=[attacker_LinkCreat_FileRead]))
 
 ########################################################################
@@ -400,7 +389,7 @@ def cb_link_read_file_read_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='LinkRead-FileRead', syscallset1=SYS_LinkRead,
-    syscallset2=SYS_FileRead, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileRead, callbacks=[perm_checker, file_checker,
     cb_link_read_file_read_link], attackers=[attacker_LinkCreat_FileWrite]))
 
 ########################################################################
@@ -412,7 +401,7 @@ def cb_link_read_file_write_link (s1, s2):
     return True
 
 patterns.append(Pattern(desc='LinkRead-FileWrite', syscallset1=SYS_LinkRead,
-    syscallset2=SYS_FileWrite, callbacks=[path_checker, file_checker,
+    syscallset2=SYS_FileWrite, callbacks=[perm_checker, file_checker,
     cb_link_read_file_write_link], attackers=[attacker_LinkCreat_FileWrite]))
 
 ########################################################################
