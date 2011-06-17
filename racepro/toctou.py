@@ -162,12 +162,12 @@ class NodeBookmarkFile(NodeBookmark):
     def need_bookmark(self, event, before=False, after=False):
         assert (before and not after) or (after and not before)
 
-        syscalls_node_file = [
+        syscalls_node_file = set([
             SYS_Check, SYS_FileCreate, SYS_LinkCreate, SYS_DirCreate,
             SYS_FileRemove, SYS_LinkRemove, SYS_DirRemove, SYS_FileWrite,
             SYS_FileRead, SYS_LinkWrite, SYS_LinkRead, SYS_DirWrite,
-            SYS_DirRead,
-            ]
+            SYS_DirRead
+            ])
 
         if before:
             return event.nr in syscalls_node_file
