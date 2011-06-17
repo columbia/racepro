@@ -32,12 +32,12 @@ def exec_piped(cmd, redirect=None):
 
 class Callback:
     def __init__(self, function, **private):
-        self.function = function
-        self.private = private
+        self._function = function
+        self._private = private
 
-    def call(self, **kargs):
-        newkargs = dict(self.private.items() + kargs.items())
-        return self.function(**newkargs)
+    def __call__(self, **kargs):
+        newkargs = dict(self._private.items() + kargs.items())
+        return self._function(**newkargs)
 
 def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
                     deadlock=None, backtrace=2,
@@ -59,7 +59,7 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
     class RaceproContext(scribe.Context):
         def on_bookmark(self, id, npr):
             if bookmark_cb:
-                resume = bookmark_cb.call(scribe=self, id=id, npr=npr)
+                resume = bookmark_cb(scribe=self, id=id, npr=npr)
             else:
                 resume = True
             if resume:
@@ -185,8 +185,7 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
         if bookmark_cb:
-            bookmark_cb.private['exe'] = exe
-            bookmark_cb.private['logfile'] = logfile
+            bookmark_cb = Callback(bookmark_cb, exe=exe, logfile=logfile)
 
         if pre_replay:
             logging.info('    running pre-replay callback...')
