@@ -220,57 +220,7 @@ class NodeBookmarkFile(NodeBookmark):
             for key, value in event.file_info.items():
                 logging.debug('        %s : %s' % (key, value))
 
-queriers.append(NodeBookmarkFile)
-
-#############################################################################
-
-def NodeBookmarkProc(NodeBookmark):
-    def need_bookmark(self, event, before=False, after=False):
-        assert (before and not after) or (after and not before)
-
-        syscalls_node_proc = [
-            SYS_ProcCreat,  SYS_DirChange,
-            ]
-
-        if before:
-            return event.nr in syscalls_node_proc
-        else:
-            return False
-
-    def _proc_info_init(event, exe):
-        if not hasattr(exe, 'proc_info'):
-            setattr(exe, 'proc_info', dict())
-
-        if event.proc.pid not in exe.proc_info:
-            exe.proc_info[event.proc.pid] = dict({'root': '/',
-                                                  'cwd': os.getcwd()})
-
-    def upon_bookmark(self, event, exe, before=False, after=False):
-        assert (before and not after) or (after and not before)
-
-        _proc_info_init(event, exe)
-
-        assert before
-
-        syscall = syscalls.Syscalls[event.nr](event)
-        path = get_resource_path(syscall)
-
-        if event.nr in SYS_ProcCreat:
-            exe.proc_info[event.ret] = exe.proc_info[event.proc.pid]
-
-        if syscall.is_a(SYS_chdir):
-            old_path = exe.proc_info[event.proc.pid]['cwd']
-            path = os.path.join(old_path, path)
-            exe.proc_info[event.proc.pid]['cwd'] = path
-
-        if syscall.is_a(SYS_chroot):
-            old_path = exe.proc_info[event.proc.pid]['root']
-            cwd = exe.proc_info[event.proc.pid]['cwd']
-            path = os.path.join(cwd, path)
-            path = os.path.normpath(old_path + '/' + path)
-            exe.proc_info[event.proc.pid]['root'] = path
-
-queriers.append(NodeBookmarkProc)
+queriers.append(NodeBookmarkFile())
 
 #############################################################################
 
