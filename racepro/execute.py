@@ -171,7 +171,7 @@ class ExecuteJail(Execute):
 #############################################################################
 
 def is_jailed():
-    return os.path.exists("/.JAILED"):
+    return os.path.exists("/.JAILED")
 
 def open(jailed=False, chroot=None, **kwargs):
     if not jailed:

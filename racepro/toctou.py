@@ -4,7 +4,7 @@ import pwd
 import os
 
 
-from syscalls import *
+import syscalls
 import execute
 import fcntl
 
