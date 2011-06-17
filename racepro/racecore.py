@@ -677,8 +677,12 @@ def replay_for_toctou(graph, args):
         id = kargs['id']
 
         for nl in bookmarks[id].values():
+<<<<<<< HEAD
             node = nl.node
             for querier in node.queriers:
+=======
+            for querier in nl.node.queriers:
+>>>>>>> toctou
                 querier.upon_bookmark(nl.node, exe,
                                       before=nl.before,
                                       after=nl.after)

@@ -1,9 +1,17 @@
+import os
+import pwd
 import sys
 import stat
+<<<<<<< HEAD
 import pwd
 import os
 import tempfile
 import logging
+=======
+import logging
+import tempfile
+
+>>>>>>> toctou
 import syscalls
 import execute
 import fcntl
@@ -37,7 +45,6 @@ queriers  = list()
 def event_to_syscall(event):
     """Convert a syscall event to Syscall object"""
     syscall = syscalls.Syscalls[event.nr](event)
-    assert(syscall is not None)
     return syscall
 
 ###############################################################################
@@ -45,10 +52,11 @@ def event_to_syscall(event):
 class Pattern:
     def check(self, event1, event2):
         """Check if the event pair causes toctou racing"""
-        try:
-            s1 = event_to_syscall(event1)
-            s2 = event_to_syscall(event2)
-        except AssertionError: return False
+
+        s1 = event_to_syscall(event1)
+        s2 = event_to_syscall(event2)
+        if not (s1 and s1):
+            return False
 
         for callback in self.callbacks:
             ret = callback(s1, s2)
@@ -59,10 +67,11 @@ class Pattern:
 
     def generate(self, event1, event2):
         """Generate string to run in the attacker"""
-        try:
-            s1 = event_to_syscall(event1)
-            s2 = event_to_syscall(event2)
-        except AssertionError: return ''
+
+        s1 = event_to_syscall(event1)
+        s2 = event_to_syscall(event2)
+        if not (s1 and s1):
+            return False
 
         attack_strings = list()
         for attacker in self.attackers:
@@ -163,44 +172,38 @@ class NodeBookmarkFile(NodeBookmark):
     def need_bookmark(self, event, before=False, after=False):
         assert (before and not after) or (after and not before)
 
-        syscalls_node_file = set().union(
+        syscalls_node_file = set([
             SYS_Check, SYS_FileCreate, SYS_LinkCreate, SYS_DirCreate,
             SYS_FileRemove, SYS_LinkRemove, SYS_DirRemove, SYS_FileWrite,
             SYS_FileRead, SYS_LinkWrite, SYS_LinkRead, SYS_DirWrite,
-            SYS_DirRead)
+            SYS_DirRead
+            ])
+
+        def consider_path(path):
+            bad_prefix = ['/proc', '/dev', '/tmp/isolate']
+            for prefix in bad_prefix:
+                if path.startswith(prefix):
+                    return False
+            return True
 
         if before:
             if event.nr in syscalls_node_file:
-                ignored_prefixes = ['/proc', '/dev', '/tmp/isolate']
-  
-                try: 
-                    syscall = event_to_syscall(event)
-                except AssertionError: return False
-
+                syscall = event_to_syscall(event)
                 path = get_resource_path(syscall)
-                if path is None:
-                    return False
+                return consider_path(path)
 
-                for prefix in ignored_prefixes:
-                    if path.startswith(prefix):
-                        return False
-
-                return True
-            else:
-                return False
-        else:
-            return False
+        return False
 
     def upon_bookmark(self, event, exe, before=False, after=False):
         assert (before and not after) or (after and not before)
 
-        try: 
-            syscall = event_to_syscall(event)
-        except AssertionError: return
+        syscall = event_to_syscall(event)
+        if not syscall:
+            return
 
         path = get_resource_path(syscall)
-       
-        assert path is not None
+
+        assert path, 'Path expected for syscall %s ?' % syscall
         assert before
 
         def get_real_pid(event, exe):
@@ -212,12 +215,12 @@ class NodeBookmarkFile(NodeBookmark):
         pid = get_real_pid(event, exe)
         proc = exe.chroot + '/proc'
 
-        file_info = dict()
         cwd = get_proc_info(proc, pid, 'cwd', os.readlink)
         root = get_proc_info(proc, pid, 'root', os.readlink)
         cwd = os.path.join('/', os.path.relpath(cwd, root))
         root = os.path.join('/', os.path.relpath(root, exe.chroot))
 
+        file_info = dict()
         file_info['cwd'] = os.path.normpath(cwd)
         file_info['root'] = os.path.normpath(root)
 
@@ -334,12 +337,13 @@ def link_tester(param):
 # Attackers
 # Naming rules: <Action>-<Cutoff Syscall>
 
-#################################################################
 # Attacker 1: LinkCreate
 
 attacker_LinkCreate = Attacker(desc="LinkCreate",
-    generator = link_attack_generator, pre_attacker = link_pre_attacker,
-    attacker = link_attacker, tester = link_tester)
+                               generator = link_attack_generator,
+                               pre_attacker = link_pre_attacker,
+                               attacker = link_attacker,
+                               tester = link_tester)
 
 attackers.append(attacker_LinkCreate)
 
