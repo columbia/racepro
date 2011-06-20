@@ -13,6 +13,9 @@ LOGIC/ALGORITMS
   reparented to 1, so cannot be waited-for, so the race is skipped.
   => solve: add HB due to reparenting ?
 
+- toctou: consider the situation that the two system calls happen without
+  happen-before. One idea is to cut-off at the two system calls and enforce
+  the order.
 
 ===============================================================================
 REFACTOR/REWRITE
