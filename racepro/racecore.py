@@ -568,10 +568,12 @@ class RaceToctou(Race):
                             continue
                         for sys_old in syscalls[pattern.syscallset1]:
                             if sys_cur.vclock.before(sys_old.vclock):
-                                continue
+                                break
                             if pattern.check(sys_old, sys_cur):
                                 nodes.add((sys_old, sys_cur, pattern,
                                            pattern.generate(sys_old, sys_cur)))
+                                logging.debug('\tadding %s -> %s to pattern %s' % 
+                                              (sys_old, sys_cur, pattern.desc))
 
                 for node in events_per_proc[proc]:
                     check_pattern(syscalls, node.syscall)
