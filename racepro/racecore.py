@@ -671,14 +671,16 @@ def replay_for_toctou(graph, args):
                 bookmarks.append(dict({node.proc: NodeLoc(node, 'after')}))
 
     out = args.path + '.toctou.log'
-    save_modify_log(graph, out, bookmarks, None, None, None)
 
     def toctou_bookmark_cb(**kargs):
         bookmarks = kargs['bookmarks']
         exe = kargs['exe']
         id = kargs['id']
 
-        for nl in bookmarks[id].values():
+        current_bookmark = bookmarks[id]
+        bookmarks[id] = None
+
+        for nl in current_bookmark.values():
             for querier in nl.node.queriers:
                 querier.upon_bookmark(nl.node, exe,
                                       before=nl.before,
@@ -686,17 +688,26 @@ def replay_for_toctou(graph, args):
 
         return True
 
-    bookmark_cb = scribewrap.Callback(toctou_bookmark_cb, bookmarks=bookmarks)
+    while True:
+        save_modify_log(graph, out, bookmarks, None, None, None)
 
-    print('ABOUT TO REPLAY TOCTOU')
-    ret = scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb)
-    if not ret:
-        raise execute.ExecuteError('toctou replay', ret)
+        bookmark_cb = scribewrap.Callback(toctou_bookmark_cb, bookmarks=bookmarks)
 
-    for bookmark in bookmarks:
-        for nl in bookmark.values():
-            for querier in nl.node.queriers:
-                querier.debug(nl.node)
+        print('ABOUT TO REPLAY TOCTOU')
+        if scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb):
+            break
+        
+        new_bookmarks = list()
+        for bookmark in bookmarks:
+            if bookmark is not None:
+                new_bookmarks.append(bookmark)
+
+        bookmarks = new_bookmarks
+
+    for node in networkx.algorithms.dag.topological_sort(graph):
+        if node.is_a(scribe.EventSyscallExtra):
+            for querier in node.queriers:
+                querier.debug(node)
 
 def find_show_toctou(graph, args):
     total = 0
