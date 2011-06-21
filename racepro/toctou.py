@@ -290,6 +290,8 @@ def link_pre_attacker(param):
     f = open(tgt, 'w')
     if os.path.exists(src):
         f.write(open(src, 'r').read())
+        os.chmod(tgt, os.stat(src).st_mode)
+        os.chown(tgt, os.stat(src).st_uid, os.stat(src).st_gid)
     f.close()
     param.append(tgt)
 
