@@ -161,6 +161,13 @@ def get_resource_path(s):
     elif s.belongs_to(syscalls_info_dir):
         return s.dir
 
+def consider_path(path):
+    bad_prefix = ['/proc', '/dev', '/tmp/isolate']
+    for prefix in bad_prefix:
+        if path.startswith(prefix):
+            return False
+    return True
+
 #############################################################################
 
 class NodeBookmarkFile(NodeBookmark):
@@ -172,13 +179,6 @@ class NodeBookmarkFile(NodeBookmark):
             SYS_FileRemove, SYS_LinkRemove, SYS_DirRemove, SYS_FileWrite,
             SYS_FileRead, SYS_LinkWrite, SYS_LinkRead, SYS_DirWrite,
             SYS_DirRead)
-
-        def consider_path(path):
-            bad_prefix = ['/proc', '/dev', '/tmp/isolate']
-            for prefix in bad_prefix:
-                if path.startswith(prefix):
-                    return False
-            return True
 
         if before:
             if event.nr in syscalls_node_file:
@@ -245,11 +245,14 @@ queriers.append(NodeBookmarkFile())
 #############################################################################
 
 def perm_checker(s1, s2):
-    if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
-        if s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
-            return
+    path1 = get_resource_path(s1)
+    path2 = get_resource_path(s2)
+    if path1 != path2 or not consider_path(path2):
+        return False
 
-    return False
+    if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
+        if not s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
+            return False
 
 def file_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
@@ -277,7 +280,7 @@ def link_attack_generator(s1, s2):
     else:
         assert False, 'The system call is not handled'
    
-    return '%s %s' % (get_resource_path(s1), key)
+    return '%s %s' % (get_resource_path(s2), key)
 
 def link_pre_attacker(param):
     assert len(param) == 2
