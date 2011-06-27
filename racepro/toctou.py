@@ -163,12 +163,12 @@ class NodeBookmarkFile(NodeBookmark):
     def need_bookmark(self, event, before=False, after=False):
         assert (before and not after) or (after and not before)
 
-        syscalls_node_file = set([
+        syscalls_node_file = set().union(
             SYS_Check, SYS_FileCreate, SYS_LinkCreate, SYS_DirCreate,
             SYS_FileRemove, SYS_LinkRemove, SYS_DirRemove, SYS_FileWrite,
             SYS_FileRead, SYS_LinkWrite, SYS_LinkRead, SYS_DirWrite,
             SYS_DirRead
-            ])
+            )
 
         def consider_path(path):
             bad_prefix = ['/proc', '/dev', '/tmp/isolate']
@@ -243,15 +243,21 @@ queriers.append(NodeBookmarkFile())
 
 def perm_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
-        return not not (s2.node.file_info['dir_st_mode'] & stat.S_IWOTH)
+        if s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
+            return True
+    return False
 
 def file_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
-        return not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR)
+        if s2.node.file_info['st_flags'] & stat.stat.S_IFDIR:
+            return False
+    return True
 
 def dir_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
-        return not not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR)
+        if not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR):
+            return False
+    return True
 
 ############################################################################
 
@@ -296,7 +302,10 @@ def link_attacker(param):
     assert len(param) == 3
     src, key, tgt = param
 
-    os.remove(src)
+    # isn't it ironic to have a TOCTOU race here ourselves ?!
+    if os.path.exists(src):
+        os.remove(src)
+
     os.symlink(tgt, src)
 
 def link_tester(param):
