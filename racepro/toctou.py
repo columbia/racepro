@@ -249,19 +249,19 @@ def perm_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
         if not s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
             return False
-    return True
+    return None
 
 def file_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
         if s2.node.file_info['st_flags'] & stat.stat.S_IFDIR:
             return False
-    return True
+    return None
 
 def dir_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
         if not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR):
             return False
-    return True
+    return None
 
 ############################################################################
 
