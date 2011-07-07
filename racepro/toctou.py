@@ -178,7 +178,8 @@ class NodeBookmarkFile(NodeBookmark):
             SYS_Check, SYS_FileCreate, SYS_LinkCreate, SYS_DirCreate,
             SYS_FileRemove, SYS_LinkRemove, SYS_DirRemove, SYS_FileWrite,
             SYS_FileRead, SYS_LinkWrite, SYS_LinkRead, SYS_DirWrite,
-            SYS_DirRead)
+            SYS_DirRead
+            )
 
         if before:
             if event.nr in syscalls_node_file:
@@ -249,20 +250,22 @@ def perm_checker(s1, s2):
     path2 = get_resource_path(s2)
     if path1 != path2 or not consider_path(path2):
         return False
-
     if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
         if not s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
             return False
+    return None
 
 def file_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
         if s2.node.file_info['st_flags'] & stat.stat.S_IFDIR:
             return False
+    return None
 
 def dir_checker(s1, s2):
     if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
         if not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR):
             return False
+    return None
 
 ############################################################################
 
@@ -279,7 +282,6 @@ def link_attack_generator(s1, s2):
         key = 'ino'
     else:
         assert False, 'The system call is not handled'
-   
     return '%s %s' % (get_resource_path(s2), key)
 
 def link_pre_attacker(param):
@@ -291,11 +293,9 @@ def link_pre_attacker(param):
     f = open(tgt, 'w')
     if os.path.exists(src):
         f.write(open(src, 'r').read())
-        f.close()
         os.chmod(tgt, os.stat(src).st_mode)
         os.chown(tgt, os.stat(src).st_uid, os.stat(src).st_gid)
-    else:
-        f.close()
+    f.close()
     param.append(tgt)
         
     if key == 'mtime' or key == 'atime':
@@ -312,8 +312,10 @@ def link_attacker(param):
 
     src, key, tgt = param
 
+    # isn't it ironic to have a TOCTOU race here ourselves ?!
     if os.path.exists(src):
         os.remove(src)
+
     os.symlink(tgt, src)
 
 def link_tester(param):

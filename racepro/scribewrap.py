@@ -40,7 +40,7 @@ class Callback:
         return self._function(**newkargs)
 
 def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
-                    deadlock=None, backtrace=2,
+                    deadlock=None, backtrace=50,
                     record=False, replay=False, wait=True,
                     bookmark_cb=None):
 
@@ -70,8 +70,8 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
             exe.pids[scribe_pid] = real_pid
 
     context = RaceproContext(logfile,
-                             backtrace_len = 100,
-                             backtrace_num_last_events = backtrace)
+                             backtrace_len=50,
+                             backtrace_num_last_events=backtrace)
 
     context.add_init_loader(lambda argv, envp: exe.prepare())
     pinit = scribe.Popen(context, cmd,
