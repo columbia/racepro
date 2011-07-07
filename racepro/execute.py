@@ -74,7 +74,9 @@ class Execute:
     def __enter__(self):
         return self
 
-    def __init__(self, chroot=None):
+    def __init__(self, chroot=''):
+        if chroot is None:
+            chroot = ''
         self.chroot = chroot
 
 #############################################################################
@@ -158,9 +160,10 @@ class ExecuteJail(Execute):
         self.open()
         return self
 
-    def __init__(self, chroot=None, root='/', scratch=None, persist=None):
+    def __init__(self, chroot='', root='/', scratch=None, persist=None):
+        Execute.__init__(self, chroot)
+
         self.root = root
-        self.chroot = chroot
         self.scratch = scratch
         self.persist = persist
 
@@ -173,7 +176,7 @@ class ExecuteJail(Execute):
 def is_jailed():
     return os.path.exists("/.JAILED")
 
-def open(jailed=False, chroot=None, **kwargs):
+def open(jailed=False, chroot='', **kwargs):
     if not jailed:
         return Execute(chroot)
     else:
