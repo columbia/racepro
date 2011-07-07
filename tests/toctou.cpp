@@ -3,9 +3,9 @@
 #include <sys/stat.h>
 
 int main() {
-    if (access("test.txt", W_OK) != 0) {
+    if (access("test.dir/test.txt", W_OK) != 0) {
 	return 0;
     }
 
-    chmod ("test.txt", 00777);
+    chmod ("test.dir/test.txt", 00777);
 }

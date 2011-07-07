@@ -1,4 +1,4 @@
 #!/bin/sh
 
-rm -f test.txt
-touch test.txt
+rm -f test.dir/test.txt
+touch test.dir/test.txt
