@@ -451,15 +451,15 @@ def _attack(attacker, params):
         print >> sys.stderr, "Unable to pre-attack:", sys.exc_info()[1]
         return
 
+    try:
+        non_root_attacker = pwd.getpwnam('racepro').pw_uid
+    except KeyError:
+        assert False, "Non-root attacker 'racepro' does not exist"
+
     pid = os.fork()
     if pid == 0:
         try:
-            pw = pwd.getpwnam("racepro")
-            os.seteuid(pw.pw_uid)
-        except OSError:
-            print >> sys.stderr, "Unable to run non-root:", sys.exc_info()[1]
-
-        try:
+            os.seteuid(non_root_attacker)
             attacker.attack(params)
         except OSError:
             print >> sys.stderr, "Unable to attack:", sys.exc_info()[1]
