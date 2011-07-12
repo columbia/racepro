@@ -178,6 +178,7 @@ def scribe_record(args, logfile=None,
             logging.info('    running post-record callback...')
             post_record(exe, args)
 
+        del exe
         return success
 
 def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
@@ -251,6 +252,7 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
             exec_piped('rm -rf %s' % logdir)
             exec_piped('cp -ax %s %s' % (exe.scratch, logdir))
 
+        del exe
         return success
 
 

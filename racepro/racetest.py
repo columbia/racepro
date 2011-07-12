@@ -112,6 +112,8 @@ def _findraces(args, opts):
         racecore.find_show_toctou(graph, args)
     else:
         racecore.find_show_races(graph, args)
+
+    del events
     return True
 
 def do_one_test(args, t_name, t_exec):
