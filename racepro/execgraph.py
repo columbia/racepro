@@ -162,7 +162,9 @@ class ExecutionGraph(networkx.DiGraph, Session):
 
     def _dependency_signal(self):
         for sig in self.signals:
-            self.add_edge(sig.send.syscall, sig.recv.syscall, label='signal')
+            recv_syscall = (e for e in sig.recv.proc.events.after(sig.recv) if
+                            e.is_a(scribe.EventSyscallExtra)).next()
+            self.add_edge(sig.send.syscall, recv_syscall, label='signal')
 
     def _compute_vclocks(self):
         for node in networkx.algorithms.dag.topological_sort(self):
