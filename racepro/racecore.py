@@ -84,7 +84,10 @@ def crosscut_to_bookmark(crosscut):
     return bookmark
 
 def syscall_name(nr):
-    return syscalls.Syscalls[nr].name
+    if nr < len(syscalls.Syscalls):
+        return syscalls.Syscalls[nr].name
+    else:
+        return '???(nr=%d)' % nr
 
 ##############################################################################
 # races of RESOURCES
@@ -188,7 +191,17 @@ class RaceResource(Race):
         nodes = set()
 
         ignore_type = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
-        ignore_thresh = 100
+
+        def skip_parent_dir_race(resource, node1, node2):
+            if resource.type not in [scribe.SCRIBE_RES_TYPE_FILE,
+                                     scribe.SCRIBE_RES_TYPE_FILES_STRUCT,
+                                     scribe.SCRIBE_RES_TYPE_INODE]:
+                return False
+
+            path1 = toctou.get_resource_path(syscalls.Syscalls[node1.nr](node1))
+            path2 = toctou.get_resource_path(syscalls.Syscalls[node2.nr](node2))
+            return os.path.isabs(path1) and os.path.isabs(path2) and \
+                   os.path.commonprefix(path1, path2) not in [path1, path2]
 
         def find_races_resource(resource):
             pairs = list()
@@ -205,6 +218,9 @@ class RaceResource(Race):
                             continue
                         if node1.write_access == 0 and node2.write_access == 0:
                             continue
+                        if skip_parent_dir_race(resource, node1.syscall,
+                                node2.syscall):
+                            continue
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
                         if node1.serial < node2.serial:
@@ -217,7 +233,8 @@ class RaceResource(Race):
             if resource.type in ignore_type:
                 continue
             # ignore resource with too many events (FIXME)
-            if len(resource.events) > ignore_thresh:
+            if RaceResource.threshold and \
+               len(resource.events) > RaceResource.threshold:
                 logging.info('resource %d has too many events (%d); skip'
                              % (resource.id, len(resource.events)))
                 continue
@@ -622,6 +639,7 @@ def find_show_races(graph, args):
     count = 0
 
     # step 1: find resource races
+    RaceResource.threshold = args.threshold
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
     total += len(race_list)

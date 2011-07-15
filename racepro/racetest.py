@@ -240,6 +240,7 @@ def do_one_test(args, t_name, t_exec):
 
 def uninitialized(args):
     if 'timeout' not in args: args.timeout = 0
+    if 'threshold' not in args: args.threshold = 100
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
     if 'max_runtime' not in args: args.max_runtime = None

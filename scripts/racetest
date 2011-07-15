@@ -103,6 +103,7 @@ if args.config:
 
             if k == 'name': args.name = v
             elif k == 'timeout': args.timeout = v
+            elif k == 'threshold': args.threshold = v
             elif k == 'script-run': args.run = v
             elif k == 'script-pre': args.pre = v
             elif k == 'script-post': args.post = v
