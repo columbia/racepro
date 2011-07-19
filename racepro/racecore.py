@@ -84,7 +84,7 @@ def crosscut_to_bookmark(crosscut):
     return bookmark
 
 def syscall_name(nr):
-    if nr in syscalls.Syscalls):
+    if nr in syscalls.Syscalls:
         return syscalls.Syscalls[nr].name
     else:
         return '???(nr=%d)' % nr
