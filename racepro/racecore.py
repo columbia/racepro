@@ -84,7 +84,7 @@ def crosscut_to_bookmark(crosscut):
     return bookmark
 
 def syscall_name(nr):
-    if nr < len(syscalls.Syscalls):
+    if nr in syscalls.Syscalls:
         return syscalls.Syscalls[nr].name
     else:
         return '???(nr=%d)' % nr
@@ -198,10 +198,11 @@ class RaceResource(Race):
                                      scribe.SCRIBE_RES_TYPE_INODE]:
                 return False
 
-            path1 = toctou.get_resource_path(syscalls.Syscalls[node1.nr](node1))
-            path2 = toctou.get_resource_path(syscalls.Syscalls[node2.nr](node2))
-            return os.path.isabs(path1) and os.path.isabs(path2) and \
-                   os.path.commonprefix(path1, path2) not in [path1, path2]
+            path1 = syscalls.get_resource_path(syscalls.event_to_syscall(node1))
+            path2 = syscalls.get_resource_path(syscalls.event_to_syscall(node2))
+            return path1 and path2 and \
+                   os.path.isabs(path1) and os.path.isabs(path2) and \
+                   os.path.commonprefix([path1, path2]) not in [path1, path2]
 
         def find_races_resource(resource):
             pairs = list()
