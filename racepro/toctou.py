@@ -37,19 +37,12 @@ queriers  = list()
 
 ##################################################################
 
-def event_to_syscall(event):
-    """Convert a syscall event to Syscall object"""
-    syscall = syscalls.Syscalls[event.nr](event)
-    return syscall
-
-###############################################################################
-
 class Pattern:
     def check(self, event1, event2):
         """Check if the event pair causes toctou racing"""
 
-        s1 = event_to_syscall(event1)
-        s2 = event_to_syscall(event2)
+        s1 = syscalls.event_to_syscall(event1)
+        s2 = syscalls.event_to_syscall(event2)
         if not (s1 and s1):
             return False
 
@@ -63,8 +56,8 @@ class Pattern:
     def generate(self, event1, event2):
         """Generate string to run in the attacker"""
 
-        s1 = event_to_syscall(event1)
-        s2 = event_to_syscall(event2)
+        s1 = syscalls.event_to_syscall(event1)
+        s2 = syscalls.event_to_syscall(event2)
         if not (s1 and s1):
             return False
 
@@ -135,32 +128,6 @@ class NodeBookmark:
 
 ##############################################################################
 
-def get_resource_path(s):
-    if hasattr(s.node, 'file_info') and 'path' in s.node.file_info:
-        return s.node.file_info['path']
-
-    syscalls_info_path = [
-        SYS_stat, SYS_stat64, SYS_access, SYS_creat,
-        SYS_mknod, SYS_open, SYS_mkdir, SYS_rmdir, SYS_chmod,
-        SYS_chown, SYS_truncate, SYS_execve, SYS_readlink,
-        SYS_chdir, SYS_chroot, SYS_unlink,
-        ]
-
-    syscalls_info_oldname = [
-        SYS_rename, SYS_link, SYS_symlink,
-        ]
-
-    syscalls_info_dir = [
-        SYS_mount,
-        ]
-
-    if s.belongs_to(syscalls_info_path):
-        return s.path
-    elif s.belongs_to(syscalls_info_oldname):
-        return s.oldname
-    elif s.belongs_to(syscalls_info_dir):
-        return s.dir
-
 def consider_path(path):
     bad_prefix = ['/proc', '/dev', '/tmp/isolate']
     for prefix in bad_prefix:
@@ -183,8 +150,8 @@ class NodeBookmarkFile(NodeBookmark):
 
         if before:
             if event.nr in syscalls_node_file:
-                syscall = event_to_syscall(event)
-                path = get_resource_path(syscall)
+                syscall = syscalls.event_to_syscall(event)
+                path = syscalls.get_resource_path(syscall)
                 return consider_path(path)
 
         return False
@@ -192,11 +159,11 @@ class NodeBookmarkFile(NodeBookmark):
     def upon_bookmark(self, event, exe, before=False, after=False):
         assert (before and not after) or (after and not before)
 
-        syscall = event_to_syscall(event)
+        syscall = syscalls.event_to_syscall(event)
         if not syscall:
             return
 
-        path = get_resource_path(syscall)
+        path = syscalls.get_resource_path(syscall)
 
         assert path, 'Path expected for syscall %s ?' % syscall
         assert before
@@ -227,7 +194,7 @@ class NodeBookmarkFile(NodeBookmark):
                     if attr.startswith('st_'):
                         file_info[prefix + attr] = getattr(file_stat, attr)
 
-        path = os.path.join(cwd, get_resource_path(syscall))
+        path = os.path.join(cwd, syscalls.get_resource_path(syscall))
         set_event_file_info(os.path.normpath(path), '')
 
         path = os.path.dirname(path)
@@ -246,8 +213,8 @@ queriers.append(NodeBookmarkFile())
 #############################################################################
 
 def perm_checker(s1, s2):
-    path1 = get_resource_path(s1)
-    path2 = get_resource_path(s2)
+    path1 = syscalls.get_resource_path(s1)
+    path2 = syscalls.get_resource_path(s2)
     if path1 != path2 or not consider_path(path2):
         return False
     if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
@@ -282,7 +249,7 @@ def link_attack_generator(s1, s2):
         key = 'ino'
     else:
         assert False, 'The system call is not handled'
-    return '%s %s' % (get_resource_path(s2), key)
+    return '%s %s' % (syscalls.get_resource_path(s2), key)
 
 def link_pre_attacker(param):
     assert len(param) == 2
