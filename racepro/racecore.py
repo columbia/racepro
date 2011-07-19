@@ -255,7 +255,7 @@ class RaceResource(Race):
 class RaceSignal(Race):
     def __init__(self, node):
         Race.__init__(self)
-        self.signal = signal
+        self.signal = node
 
     def __str__(self):
         node = self.node
