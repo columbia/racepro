@@ -274,6 +274,8 @@ class RaceSignal(Race):
 
     def prepare(self, graph):
         node = self.signal.handled
+        if not node:
+            return False
         crosscut = graph.crosscut([node])
 
         # bookmarks
@@ -648,22 +650,18 @@ def find_show_races(graph, args):
     races = race_list
 
     # step 2: find exit-exit-wait races
-    if args.no_exit_races:
-        race_list = list()
-    else:
+    if not args.no_exit_races:
         race_list = RaceList(graph, RaceExitWait.find_races)
-    total += len(race_list)
-    count = output_races(race_list, args.path, 'EXIT-WAIT', count, args.count)
-    races.extend(race_list)
+        total += len(race_list)
+        count = output_races(race_list, args.path, 'EXIT-WAIT', count, args.count)
+        races.extend(race_list)
 
     # step 3: find signal races
-    if args.no_signal_races:
-        race_list = list()
-    else:
+    if not args.no_signal_races:
         race_list = RaceList(graph, RaceSignal.find_races)
-    total += len(race_list)
-    count = output_races(race_list, args.path, 'SIGNAL', count, args.count)
-    races.extend(race_list)
+        total += len(race_list)
+        count = output_races(race_list, args.path, 'SIGNAL', count, args.count)
+        races.extend(race_list)
 
     # step 4: statistics
     print('Generated %d logs for races out of %d candidates' % (count, total))
