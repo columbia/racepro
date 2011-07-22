@@ -84,31 +84,41 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
 
     if wait:
         context.wait()
-        
-    if deadlock:
+
+        if deadlock:
+            signal.setitimer(signal.ITIMER_REAL, 0, 0)
+
+    return (context, pinit)
+
+def _do_scribe_wait(context, p, timeout=None, kill=False):
+    logging.info("timeout: %s, kill: %s" % (timeout, kill))
+    try:
+        if not timeout:
+            assert not kill
+            logging.info("context.wait() [1]")
+            context.wait()
+            return p.wait()
+
+        time.sleep(float(timeout))
+
+        r = p.poll()
+        if r is not None:
+            logging.info("context.wait() [2]")
+            context.wait()
+            return p.wait()
+
+        if kill:
+            try:
+                p.kill()
+            except OSError:
+                pass
+            logging.info("context.wait() [3]")
+            context.wait()
+            return p.wait()
+
+        return None
+    finally:
         signal.setitimer(signal.ITIMER_REAL, 0, 0)
-
-    return pinit
-
-def _do_scribe_wait(p, timeout=None, kill=False):
-    if not timeout:
-        assert not kill
-        return p.wait()
-
-    time.sleep(float(timeout))
-
-    r = p.poll()
-    if r is not None:
-        return p.wait()
-
-    if kill:
-        try:
-            p.kill()
-        except OSError:
-            pass
-        return p.wait()
-
-    return None
 
 def _do_scribe_script(exe, script, redirect):
     if script:
@@ -161,11 +171,10 @@ def scribe_record(args, logfile=None,
 
         with open(logfile, 'w') as file:
             try:
-                pinit = _do_scribe_exec(cmd, file, exe,
-                                        args.redirect, flags,
-                                        record=True,
-                                        wait = not args.max_runtime)
-                _do_scribe_wait(pinit, args.max_runtime,
+                context, pinit = _do_scribe_exec(
+                        cmd, file, exe, args.redirect, flags,
+                        record=True, wait = not args.max_runtime)
+                _do_scribe_wait(context, pinit, args.max_runtime,
                                 kill=not not args.max_runtime)
             except Exception as e:
                 logging.error('failed recording: %s' % e)
@@ -201,11 +210,11 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
             pinit = None
             ret = None
             try:
-                pinit =  _do_scribe_exec(None, file, exe, args.redirect, 0,
-                                         deadlock=1, replay=True,
-                                         bookmark_cb=bookmark_cb,
-                                         wait = not args.max_runtime)
-                ret = _do_scribe_wait(pinit, args.max_runtime,
+                context, pinit =  _do_scribe_exec(
+                        None, file, exe, args.redirect, 0, deadlock=1,
+                        replay=True, bookmark_cb=bookmark_cb,
+                        wait = not args.max_runtime)
+                ret = _do_scribe_wait(context, pinit, args.max_runtime,
                                       not not args.max_runtime)
             except scribe.DeadlockError as derr:
                 logging.info(str(derr))
@@ -240,8 +249,8 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
         elif success and verbose:
             print(verbose + 'BUG replayed but not tested')
 
-        if args.max_runtime:
-            _do_scribe_wait(pinit, 0.01, True)
+        if args.max_runtime and success:
+            _do_scribe_wait(context, pinit, 0.01, True)
 
         if post_replay:
             logging.info('    running post-replay callback...')
