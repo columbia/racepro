@@ -51,10 +51,17 @@ class ExecuteError(Exception):
 #############################################################################
 
 class Execute:
-    def prepare(self):
+    def prepare(self, reload_proc=False):
         if self.chroot:
             os.chroot(self.chroot)
             os.chdir(os.getcwd())
+
+        if reload_proc:
+            # We might need to reload /proc since we are potentially executing
+            # prepare() in a different PID namespace than the caller of
+            # open().
+            sudo(['mount', '-t', 'proc', 'proc', '/proc'])
+
 
     def execute(self, cmd, **kwargs):
         if self.chroot:
