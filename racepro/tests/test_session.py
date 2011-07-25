@@ -110,9 +110,9 @@ def test_process_syscall():
     def get_syscall(e):
         return e.syscall
     assert_raises(AttributeError, get_syscall, events[0])
-    assert_raises(AttributeError, get_syscall, events[1])
     assert_raises(AttributeError, get_syscall, events[4])
 
+    assert_equal(events[1].syscall, events[1])
     assert_equal(events[2].syscall, events[1])
     assert_equal(events[6].syscall, events[5])
     assert_equal(events[7].syscall, events[5])

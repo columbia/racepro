@@ -1,5 +1,5 @@
 from nose.tools import *
-from racepro.execution_graph import *
+from racepro.execgraph import *
 from racepro.unistd import *
 
 def test_fork_wait_dep():
