@@ -368,6 +368,7 @@ NR_sendmsg                = scribe.__NR_sendmsg
 NR_recv                   = scribe.__NR_recv
 NR_recvfrom               = scribe.__NR_recvfrom
 NR_recvmsg                = scribe.__NR_recvmsg
+NR_connect                = scribe.__NR_connect
 
 SYS_fork       = set([NR_fork, NR_clone, NR_vfork])
 SYS_exit       = set([NR_exit, NR_exit_group])
