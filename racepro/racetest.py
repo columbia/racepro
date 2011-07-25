@@ -177,7 +177,7 @@ def do_one_test(args, t_name, t_exec):
         logging.info('  recording original exceution (twice)')
         if not scribewrap.scribe_record(args):
             return True if args.keepgoing else False
-        if not scribewrap.scribe_record(args):
+        if not args.jailed and not scribewrap.scribe_record(args):
             return True if args.keepgoing else False
 
         t_replay = datetime.datetime.now()
