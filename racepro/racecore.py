@@ -234,8 +234,8 @@ class RaceResource(Race):
             if resource.type in ignore_type:
                 continue
             # ignore resource with too many events (FIXME)
-            if RaceResource.threshold and \
-               len(resource.events) > RaceResource.threshold:
+            if RaceResource.max_races and \
+               len(resource.events) > RaceResource.max_races:
                 logging.info('resource %d has too many events (%d); skip'
                              % (resource.id, len(resource.events)))
                 continue
@@ -620,7 +620,7 @@ class RaceToctou(Race):
 
 ##############################################################################
 
-def output_races(race_list, path, desc, count, limit):
+def output_races(race_list, path, desc, count):
     print('-' * 79)
     print('%s' % desc)
     print('  found %d potential races' % len(race_list))
@@ -629,8 +629,6 @@ def output_races(race_list, path, desc, count, limit):
     logging.debug('Race list %s' % race_list)
 
     for race in race_list:
-        if count >= limit:
-            break;
         if race.prepare(race_list.graph):
             count += 1
             print('RACE %2d: %s' % (count, race))
@@ -643,11 +641,11 @@ def find_show_races(graph, args):
     count = 0
 
     # step 1: find resource races
-    RaceResource.threshold = args.threshold
+    RaceResource.max_races = args.max_races
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
     total += len(race_list)
-    count = output_races(race_list, args.path, 'RESOURCE', count, args.count)
+    count = output_races(race_list, args.path, 'RESOURCE', count)
     races = race_list
 
     # step 2: find exit-exit-wait races
@@ -656,7 +654,7 @@ def find_show_races(graph, args):
     else:
         race_list = RaceList(graph, RaceExitWait.find_races)
     total += len(race_list)
-    count = output_races(race_list, args.path, 'EXIT-WAIT', count, args.count)
+    count = output_races(race_list, args.path, 'EXIT-WAIT', count)
     races.extend(race_list)
 
     # step 3: find signal races
@@ -665,7 +663,7 @@ def find_show_races(graph, args):
     else:
         race_list = RaceList(graph, RaceSignal.find_races)
     total += len(race_list)
-    count = output_races(race_list, args.path, 'SIGNAL', count, args.count)
+    count = output_races(race_list, args.path, 'SIGNAL', count)
     races.extend(race_list)
 
     # step 4: statistics
@@ -730,7 +728,7 @@ def find_show_toctou(graph, args):
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
     total += len(race_list)
-    count = output_races(race_list, args.path, 'TOCTOU', count, args.count)
+    count = output_races(race_list, args.path, 'TOCTOU', count)
 
     # step 2: statistics
     print('Generated %d logs for races of of %d candidates' % (count, total))
