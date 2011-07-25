@@ -134,11 +134,13 @@ class Process:
         if e.is_a(scribe.EventSyscallExtra):
             self.syscalls.append(e)
             self.current_syscall = e
-        elif e.is_a(scribe.EventSyscallEnd):
+
+        if self.current_syscall is not None:
+            e.syscall = self.current_syscall
+
+        if e.is_a(scribe.EventSyscallEnd):
             check_execve(self.current_syscall)
             self.current_syscall = None
-        elif self.current_syscall is not None:
-            e.syscall = self.current_syscall
 
     def __str__(self):
         return "pid=%d (%s)" % (self.pid, self.name if self.name else "??")
