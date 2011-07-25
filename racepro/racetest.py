@@ -186,8 +186,11 @@ def do_one_test(args, t_name, t_exec):
         # an "external" script; We expect replay to also stop similarly, so
         # we don't need to temporarilty turn off args.max_runtime.
         logging.info('  replaying original execution')
+        max_runtime = args.max_runtime
+        args.max_runtime = 0
         if not scribewrap.scribe_replay(args):
             return True if args.keepgoing else False
+        args.max_runtime = max_runtime
 
     else:
         t_replay = t_start
@@ -240,13 +243,12 @@ def do_one_test(args, t_name, t_exec):
 
 def uninitialized(args):
     if 'timeout' not in args: args.timeout = 0
-    if 'threshold' not in args: args.threshold = 100
+    if 'max_races' not in args: args.max_races = 100
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
     if 'max_runtime' not in args: args.max_runtime = None
     if 'archive' not in args: args.archive = False
     if 'netns' not in args: args.netns = False
-    if 'count' not in args: args.count = 5000
     if 'keepgoing' not in args: args.keepgoing = False
     if 'outdir' not in args: args.outdir = None
     if 'redirect' not in args: args.redirect = None

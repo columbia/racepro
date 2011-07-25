@@ -40,9 +40,9 @@ parser_io.add_argument('-o', '--output', dest='path', metavar='PREFIX',
                        help='Prefix for output files')
 
 parser_races = argparse.ArgumentParser(add_help=False)
-parser_races.add_argument('-c', '--count', dest='count',
-                          metavar='COUNT', type=int, default=1000,
-                          help='Limit results to COUNT races')
+parser_races.add_argument('-c', '--max-races', dest='max_races',
+                          metavar='MAX', type=int, default=100,
+                          help='Limit results to MAX races')
 parser_races.add_argument('--no-exit-races', dest='no_exit_races',
                           action='store_true', default=False,
                           help='Do not detect exit-exit-wait race')
@@ -84,4 +84,5 @@ if not args.path:
     args.path = os.path.splitext(args.logfile)[0]
 
 ret = args.func(args)
-exit(0 if ret >= 0 else -ret)
+exit(0)
+
