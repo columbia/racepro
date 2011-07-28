@@ -274,6 +274,9 @@ class RaceSignal(Race):
 
     def prepare(self, graph):
         node = self.signal.handled
+        if not node:
+            return False
+
         crosscut = graph.crosscut([node])
 
         # bookmarks
