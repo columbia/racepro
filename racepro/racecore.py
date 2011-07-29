@@ -84,7 +84,10 @@ def crosscut_to_bookmark(crosscut):
     return bookmark
 
 def syscall_name(nr):
-    return syscalls.Syscalls[nr].name
+    if nr in syscalls.Syscalls:
+        return syscalls.Syscalls[nr].name
+    else:
+        return '???(nr=%d)' % nr
 
 ##############################################################################
 # races of RESOURCES
@@ -188,7 +191,18 @@ class RaceResource(Race):
         nodes = set()
 
         ignore_type = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
-        ignore_thresh = 100
+
+        def skip_parent_dir_race(resource, node1, node2):
+            if resource.type not in [scribe.SCRIBE_RES_TYPE_FILE,
+                                     scribe.SCRIBE_RES_TYPE_FILES_STRUCT,
+                                     scribe.SCRIBE_RES_TYPE_INODE]:
+                return False
+
+            path1 = syscalls.get_resource_path(syscalls.event_to_syscall(node1))
+            path2 = syscalls.get_resource_path(syscalls.event_to_syscall(node2))
+            return path1 and path2 and \
+                   os.path.isabs(path1) and os.path.isabs(path2) and \
+                   os.path.commonprefix([path1, path2]) not in [path1, path2]
 
         def find_races_resource(resource):
             pairs = list()
@@ -205,6 +219,9 @@ class RaceResource(Race):
                             continue
                         if node1.write_access == 0 and node2.write_access == 0:
                             continue
+                        if skip_parent_dir_race(resource, node1.syscall,
+                                node2.syscall):
+                            continue
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
                         if node1.serial < node2.serial:
@@ -217,7 +234,8 @@ class RaceResource(Race):
             if resource.type in ignore_type:
                 continue
             # ignore resource with too many events (FIXME)
-            if len(resource.events) > ignore_thresh:
+            if RaceResource.max_races and \
+               len(resource.events) > RaceResource.max_races:
                 logging.info('resource %d has too many events (%d); skip'
                              % (resource.id, len(resource.events)))
                 continue
@@ -237,7 +255,7 @@ class RaceResource(Race):
 class RaceSignal(Race):
     def __init__(self, node):
         Race.__init__(self)
-        self.signal = signal
+        self.signal = node
 
     def __str__(self):
         node = self.node
@@ -256,6 +274,9 @@ class RaceSignal(Race):
 
     def prepare(self, graph):
         node = self.signal.handled
+        if not node:
+            return False
+
         crosscut = graph.crosscut([node])
 
         # bookmarks
@@ -599,7 +620,7 @@ class RaceToctou(Race):
 
 ##############################################################################
 
-def output_races(race_list, path, desc, count, limit):
+def output_races(race_list, path, desc, count):
     print('-' * 79)
     print('%s' % desc)
     print('  found %d potential races' % len(race_list))
@@ -608,8 +629,6 @@ def output_races(race_list, path, desc, count, limit):
     logging.debug('Race list %s' % race_list)
 
     for race in race_list:
-        if count >= limit:
-            break;
         if race.prepare(race_list.graph):
             count += 1
             print('RACE %2d: %s' % (count, race))
@@ -622,10 +641,11 @@ def find_show_races(graph, args):
     count = 0
 
     # step 1: find resource races
+    RaceResource.max_races = args.max_races
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
     total += len(race_list)
-    count = output_races(race_list, args.path, 'RESOURCE', count, args.count)
+    count = output_races(race_list, args.path, 'RESOURCE', count)
     races = race_list
 
     # step 2: find exit-exit-wait races
@@ -634,7 +654,7 @@ def find_show_races(graph, args):
     else:
         race_list = RaceList(graph, RaceExitWait.find_races)
     total += len(race_list)
-    count = output_races(race_list, args.path, 'EXIT-WAIT', count, args.count)
+    count = output_races(race_list, args.path, 'EXIT-WAIT', count)
     races.extend(race_list)
 
     # step 3: find signal races
@@ -643,7 +663,7 @@ def find_show_races(graph, args):
     else:
         race_list = RaceList(graph, RaceSignal.find_races)
     total += len(race_list)
-    count = output_races(race_list, args.path, 'SIGNAL', count, args.count)
+    count = output_races(race_list, args.path, 'SIGNAL', count)
     races.extend(race_list)
 
     # step 4: statistics
@@ -708,7 +728,7 @@ def find_show_toctou(graph, args):
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
     total += len(race_list)
-    count = output_races(race_list, args.path, 'TOCTOU', count, args.count)
+    count = output_races(race_list, args.path, 'TOCTOU', count)
 
     # step 2: statistics
     print('Generated %d logs for races of of %d candidates' % (count, total))

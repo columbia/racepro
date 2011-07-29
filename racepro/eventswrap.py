@@ -40,7 +40,7 @@ def mutate_events(graph,
     @replace: events to substitutee [{ old1:new1 },{ old2,new2 }..]
     """
 
-    def check_bookmarks(bookmarks, nl):
+    def check_bookmarks(nl):
 
         def live_processes(bmark):
             def proc_is_alive(p):
@@ -64,13 +64,13 @@ def mutate_events(graph,
                         event.type = scribe.SCRIBE_BOOKMARK_PRE_SYSCALL
                     event.id = n
                     event.npr = len(live_processes(bmark))
-                    logging.debug('[%d] bookmark at syscall %s' %
-                                  (proc.pid, nl.node))
+                    logging.debug('[%d] bookmark at syscall %s npr %d' %
+                                  (proc.pid, nl.node, event.npr))
                     yield session.Event(event)
             except KeyError:
                 pass
 
-    def check_inject(injects, nl):
+    def check_inject(nl):
         proc = nl.node.proc
         try:
             for a in injects[proc][nl]:
@@ -83,7 +83,7 @@ def mutate_events(graph,
         except KeyError:
             pass
 
-    def check_cutoff(cutoff, nl):
+    def check_cutoff(nl):
         try:
             if cutoff[proc] == nl:
                 logging.debug('[%d] cutoff at syscall %s' % (proc.pid, node))
@@ -91,13 +91,13 @@ def mutate_events(graph,
         except KeyError:
             pass
 
-    def consider_event(node, when):
+    def consider_event(nl):
         # pid bookmark ?
-        for event in check_bookmarks(bookmarks, NodeLoc(node, when)):
+        for event in check_bookmarks(nl):
             yield event
 
         # pid inject ?
-        for event in check_inject(injects, NodeLoc(node, when)):
+        for event in check_inject(nl):
             if event.action == scribe.SCRIBE_INJECT_ACTION_PSFLAGS:
                 if event.arg2 & scribe.SCRIBE_PS_ENABLE_RESOURCE:
                     relaxed[proc]['resource'] = True
@@ -106,7 +106,7 @@ def mutate_events(graph,
             yield event
 
         # pid cutoff ?
-        if check_cutoff(cutoff, NodeLoc(node, when)):
+        if check_cutoff(nl):
             inactive[proc] = True
 
     def is_resource_event(node):
@@ -118,45 +118,67 @@ def mutate_events(graph,
         return node.is_a(scribe.EventData) or \
             node.is_a(scribe.EventDataExtra)
 
-    def events_for_node(node, sys):
-        proc = node.proc
+    def new_events_of_event(event):
+        proc = event.proc
 
         # not strictly needed here, but can expedite things
         if proc in inactive:
             return
 
         # ignore old bookmarks
-        if node.is_a(scribe.EventBookmark):
+        if event.is_a(scribe.EventBookmark):
             return
 
         # actions before a syscall
-        if node.is_a(scribe.EventSyscallExtra):
-            for event in consider_event(sys, 'before'):
-                yield event
+        if event.is_a(scribe.EventSyscallExtra):
+            for new_event in consider_event(NodeLoc(event.syscall, 'before')):
+                yield new_event
 
         if proc in relaxed:
             # skip 'resource' events ?
-            if relaxed[proc]['resource'] and is_resource_event(node):
+            if relaxed[proc]['resource'] and is_resource_event(event):
                 return
             # skip 'data' events ?
-            if relaxed[proc]['data'] and is_data_event(node):
+            if relaxed[proc]['data'] and is_data_event(event):
                 return
 
         # replace this event ?
-        if node in replace:
-            node = replace[node]
+        if event in replace:
+            event = replace[event]
 
-        if node != proc.first_anchor and node != proc.last_anchor:
-            yield node
+        if event not in [proc.first_anchor, proc.last_anchor]:
+            yield event
 
         # actions after a syscall
-        if node.is_a(scribe.EventSyscallEnd):
-            for event in consider_event(sys, 'after'):
-                yield event
+        if event.is_a(scribe.EventSyscallEnd):
+            for new_event in consider_event(NodeLoc(event.syscall, 'after')):
+                yield new_event
 
-        if node.is_a(scribe.EventQueueEof):
+        if event == proc.first_anchor:
+            for new_event in consider_event(NodeLoc(event, 'after')):
+                yield new_event
+
+        if event.is_a(scribe.EventQueueEof):
             endofq[proc] = True
             inactive[proc] = True
+
+    def new_events_of_node(node):
+        def node_and_after(node):
+            if node == proc.first_anchor:
+                return itertools.chain([node], proc.events)
+            elif node == proc.last_anchor:
+                return [node]
+            else:
+                return itertools.chain([node], proc.events.after(node))
+
+        def events_of_node(node):
+            return itertools.takewhile(lambda e: e != node.next_node(),
+                                       node_and_after(node))
+
+        for event in events_of_node(node):
+            for new_event in new_events_of_event(event):
+                yield new_event
+
 
     if not bookmarks: bookmarks = dict()
     if not injects: injects = dict()
@@ -176,26 +198,15 @@ def mutate_events(graph,
 
     for node in networkx.algorithms.dag.topological_sort(graph):
         proc = node.proc
-
-        def node_and_after(node):
-            if node == proc.first_anchor:
-                return proc.events
-            elif node == proc.last_anchor:
-                return list()
-            else:
-                return itertools.chain([node], proc.events.after(node))
-
-        for nd in itertools.takewhile(lambda e: e != node.next_node(),
-                                      node_and_after(node)):
-            for event in events_for_node(nd, node):
-                if not event:
-                    continue
-                if proc in inactive:
-                    continue
-                if proc != current:
-                    yield session.Event(scribe.EventPid(proc.pid))
-                    current = proc
-                yield event
+        for new_event in new_events_of_node(node):
+            if not new_event:
+                continue
+            if proc in inactive:
+                continue
+            if proc != current:
+                yield session.Event(scribe.EventPid(proc.pid))
+                current = proc
+            yield new_event
 
     # indicate go-live where needed
     for proc in graph.processes.itervalues():

@@ -421,3 +421,41 @@ def declare_syscall_sets(sets):
         syscallset_name = 'SYS_%s' % name
         syscalls = [getattr(unistd, 'NR_%s' % s) for s in syslist]
         __builtins__[syscallset_name] = frozenset(syscalls)
+
+
+def event_to_syscall(event):
+    """Convert a syscall event to Syscall object"""
+    if event.nr in Syscalls:
+        return Syscalls[event.nr](event)
+    else:
+        return None
+
+
+def get_resource_path(s):
+    if s is None:
+        return None
+
+    if hasattr(s.node, 'file_info') and 'path' in s.node.file_info:
+        return s.node.file_info['path']
+
+    syscalls_info_path = [
+        SYS_stat, SYS_stat64, SYS_access, SYS_creat,
+        SYS_mknod, SYS_open, SYS_mkdir, SYS_rmdir, SYS_chmod,
+        SYS_chown, SYS_truncate, SYS_execve, SYS_readlink,
+        SYS_chdir, SYS_chroot, SYS_unlink,
+        ]
+
+    syscalls_info_oldname = [
+        SYS_rename, SYS_link, SYS_symlink,
+        ]
+
+    syscalls_info_dir = [
+        SYS_mount,
+        ]
+
+    if s.belongs_to(syscalls_info_path):
+        return s.path
+    elif s.belongs_to(syscalls_info_oldname):
+        return s.oldname
+    elif s.belongs_to(syscalls_info_dir):
+        return s.dir
