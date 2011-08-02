@@ -197,12 +197,25 @@ class RaceResource(Race):
                                      scribe.SCRIBE_RES_TYPE_FILES_STRUCT,
                                      scribe.SCRIBE_RES_TYPE_INODE]:
                 return False
+            for node in [node1, node2]:
+                if not node: continue
+                if not hasattr(node, 'path'):
+                    node.path = syscalls.get_resource_path(
+                            syscalls.event_to_syscall(node))
+                    if node.path and not os.path.isabs(node.path):
+                        node.path = None
+                if not node.path:
+                    return False
+            return node1 and node2 and \
+                   os.path.commonprefix([node1.path, node2.path]) not in \
+                   [node1.path, node2.path]
 
-            path1 = syscalls.get_resource_path(syscalls.event_to_syscall(node1))
-            path2 = syscalls.get_resource_path(syscalls.event_to_syscall(node2))
-            return path1 and path2 and \
-                   os.path.isabs(path1) and os.path.isabs(path2) and \
-                   os.path.commonprefix([path1, path2]) not in [path1, path2]
+        def skip_false_positive(resource, node1, node2):
+            if node1: node1 = node1.syscall
+            if node2: node2 = node2.syscall
+            if skip_parent_dir_race(resource, node1, node2): 
+                return True
+            return False
 
         def find_races_resource(resource):
             pairs = list()
@@ -212,15 +225,18 @@ class RaceResource(Race):
                 dict_values_to_lists(ievents_per_proc)
             for proc1, proc2 in combinations(events_per_proc, 2):
                 for node1 in events_per_proc[proc1]:
+                    if skip_false_positive(resource, node1, None):
+                        continue
                     for node2 in events_per_proc[proc2]:
+                        if skip_false_positive(resource, None, node2):
+                            continue
                         if node1.syscall.vclock.before(node2.syscall.vclock):
                             break
                         if node2.syscall.vclock.before(node1.syscall.vclock):
                             continue
                         if node1.write_access == 0 and node2.write_access == 0:
                             continue
-                        if skip_parent_dir_race(resource, node1.syscall,
-                                node2.syscall):
+                        if skip_false_positive(resource, node1, node2):
                             continue
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
