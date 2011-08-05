@@ -216,11 +216,12 @@ class RaceResource(Race):
             for node in [node1, node2]:
                 if not node: continue
                 if not add_path_info(node): continue
-                for pattern in RaceResource.ignore_path:
-                    if node.path and fnmatch.fnmatch(node.path, pattern):
-                        logging.debug('False positive: %s is skipped' %
-                                      node.path)
-                        return True
+                if RaceResource.ignore_path:
+                    for pattern in RaceResource.ignore_path:
+                        if node.path and fnmatch.fnmatch(node.path, pattern):
+                            logging.debug('False positive: %s is skipped' %
+                                         node.path)
+                            return True
             return False
 
         def skip_parent_dir_race(resource, node1, node2):
