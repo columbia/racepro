@@ -670,7 +670,8 @@ def find_show_races(graph, args):
     count = 0
 
     # step 0: controlled replay to get extra info on special syscalls
-    predetect_replay(graph, args, [NodeBookmarkPath()])
+    if not args.skip_predetect:
+        predetect_replay(graph, args, [NodeBookmarkPath()])
 
     # step 1: find resource races
     RaceResource.resource_thres = args.resource_thres
@@ -706,7 +707,8 @@ def find_show_toctou(graph, args):
     count = 0
 
     # step 0: controlled replay to get extra info on special syscalls
-    predetect_replay(graph, args, [NodeBookmarkPath(), NodeBookmarkFile()])
+    if not args.skip_predetect:
+        predetect_replay(graph, args, [NodeBookmarkPath(), NodeBookmarkFile()])
 
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
@@ -872,18 +874,27 @@ def predetect_replay(graph, args, queriers):
                 querier.upon_bookmark(nl.node, exe,
                                       before=nl.before,
                                       after=nl.after)
-
+        bookmarks[id] = None
         return True
 
-    bookmark_cb = scribewrap.Callback(predetect_bookmark_cb, bookmarks=bookmarks)
+    max_retry_time = 3
+    retry_time = 0
 
-    ret = scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb)
-    if not ret:
-        raise execute.ExecuteError('predetect replay', ret)
+    while retry_time < max_retry_time:
+        bookmark_cb = scribewrap.Callback(predetect_bookmark_cb, bookmarks=bookmarks)
 
-    for bookmark in bookmarks:
-        for nl in bookmark.values():
-            for querier in nl.node.queriers:
-                querier.debug(nl.node)
+        ret = scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb)
+        if ret:
+            break
+        else:
+            bookmarks = [b for b in bookmarks if b is not None]
+            save_modify_log(graph, out, bookmarks, None, None, None)
+
+        retry_time += 1
+
+    for node in networkx.algorithms.dag.topological_sort(graph):
+        if hasattr(node, 'queriers'):
+            for querier in node.queriers:
+                querier.debug(node)
 
 
