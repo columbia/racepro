@@ -224,6 +224,16 @@ class RaceResource(Race):
             events_per_proc = \
                 dict_values_to_lists(ievents_per_proc)
             for proc1, proc2 in combinations(events_per_proc, 2):
+                #ignore resource with too many events
+                if RaceResource.resource_thres and \
+                    len(events_per_proc[proc1])*len(events_per_proc[proc2]) \
+                    > RaceResource.resource_thres:
+                        logging.info('resource %d has too many events: %s=>%d, %s=>%d; skip' %
+                                     (resource.id, 
+                                     proc1, len(events_per_proc[proc1]),
+                                     proc2, len(events_per_proc[proc2])))
+                        continue
+
                 for node1 in events_per_proc[proc1]:
                     if skip_false_positive(resource, node1, None):
                         continue
@@ -248,12 +258,6 @@ class RaceResource(Race):
         for resource in graph.resources.itervalues():
             # ignore some resources
             if resource.type in ignore_type:
-                continue
-            # ignore resource with too many events (FIXME)
-            if RaceResource.max_races and \
-               len(resource.events) > RaceResource.max_races:
-                logging.info('resource %d has too many events (%d); skip'
-                             % (resource.id, len(resource.events)))
                 continue
 
             pairs = find_races_resource(resource)
@@ -656,6 +660,7 @@ def find_show_races(graph, args):
     count = 0
 
     # step 1: find resource races
+    RaceResource.resource_thres = args.resource_thres
     RaceResource.max_races = args.max_races
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
