@@ -117,8 +117,6 @@ if args.config:
             elif k == 'timeout': args.timeout = float(v)
             elif k == 'resource-thres': args.resource_thres = float(v)
             elif k == 'max-races': args.max_races = int(v)
-            elif k == 'ignore-path': args.ignore_path = v
-            elif k == 'ignore-type': args.ignore_type = v
             elif k == 'script-run': args.run = v
             elif k == 'script-pre': args.pre = v
             elif k == 'script-post': args.post = v

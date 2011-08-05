@@ -2,7 +2,7 @@ import networkx
 import logging
 import struct
 import pdb
-
+import fnmatch
 from itertools import *
 
 import unistd
@@ -192,37 +192,56 @@ class RaceResource(Race):
 
         ignore_type = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
 
-        def skip_parent_dir_race(resource, node1, node2):
-            for node in [node1, node2]:
-                if not node: continue
-                if hasattr(node, 'path_info'):
-                    node.proc.path_info = node.path_info
+        def add_path_info(node):
+            if hasattr(node, 'path_info'):
+                node.proc.path_info = node.path_info
 
             if resource.type not in [scribe.SCRIBE_RES_TYPE_FILE,
                                      scribe.SCRIBE_RES_TYPE_FILES_STRUCT,
                                      scribe.SCRIBE_RES_TYPE_INODE]:
                 return False
 
+            if not hasattr(node, 'path'):
+                node.path = syscalls.get_resource_path(
+                            syscalls.event_to_syscall(node))
+                if node.path and not os.path.isabs(node.path) and \
+                   hasattr(node.proc, 'path_info'):
+                    node.path = os.path.join(node.proc.path_info['cwd'],
+                                             node.path)
+
+            logging.debug('path info: %s: %s' % (node, node.path))
+            return True
+ 
+        def skip_given_path(resource, node1, node2):
             for node in [node1, node2]:
                 if not node: continue
-                if not hasattr(node, 'path'):
-                    node.path = syscalls.get_resource_path(
-                                syscalls.event_to_syscall(node))
-                    if node.path and not os.path.isabs(node.path):
-                        if hasattr(node.proc, 'path_info'):
-                            node.path = os.path.join(node.proc.path_info['cwd'],
-                                                     node.path)
-                        else:
-                            node.path = None
-                if not node.path:
+                if not add_path_info(node): continue
+                for pattern in RaceResource.ignore_path:
+                    if node.path and fnmatch.fnmatch(node.path, pattern):
+                        logging.debug('False positive: %s is skipped' %
+                                      node.path)
+                        return True
+            return False
+
+        def skip_parent_dir_race(resource, node1, node2):
+            for node in [node1, node2]:
+                if not node: continue
+                if not add_path_info(node): continue
+                if not node.path or not os.path.isabs(node.path):
                     return False
-            return node1 and node2 and \
-                   os.path.commonprefix([node1.path, node2.path]) not in \
-                   [node1.path, node2.path]
+
+            if node1 and node2 and \
+               os.path.commonprefix([node1.path, node2.path]) not in \
+               [node1.path, node2.path]:
+                logging.debug('False positive: %s=>%s' % (node1.path,
+                    node2.path))
+                return True
 
         def skip_false_positive(resource, node1, node2):
             if node1: node1 = node1.syscall
             if node2: node2 = node2.syscall
+            if skip_given_path(resource, node1, node2):
+                return True
             if skip_parent_dir_race(resource, node1, node2): 
                 return True
             return False
@@ -676,6 +695,8 @@ def find_show_races(graph, args):
     # step 1: find resource races
     RaceResource.resource_thres = args.resource_thres
     RaceResource.max_races = args.max_races
+    RaceResource.ignore_type = args.ignore_type
+    RaceResource.ignore_path = args.ignore_path
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
     total += len(race_list)

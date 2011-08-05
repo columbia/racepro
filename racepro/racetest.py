@@ -245,8 +245,8 @@ def uninitialized(args):
     if 'timeout' not in args: args.timeout = 0
     if 'resource_thres' not in args: args.resource_thres = 1000
     if 'max_races' not in args: args.max_races = 1000
-    if 'ignore_type' not in args: args.ignore_type = None
-    if 'ignore_path' not in args: args.ignore_path = None
+    if 'ignore_type' not in args: args.ignore_type = list()
+    if 'ignore_path' not in args: args.ignore_path = list()
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
     if 'max_runtime' not in args: args.max_runtime = None
