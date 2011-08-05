@@ -193,17 +193,27 @@ class RaceResource(Race):
         ignore_type = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
 
         def skip_parent_dir_race(resource, node1, node2):
+            for node in [node1, node2]:
+                if not node: continue
+                if hasattr(node, 'path_info'):
+                    node.proc.path_info = node.path_info
+
             if resource.type not in [scribe.SCRIBE_RES_TYPE_FILE,
                                      scribe.SCRIBE_RES_TYPE_FILES_STRUCT,
                                      scribe.SCRIBE_RES_TYPE_INODE]:
                 return False
+
             for node in [node1, node2]:
                 if not node: continue
                 if not hasattr(node, 'path'):
                     node.path = syscalls.get_resource_path(
-                            syscalls.event_to_syscall(node))
+                                syscalls.event_to_syscall(node))
                     if node.path and not os.path.isabs(node.path):
-                        node.path = None
+                        if hasattr(node.proc, 'path_info'):
+                            node.path = os.path.join(node.proc.path_info['cwd'],
+                                                     node.path)
+                        else:
+                            node.path = None
                 if not node.path:
                     return False
             return node1 and node2 and \
@@ -659,6 +669,9 @@ def find_show_races(graph, args):
     total = 0
     count = 0
 
+    # step 0: controlled replay to get extra info on special syscalls
+    predetect_replay(graph, args, [NodeBookmarkPath()])
+
     # step 1: find resource races
     RaceResource.resource_thres = args.resource_thres
     RaceResource.max_races = args.max_races
@@ -688,7 +701,147 @@ def find_show_races(graph, args):
 
     return races
 
-def replay_for_toctou(graph, args):
+def find_show_toctou(graph, args):
+    total = 0
+    count = 0
+
+    # step 0: controlled replay to get extra info on special syscalls
+    predetect_replay(graph, args, [NodeBookmarkPath(), NodeBookmarkFile()])
+
+    # step 1: find toctou races
+    race_list = RaceList(graph, RaceToctou.find_races)
+    total += len(race_list)
+    count = output_races(race_list, args.path, 'TOCTOU', count)
+
+    # step 2: statistics
+    print('Generated %d logs for races of of %d candidates' % (count, total))
+    print('-' * 79)
+
+    return race_list
+
+#############################################################################
+
+class NodeBookmark:
+    def need_bookmark(self, event, before=False, after=False):
+        return False
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        assert False
+
+    def debug(self, event):
+        pass
+
+    def __init__(self):
+        pass
+
+syscalls.declare_syscall_sets({
+        "ChangeRoot" : ["chroot"],
+        "ChangeDir"  : ["chdir", "fchdir"],
+        })
+
+class NodeBookmarkPath(NodeBookmark):
+    def need_bookmark(self, event, before=False, after=False):
+        assert (before and not after) or (after and not before)
+
+        return (before and event == event.proc.syscalls[0]) or \
+               (after and event.nr in set().union(SYS_ChangeRoot, SYS_ChangeDir))
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        assert (before and not after) or (after and not before)
+
+        def get_real_pid(event, exe):
+            return exe.pids[event.proc.pid]
+
+        def get_proc_info(proc, pid, key, callback):
+            return callback('%s/%d/%s' % (proc, pid, key))
+
+        pid = get_real_pid(event, exe)
+        proc = exe.chroot + '/proc'
+
+        cwd = get_proc_info(proc, pid, 'cwd', os.readlink)
+        root = get_proc_info(proc, pid, 'root', os.readlink)
+        cwd = os.path.join('/', os.path.relpath(cwd, root))
+        root = os.path.join('/', os.path.relpath(root, exe.chroot))
+
+        path_info = dict()
+        path_info['cwd'] = os.path.normpath(cwd)
+        path_info['root'] = os.path.normpath(root)
+
+        event.path_info = path_info
+        event.proc.path_info = path_info
+
+    def debug(self, event):
+        if hasattr(event, 'path_info'):
+            logging.debug('    %s' % event)
+            for key, value in event.path_info.items():
+                logging.debug('        %s : %s' % (key, value))
+
+class NodeBookmarkFile(NodeBookmark):
+    def need_bookmark(self, event, before=False, after=False):
+        assert (before and not after) or (after and not before)
+
+        syscalls_node_file = set().union(
+            SYS_Check, SYS_FileCreate, SYS_LinkCreate, SYS_DirCreate,
+            SYS_FileRemove, SYS_LinkRemove, SYS_DirRemove, SYS_FileWrite,
+            SYS_FileRead, SYS_LinkWrite, SYS_LinkRead, SYS_DirWrite,
+            SYS_DirRead
+            )
+
+        def consider_path(path):
+            bad_prefix = ['/proc', '/dev', '/tmp/isolate']
+            for prefix in bad_prefix:
+                if path.startswith(prefix):
+                    return False
+            return True
+
+        if before:
+            if event.nr in syscalls_node_file:
+                syscall = syscalls.event_to_syscall(event)
+                path = syscalls.get_resource_path(syscall)
+                return consider_path(path)
+
+        return False
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        assert (before and not after) or (after and not before)
+
+        syscall = syscalls.event_to_syscall(event)
+        if not syscall:
+            return
+
+        path = syscalls.get_resource_path(syscall)
+
+        assert path, 'Path expected for syscall %s ?' % syscall
+        assert before
+
+        if hasattr(event, 'path_info'):
+            file_info = event.path_info
+        else:
+            file_info = event.proc.path_info
+
+        def set_event_file_info(path, prefix):
+            file_info[prefix + 'path'] = os.path.normpath(path)
+            if os.path.exists(exe.chroot + path):
+                file_stat = os.stat(exe.chroot + path)
+                for attr in dir(file_stat):
+                    if attr.startswith('st_'):
+                        file_info[prefix + attr] = getattr(file_stat, attr)
+
+        path = os.path.join(file_info['cwd'], syscalls.get_resource_path(syscall))
+        set_event_file_info(os.path.normpath(path), '')
+
+        path = os.path.dirname(path)
+        set_event_file_info(os.path.normpath(path), 'dir_')
+
+        event.file_info = file_info
+
+    def debug(self, event):
+        if hasattr(event, 'file_info'):
+            logging.debug('    %s' % event)
+            for key, value in event.file_info.items():
+                logging.debug('        %s : %s' % (key, value))
+
+def predetect_replay(graph, args, queriers):
 
     bookmarks = list()
 
@@ -698,7 +851,7 @@ def replay_for_toctou(graph, args):
 
         node.queriers = list()
 
-        for querier in toctou.queriers:
+        for querier in queriers:
             if querier.need_bookmark(node, before=True):
                 node.queriers.append(querier)
                 bookmarks.append(dict({node.proc: NodeLoc(node, 'before')}))
@@ -706,10 +859,10 @@ def replay_for_toctou(graph, args):
                 node.queriers.append(querier)
                 bookmarks.append(dict({node.proc: NodeLoc(node, 'after')}))
 
-    out = args.path + '.toctou.log'
+    out = args.path + '.pre.log'
     save_modify_log(graph, out, bookmarks, None, None, None)
 
-    def toctou_bookmark_cb(**kargs):
+    def predetect_bookmark_cb(**kargs):
         bookmarks = kargs['bookmarks']
         exe = kargs['exe']
         id = kargs['id']
@@ -722,32 +875,15 @@ def replay_for_toctou(graph, args):
 
         return True
 
-    bookmark_cb = scribewrap.Callback(toctou_bookmark_cb, bookmarks=bookmarks)
+    bookmark_cb = scribewrap.Callback(predetect_bookmark_cb, bookmarks=bookmarks)
 
-    print('ABOUT TO REPLAY TOCTOU')
     ret = scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb)
     if not ret:
-        raise execute.ExecuteError('toctou replay', ret)
+        raise execute.ExecuteError('predetect replay', ret)
 
     for bookmark in bookmarks:
         for nl in bookmark.values():
             for querier in nl.node.queriers:
                 querier.debug(nl.node)
 
-def find_show_toctou(graph, args):
-    total = 0
-    count = 0
 
-    # step 0: controlled replay to get extra info on special syscalls
-    replay_for_toctou(graph, args)
-
-    # step 1: find toctou races
-    race_list = RaceList(graph, RaceToctou.find_races)
-    total += len(race_list)
-    count = output_races(race_list, args.path, 'TOCTOU', count)
-
-    # step 2: statistics
-    print('Generated %d logs for races of of %d candidates' % (count, total))
-    print('-' * 79)
-
-    return race_list
