@@ -751,11 +751,14 @@ def find_show_races(graph, args):
 
     # step 1: find resource races
     RaceResource.resource_thres = args.resource_thres
-    RaceResource.max_races = args.max_races
     RaceResource.ignore_type = args.ignore_type
     RaceResource.ignore_path = args.ignore_path
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
+    if len(race_list) > args.max_races:
+        logging.info('Too many races generated: the rest %d races will be ignored' % 
+                     (len(race_list) - args.max_races))
+        race_list._races = race_list._races[:args.max_races]
     total += len(race_list)
     count = output_races(race_list, args.path, 'RESOURCE', count)
     races = race_list
