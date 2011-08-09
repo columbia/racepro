@@ -277,6 +277,7 @@ class Signal:
 class Session:
     def __init__(self, events):
         self.processes = dict()
+        self.all_resources = dict()
         self.resources = dict()
         self.events = list()
         self._current_proc = None # State for add_event()
@@ -309,9 +310,11 @@ class Session:
             return
 
         if e.is_a(scribe.EventResourceLockExtra):
-            if e.id not in self.resources:
-                self.resources[e.id] = Resource()
-            self.resources[e.id].add_event(e)
+            if e.id not in self.all_resources:
+                self.all_resources[e.id] = Resource()
+            self.all_resources[e.id].add_event(e)
+            if e.id not in self.resources and e.write_access != 0:
+                self.resources[e.id] = self.all_resources[e.id]
 
         if self._current_proc:
             self._current_proc.add_event(e)
