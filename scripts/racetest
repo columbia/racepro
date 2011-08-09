@@ -25,7 +25,7 @@ parser.add_argument('-n', '--netns', dest='netns',
                     action='store_true', default=False,
                     help='Use a separate network namespace in jail')
 parser.add_argument('-R', '--resource-thres', dest='resource_thres',
-                    metavar='THRES', type=int, default=100,
+                    metavar='THRES', type=int, default=1000,
                     help='Resource threshold for detection')
 parser.add_argument('-c', '--max-races', dest='max_races',
                     metavar='MAX', type=int, default=1000,
