@@ -58,20 +58,22 @@ class RaceList:
 
 ##############################################################################
 
-def _split_events_per_proc(resource, in_syscall=False):
-    per_proc = dict()
-
+def _filter_events(resource, in_syscall=False):
     def filter_belong_to_syscalls(events):
-        return ifilter(lambda e: hasattr(e, 'syscall'), events)
+        return list(ifilter(lambda e: hasattr(e, 'syscall'), events))
+
+    if not in_syscall:
+        return resource.events
+    else:
+        return filter_belong_to_syscalls(resource.events)
+
+def _split_events_per_proc(events):
+    per_proc = dict()
 
     def filter_belong_to_proc(events, proc):
         return ifilter(lambda n: n.proc == proc, events)
 
-    for proc in set(e.proc for e in resource.events):
-        if not in_syscall:
-            events = resource.events
-        else:
-            events = filter_belong_to_syscalls(resource.events)
+    for proc in set(e.proc for e in events):
         per_proc[proc] = filter_belong_to_proc(events, proc)
 
     return per_proc
@@ -209,7 +211,6 @@ class RaceResource(Race):
                     node.path = os.path.join(node.proc.path_info['cwd'],
                                              node.path)
 
-            logging.debug('path info: %s: %s' % (node, node.path))
             return True
  
         def skip_given_path(resource, node1, node2):
@@ -219,8 +220,6 @@ class RaceResource(Race):
                 if RaceResource.ignore_path:
                     for pattern in RaceResource.ignore_path:
                         if node.path and fnmatch.fnmatch(node.path, pattern):
-                            logging.debug('False positive: %s is skipped' %
-                                         node.path)
                             return True
             return False
 
@@ -234,8 +233,6 @@ class RaceResource(Race):
             if node1 and node2 and \
                os.path.commonprefix([node1.path, node2.path]) not in \
                [node1.path, node2.path]:
-                logging.debug('False positive: %s=>%s' % (node1.path,
-                    node2.path))
                 return True
 
         def skip_false_positive(resource, node1, node2):
@@ -247,36 +244,77 @@ class RaceResource(Race):
                 return True
             return False
 
-        def find_races_resource(resource):
+        def find_races_resource_optimized(resource):
             pairs = list()
-            ievents_per_proc = \
-                _split_events_per_proc(resource, in_syscall=True)
+            ievents = _filter_events(resource, in_syscall=True)
+            ievents_per_proc = _split_events_per_proc(ievents)
             events_per_proc = \
                 dict_values_to_lists(ievents_per_proc)
+            vc_index = dict((proc, dict()) for proc in events_per_proc)
+            skipped_procs = dict()
             for proc1, proc2 in combinations(events_per_proc, 2):
                 #ignore resource with too many events
                 if RaceResource.resource_thres and \
                     len(events_per_proc[proc1])*len(events_per_proc[proc2]) \
                     > RaceResource.resource_thres:
-                        logging.info('resource %d has too many events: %s=>%d, %s=>%d; skip' %
-                                     (resource.id, 
-                                     proc1, len(events_per_proc[proc1]),
-                                     proc2, len(events_per_proc[proc2])))
-                        continue
+                    skipped_procs[proc1] = len(events_per_proc[proc1])
+                    skipped_procs[proc2] = len(events_per_proc[proc2])
+                    vc_index[proc1][proc2] = vc_index[proc2][proc1] = None
+                else:
+                    vc_index[proc1][proc2] = vc_index[proc2][proc1] = 0
 
-                for node1 in events_per_proc[proc1]:
-                    if skip_false_positive(resource, node1, None):
+            if len(skipped_procs) > 0:
+                logging.info('resource %d too many events: %s' %
+                             (resource.id,
+                              ';'.join('%s=>%d' % (proc, skipped_procs[proc])
+                                       for proc in skipped_procs)))
+
+            for node1 in ievents:
+                proc1 = node1.proc
+                for proc2 in events_per_proc:
+                    if proc1 == proc2 or vc_index[proc1][proc2] is None:
                         continue
-                    for node2 in events_per_proc[proc2]:
-                        if skip_false_positive(resource, None, node2):
+                    index = vc_index[proc1][proc2]
+                    for node2 in events_per_proc[proc2][index:]:
+                        if node2.syscall.vclock.before(node1.syscall.vclock):
+                            index += 1
                             continue
+                        if node1.serial < node2.serial or \
+                           node1.syscall.vclock.before(node2.syscall.vclock):
+                            break
+                        if node1.write_access == 0 and node2.write_access == 0:
+                            continue
+                        pairs.append((node2, node1))
+                    if index < len(events_per_proc[proc2]):
+                        vc_index[proc1][proc2] = index
+                    else:
+                        vc_index[proc1][proc2] = None
+
+            return pairs
+
+        def find_races_resource_original(resource):
+            pairs = list()
+            ievents = _filter_events(resource, in_syscall=True)
+            ievents_per_proc = _split_events_per_proc(ievents)
+            events_per_proc = \
+                dict_values_to_lists(ievents_per_proc)
+            for proc1, proc2 in combinations(events_per_proc, 2):
+                #ignore resource with too many events
+                if RaceResource.resource_thres and \
+                   len(events_per_proc[proc1])*len(events_per_proc[proc2]) \
+                   > RaceResource.resource_thres:
+                     logging.info('resource %d too many events: %s=>%d, %s=>%d' %
+                                 (resource.id, 
+                                  proc1, len(events_per_proc[proc1]),
+                                  proc2, len(events_per_proc[proc2])))
+                     continue
+                for node1 in events_per_proc[proc1]:
+                    for node2 in events_per_proc[proc2]:
                         if node1.syscall.vclock.before(node2.syscall.vclock):
                             break
                         if node2.syscall.vclock.before(node1.syscall.vclock):
                             continue
                         if node1.write_access == 0 and node2.write_access == 0:
-                            continue
-                        if skip_false_positive(resource, node1, node2):
                             continue
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
@@ -285,17 +323,34 @@ class RaceResource(Race):
                         pairs.append((node1, node2))
             return pairs
 
+        find_races_resource = find_races_resource_optimized
+        skipped_resources = \
+                ifilter(lambda r_id: r_id not in graph.resources,
+                        graph.all_resources)
+        logging.debug('resources have no write access; skip: %s' %
+                      (','.join(str(graph.all_resources[r_id]) for r_id in \
+                                skipped_resources)))
+
+        walltime = 0.0
+        count = 0
         for resource in graph.resources.itervalues():
             # ignore some resources
             if resource.type in ignore_type:
                 continue
 
+            stime = time.time()
             pairs = find_races_resource(resource)
+            etime = time.time()
+            walltime += etime - stime
+            count += len(pairs)
             total += len(pairs)
 
             for node1, node2 in pairs:
                 nodes.add((node1.syscall, node2.syscall))
                 logging.debug('\tadding %s -> %s to races' % (node1, node2))
+
+        logging.debug('algorithm %s: %d races detected in %0.6f sec' %
+                (find_races_resource.func_name, count, walltime))
 
         return [RaceResource(n1, n2) for n1, n2 in nodes]
 
@@ -624,7 +679,8 @@ class RaceToctou(Race):
         nodes = set()
 
         def find_races_resource(resource):
-            events_per_proc = _split_events_per_proc(resource, in_syscall=True)
+            events = _filter_events(resource, in_syscall=True)
+            events_per_proc = _split_events_per_proc(events)
 
             for proc in events_per_proc:
                 syscalls = dict()
