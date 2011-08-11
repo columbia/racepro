@@ -210,6 +210,18 @@ class RaceResource(Race):
                 _split_events_per_proc(resource, in_syscall=True)
             events_per_proc = \
                 dict_values_to_lists(ievents_per_proc)
+            truncated_procs = list()
+            for proc in events_per_proc:
+                if RaceResource.max_accesses and \
+                   len(events_per_proc[proc]) > RaceResource.max_accesses:
+                    truncated_procs[proc.pid] = len(events_per_proc[proc])
+                    events_per_proc[proc] = \
+                        events_per_proc[proc][:RaceResource.max_accesses]
+            if truncated_procs:
+                logging.info('resource %d too many events: %s' %
+                             (resource.id,
+                              ';'.join('%s=>%d' % (pid, truncated_procs[pid])
+                                       for proc in truncated_procs)))
             for proc1, proc2 in combinations(events_per_proc, 2):
                 # OPTIMIZE: two processes have happens-before
                 if events_per_proc[proc1][-1].syscall.vclock.before(
@@ -257,11 +269,6 @@ class RaceResource(Race):
             # ignore some resources
             if resource.type in ignore_type:
                 continue
-            # ignore resource with too many events (FIXME)
-            if RaceResource.max_races and \
-               len(resource.events) > RaceResource.max_races:
-                logging.info('resource %d has too many events (%d); skip'
-                             % (resource.id, len(resource.events)))
                 continue
 
             pairs = find_races_resource(resource)
@@ -665,6 +672,7 @@ def find_show_races(graph, args):
     count = 0
 
     # step 1: find resource races
+    RaceResource.max_accesses = args.max_accesses
     RaceResource.max_races = args.max_races
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
