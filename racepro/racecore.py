@@ -700,17 +700,18 @@ def find_show_races(graph, args):
 
     return races
 
-def replay_for_toctou(graph, args):
+def predetect_replay(graph, args, queriers):
 
     bookmarks = list()
+    events = networkx.algorithms.dag.topological_sort(graph)
 
-    for node in networkx.algorithms.dag.topological_sort(graph):
+    for node in events:
         if not node.is_a(scribe.EventSyscallExtra):
             continue
 
         node.queriers = list()
 
-        for querier in toctou.queriers:
+        for querier in queriers:
             if querier.need_bookmark(node, before=True):
                 node.queriers.append(querier)
                 bookmarks.append(dict({node.proc: NodeLoc(node, 'before')}))
@@ -718,10 +719,10 @@ def replay_for_toctou(graph, args):
                 node.queriers.append(querier)
                 bookmarks.append(dict({node.proc: NodeLoc(node, 'after')}))
 
-    out = args.path + '.toctou.log'
+    out = args.path + '.pre.log'
     save_modify_log(graph, out, bookmarks, None, None, None)
 
-    def toctou_bookmark_cb(**kargs):
+    def predetect_bookmark_cb(**kargs):
         bookmarks = kargs['bookmarks']
         exe = kargs['exe']
         id = kargs['id']
@@ -734,17 +735,16 @@ def replay_for_toctou(graph, args):
 
         return True
 
-    bookmark_cb = scribewrap.Callback(toctou_bookmark_cb, bookmarks=bookmarks)
+    bookmark_cb = scribewrap.Callback(predetect_bookmark_cb, bookmarks=bookmarks)
 
-    print('ABOUT TO REPLAY TOCTOU')
     ret = scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb)
     if not ret:
-        raise execute.ExecuteError('toctou replay', ret)
+        raise execute.ExecuteError(
+                'pre-detect replay failed: try with --skip-predetect', ret)
 
-    for bookmark in bookmarks:
-        for nl in bookmark.values():
-            for querier in nl.node.queriers:
-                querier.debug(nl.node)
+    for node in events:
+        for querier in queriers:
+            querier.after_replay(graph, node)
 
 def find_show_toctou(graph, args):
     total = 0
@@ -763,3 +763,16 @@ def find_show_toctou(graph, args):
     print('-' * 79)
 
     return race_list
+
+class PredetectBookmarks:
+    def need_bookmark(self, event, before=False, after=False):
+        return False
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        assert False
+
+    def after_replay(self, graph, event):
+        pass
+
+    def __init__(self):
+        pass
