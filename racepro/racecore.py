@@ -2,6 +2,7 @@ import networkx
 import logging
 import struct
 import pdb
+import fnmatch
 
 from itertools import *
 
@@ -236,6 +237,12 @@ class RaceResource(Race):
                         pairs.append((node1, node2))
             return pairs
 
+        ignore_path = graph.processes[1].fd.values()
+        if RaceResource.ignore_path:
+            ignore_path += RaceResource.ignore_path
+        for path in ignore_path:
+            logging.debug('ignore this path: %s' % path)
+
         for resource in graph.resources.itervalues():
             # ignore resources with no WRITE access
             if not next(ifilter(lambda e: e.write_access > 0, resource.events), None):
@@ -245,11 +252,15 @@ class RaceResource(Race):
             if resource.type in ignore_type:
                 logging.debug('resource %d: skip type ignored' % resource.id)
                 continue
-            # ignore resource with too many events (FIXME)
-            if RaceResource.max_races and \
-               len(resource.events) > RaceResource.max_races:
-                logging.info('resource %d has too many events (%d); skip'
-                             % (resource.id, len(resource.events)))
+
+            # SKIP: given file path pattern
+            ismatch = False
+            if resource.type == scribe.SCRIBE_RES_TYPE_FILE:
+                for pattern in ignore_path:
+                    if fnmatch.fnmatch(resource.desc, pattern):
+                        ismatch = True
+                        break
+            if ismatch:
                 continue
 
             pairs = find_races_resource(resource)
@@ -659,6 +670,7 @@ def find_show_races(graph, args):
 
     # step 1: find resource races
     RaceResource.max_races = args.max_races
+    RaceResource.ignore_path = args.ignore_path
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
     total += len(race_list)
