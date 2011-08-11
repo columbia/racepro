@@ -760,3 +760,92 @@ class PredetectBookmarks:
 
     def __init__(self):
         pass
+
+syscalls.declare_syscall_sets({
+        "ChangePath" : ["chroot", "chdir", "fchdir"],
+        })
+
+class BookmarksForPaths(PredetectBookmarks):
+    def need_bookmark(self, event, before=False, after=False):
+        return (before and event == event.proc.syscalls[0]) or \
+               (after and event.nr in SYS_ChangePath)
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        pid = exe.pids[event.proc.pid]
+        proc = exe.chroot + '/proc'
+        cwd = os.readlink('%s/%d/cwd' % (proc, pid))
+        root = os.readlink('%s/%d/root' % (proc, pid))
+        event.proc.cwd = \
+            os.path.normpath('/' + os.path.relpath(cwd, root))
+        event.proc.root = \
+            os.path.normpath('/' + os.path.relpath(root, exe.chroot))
+
+    def after_replay(self, graph, event):
+        if event.is_a(scribe.EventSyscallExtra):
+            if hasattr(event, 'cwd'):
+                event.proc.cwd = event.cwd
+            else:
+                event.cwd = event.proc.cwd
+            if hasattr(event, 'root'):
+                event.proc.root = event.root
+            else:
+                event.root = event.proc.root
+            syscall = syscalls.event_to_syscall(event)
+            path = syscalls.get_resource_path(syscall)
+            if path is not None:
+                event.path = os.path.join(event.cwd, path)
+ 
+class BookmarksForFirstProc(PredetectBookmarks):
+    def need_bookmark(self, event, before=False, after=False):
+        return before and event.proc.pid == 1 and \
+               event == event.proc.syscalls[0]
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        event.proc.fd = dict()
+        pid = exe.pids[event.proc.pid]
+        proc = exe.chroot + '/proc'
+        for fd in os.listdir('%s/%d/fd' % (proc, pid)):
+            fd = int(fd)
+            path = os.readlink('%s/%d/fd/%d' % (proc, pid, fd))
+            if path.startswith('/'):
+                event.proc.fd[fd] = \
+                    os.path.normpath('/' + os.path.relpath(path, exe.chroot))
+            else:
+                event.proc.fd[fd] = path
+
+class BookmarksForStats(PredetectBookmarks):
+    def need_bookmark(self, event, before=False, after=False):
+        if before:
+            syscall = syscalls.event_to_syscall(event)
+            path = syscalls.get_resource_path(syscall)
+            if path is not None:
+                event.path = path
+                return True
+        return False
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        def _query_event_file_stat(event, exe, path, keys=None):
+            if not hasattr(event, 'stat'):
+                event.stat = dict()
+
+            def set_event_stat(path):
+                path = os.path.normpath(path)
+                if path in event.stat:
+                    return
+                event.stat[path] = dict()
+                if os.path.exists(exe.chroot + path):
+                    file_stat = os.stat(exe.chroot + path)
+                    for attr in dir(file_stat):
+                        if attr.startswith('st_') and (keys and attr in keys):
+                            event.stat[path][attr] = getattr(file_stat, attr)
+
+            set_event_stat(path)
+            while path != '/':
+                path = os.path.dirname(path)
+                set_event_stat(path)
+
+        event.path = os.path.join(event.proc.cwd, event.path)
+        _query_event_file_stat(event, exe, event.path, self._keys)
+
+    def __init__(self, keys=None):
+        self._keys = keys
