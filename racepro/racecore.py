@@ -671,6 +671,11 @@ def find_show_races(graph, args):
     total = 0
     count = 0
 
+    # step 0: controlled replay to get extra info on special syscalls
+    if not args.skip_predetect:
+        predetect_replay(graph, args, [BookmarksForPaths(),
+                                       BookmarksForFirstProc()])
+
     # step 1: find resource races
     RaceResource.max_accesses = args.max_accesses
     RaceResource.max_races = args.max_races
@@ -751,7 +756,8 @@ def find_show_toctou(graph, args):
     count = 0
 
     # step 0: controlled replay to get extra info on special syscalls
-    replay_for_toctou(graph, args)
+    if not args.skip_predetect:
+        predetect_replay(graph, args, [BookmarksForPaths(), BookmarksForStats()])
 
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
