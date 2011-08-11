@@ -194,16 +194,19 @@ class RaceResource(Race):
         ignore_type = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
 
         def skip_parent_dir_race(resource, node1, node2):
-            if resource.type not in [scribe.SCRIBE_RES_TYPE_FILE,
-                                     scribe.SCRIBE_RES_TYPE_FILES_STRUCT,
-                                     scribe.SCRIBE_RES_TYPE_INODE]:
+            if resource.type not in [scribe.SCRIBE_RES_TYPE_INODE,
+                                     scribe.SCRIBE_RES_TYPE_FILES_STRUCT]:
                 return False
 
-            path1 = syscalls.get_resource_path(syscalls.event_to_syscall(node1))
-            path2 = syscalls.get_resource_path(syscalls.event_to_syscall(node2))
-            return path1 and path2 and \
-                   os.path.isabs(path1) and os.path.isabs(path2) and \
-                   os.path.commonprefix([path1, path2]) not in [path1, path2]
+            for node in [node1, node2]:
+                if not node or not hasattr(node, 'path') or \
+                   not node.path or not os.path.isabs(node.path):
+                    return False
+
+            if node1 and node2 and \
+               os.path.commonprefix([node1.path, node2.path]) not in \
+               [node1.path, node2.path]:
+                return True
 
         def find_races_resource(resource):
             pairs = list()
@@ -227,8 +230,12 @@ class RaceResource(Race):
                             continue
                         if node1.write_access == 0 and node2.write_access == 0:
                             continue
+                        # SKIP: skip the accesses to the same dir but
+                        # different paths
                         if skip_parent_dir_race(resource, node1.syscall,
                                 node2.syscall):
+                            logging.debug('false positive: %s=>%s' % (node1,
+                                node2))
                             continue
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
