@@ -27,6 +27,9 @@ parser.add_argument('-n', '--netns', dest='netns',
 parser.add_argument('-c', '--max-races', dest='max_races',
                     metavar='MAX', type=int, default=100,
                     help='Limit results to MAX races')
+parser.add_argument('-M', '--max-accesses', dest='max_accesses',
+                    metavar='THRES', type=int, default=None,
+                    help='Resource threshold for detection')
 parser.add_argument('-k', '--keep-going', dest='keepgoing', 
                     action='store_true', default=False, 
                     help='Keep going with other logs on divergence of one log')
@@ -102,8 +105,9 @@ if args.config:
             print('%s = %s' % (k, v))
 
             if k == 'name': args.name = v
-            elif k == 'timeout': args.timeout = v
-            elif k == 'max_races': args.max_races = v
+            elif k == 'timeout': args.timeout = float(v)
+            elif k == 'max-races': args.max_races= int(v)
+            elif k == 'max-accesses': args.max_accesses = int(v)
             elif k == 'script-run': args.run = v
             elif k == 'script-pre': args.pre = v
             elif k == 'script-post': args.post = v
