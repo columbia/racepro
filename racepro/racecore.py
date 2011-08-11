@@ -241,6 +241,12 @@ class RaceResource(Race):
                         pairs.append((node1, node2))
             return pairs
 
+        skipped_resources = \
+                ifilter(lambda r_id: r_id not in graph.resources,
+                        graph.all_resources)
+        logging.debug('resources have no write access; skip: %s' %
+                      (','.join(str(graph.all_resources[r_id]) for r_id in \
+                                skipped_resources)))
         for resource in graph.resources.itervalues():
             # ignore some resources
             if resource.type in ignore_type:
