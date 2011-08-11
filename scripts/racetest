@@ -30,6 +30,9 @@ parser.add_argument('-c', '--max-races', dest='max_races',
 parser.add_argument('-M', '--max-accesses', dest='max_accesses',
                     metavar='THRES', type=int, default=None,
                     help='Resource threshold for detection')
+parser.add_argument('--ignore-path', dest='ignore_path',
+                    action='append', metavar='REGEX',
+                    help='Ignore specific path (regular expression)')
 parser.add_argument('-k', '--keep-going', dest='keepgoing', 
                     action='store_true', default=False, 
                     help='Keep going with other logs on divergence of one log')

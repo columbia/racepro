@@ -243,6 +243,7 @@ def uninitialized(args):
     if 'timeout' not in args: args.timeout = 0
     if 'max_races' not in args: args.max_races = 100
     if 'max_accesses' not in args: args.max_accesses = None
+    if 'ignore_path' not in args: args.ignore_path = None
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
     if 'max_runtime' not in args: args.max_runtime = None
@@ -257,6 +258,7 @@ def uninitialized(args):
     if 'race_file' not in args: args.race_file = None
     if 'race_list' not in args: args.race_list = None
     if 'skip_record' not in args: args.skip_record = None
+    if 'skip_predetect' not in args: args.skip_predetect = None
     if 'skip_findrace' not in args: args.skip_findrace = None
     if 'skip_testrace' not in args: args.skip_testrace = None
     if 'toctou' not in args: args.toctou = False
