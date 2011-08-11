@@ -211,6 +211,13 @@ class RaceResource(Race):
             events_per_proc = \
                 dict_values_to_lists(ievents_per_proc)
             for proc1, proc2 in combinations(events_per_proc, 2):
+                # OPTIMIZE: two processes have happens-before
+                if events_per_proc[proc1][-1].syscall.vclock.before(
+                        events_per_proc[proc2][0].syscall.vclock) or \
+                   events_per_proc[proc2][-1].syscall.vclock.before(
+                        events_per_proc[proc1][0].syscall.vclock):
+                    continue
+                vc_index1 = vc_index2 = 0
                 for node1 in events_per_proc[proc1]:
                     for node2 in events_per_proc[proc2]:
                         if node1.syscall.vclock.before(node2.syscall.vclock):
