@@ -211,12 +211,24 @@ class RaceResource(Race):
             events_per_proc = \
                 dict_values_to_lists(ievents_per_proc)
             for proc1, proc2 in combinations(events_per_proc, 2):
+                vc_index1 = vc_index2 = 0
                 for node1 in events_per_proc[proc1]:
-                    for node2 in events_per_proc[proc2]:
+                    # OPTIMIZE: any node of proc2 that happens BEFORE node1
+                    for node2 in events_per_proc[proc2][vc_index1:]:
+                        if not node2.syscall.vclock.before(node1.syscall.vclock):
+                            break
+                        vc_index1 += 1
+                    if vc_index1 >= len(events_per_proc[proc2]):
+                        break
+                    if vc_index2 < vc_index1:
+                        vc_index2 = vc_index1
+                    # OPTIMIZE: any node of proc2 that does not happen AFTTER
+                    # node1
+                    for node2 in events_per_proc[proc2][vc_index2:]:
                         if node1.syscall.vclock.before(node2.syscall.vclock):
                             break
-                        if node2.syscall.vclock.before(node1.syscall.vclock):
-                            continue
+                        vc_index2 += 1
+                    for node2 in events_per_proc[proc2][vc_index1:vc_index2]:
                         if node1.write_access == 0 and node2.write_access == 0:
                             continue
                         if skip_parent_dir_race(resource, node1.syscall,
