@@ -2,6 +2,8 @@ import os
 import pwd
 import sys
 import stat
+import pwd
+import os
 import logging
 import tempfile
 
@@ -111,26 +113,32 @@ class Attacker:
 
 ################################################################################
 
+def _get_stat_value(event, path, key):
+    if hasattr(event, 'stat') and path in event.stat and \
+            key in event.stat[path]:
+        return event.stat[path][key]
+    else:
+        return None
 
 def perm_checker(s1, s2):
-    path1 = syscalls.get_resource_path(s1)
-    path2 = syscalls.get_resource_path(s2)
-    if path1 != path2 or not consider_path(path2):
+    path1 = s1.node.path
+    path2 = s2.node.path
+    if path1 != path2:
         return False
-    if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
-        if not s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
+    mode = _get_stat_value(s2.node, os.path.dirname(path2), 'st_mode')
+    if mode and mode & stat.S_IWOTH:
             return False
     return None
 
 def file_checker(s1, s2):
-    if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
-        if s2.node.file_info['st_flags'] & stat.stat.S_IFDIR:
+    flags = _get_stat_value(s2.node, s2.node.path, 'st_flags')
+    if flags and flags & stat.stat.S_IFDIR:
             return False
     return None
 
 def dir_checker(s1, s2):
-    if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
-        if not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR):
+    flags = _get_stat_value(s2.node, s2.node.path, 'st_flags')
+    if flags and not (flags & stat.stat.S_IFDIR):
             return False
     return None
 
