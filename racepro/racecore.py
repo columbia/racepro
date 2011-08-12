@@ -199,8 +199,12 @@ class RaceResource(Race):
                 return False
 
             for node in [node1, node2]:
-                if not node or not hasattr(node, 'path') or \
-                   not node.path or not os.path.isabs(node.path):
+                if not node:
+                    return False
+                if not hasattr(node, 'path'):
+                    syscall = syscalls.event_to_syscall(node)
+                    node.path = syscalls.get_resource_path(syscall)
+                if not node.path or not os.path.isabs(node.path):
                     return False
 
             if node1 and node2 and \
@@ -244,7 +248,10 @@ class RaceResource(Race):
                         pairs.append((node1, node2))
             return pairs
 
-        ignore_path = graph.processes[1].fd.values()
+        ignore_path = []
+        if hasattr(graph.processes[1], 'fd'):
+            ignore_path += graph.processes[1].fd.values()
+
         if RaceResource.ignore_path:
             ignore_path += RaceResource.ignore_path
         for path in ignore_path:
