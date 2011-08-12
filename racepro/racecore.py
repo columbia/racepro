@@ -3,6 +3,7 @@ import logging
 import struct
 import pdb
 import fnmatch
+
 from itertools import *
 
 import unistd
@@ -58,22 +59,20 @@ class RaceList:
 
 ##############################################################################
 
-def _filter_events(resource, in_syscall=False):
-    def filter_belong_to_syscalls(events):
-        return list(ifilter(lambda e: hasattr(e, 'syscall'), events))
-
-    if not in_syscall:
-        return resource.events
-    else:
-        return filter_belong_to_syscalls(resource.events)
-
-def _split_events_per_proc(events):
+def _split_events_per_proc(resource, in_syscall=False):
     per_proc = dict()
+
+    def filter_belong_to_syscalls(events):
+        return ifilter(lambda e: hasattr(e, 'syscall'), events)
 
     def filter_belong_to_proc(events, proc):
         return ifilter(lambda n: n.proc == proc, events)
 
-    for proc in set(e.proc for e in events):
+    for proc in set(e.proc for e in resource.events):
+        if not in_syscall:
+            events = resource.events
+        else:
+            events = filter_belong_to_syscalls(resource.events)
         per_proc[proc] = filter_belong_to_proc(events, proc)
 
     return per_proc
@@ -194,39 +193,17 @@ class RaceResource(Race):
 
         ignore_type = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
 
-        def add_path_info(node):
-            if hasattr(node, 'path_info'):
-                node.proc.path_info = node.path_info
-
-            if resource.type not in [scribe.SCRIBE_RES_TYPE_FILE,
-                                     scribe.SCRIBE_RES_TYPE_FILES_STRUCT,
-                                     scribe.SCRIBE_RES_TYPE_INODE]:
+        def skip_parent_dir_race(resource, node1, node2):
+            if resource.type not in [scribe.SCRIBE_RES_TYPE_INODE,
+                                     scribe.SCRIBE_RES_TYPE_FILES_STRUCT]:
                 return False
 
-            if not hasattr(node, 'path'):
-                node.path = syscalls.get_resource_path(
-                            syscalls.event_to_syscall(node))
-                if node.path and not os.path.isabs(node.path) and \
-                   hasattr(node.proc, 'path_info'):
-                    node.path = os.path.join(node.proc.path_info['cwd'],
-                                             node.path)
-
-            return True
- 
-        def skip_given_path(resource, node1, node2):
             for node in [node1, node2]:
-                if not node: continue
-                if not add_path_info(node): continue
-                if RaceResource.ignore_path:
-                    for pattern in RaceResource.ignore_path:
-                        if node.path and fnmatch.fnmatch(node.path, pattern):
-                            return True
-            return False
-
-        def skip_parent_dir_race(resource, node1, node2):
-            for node in [node1, node2]:
-                if not node: continue
-                if not add_path_info(node): continue
+                if not node:
+                    return False
+                if not hasattr(node, 'path'):
+                    syscall = syscalls.event_to_syscall(node)
+                    node.path = syscalls.get_resource_path(syscall)
                 if not node.path or not os.path.isabs(node.path):
                     return False
 
@@ -235,86 +212,50 @@ class RaceResource(Race):
                [node1.path, node2.path]:
                 return True
 
-        def skip_false_positive(resource, node1, node2):
-            if node1: node1 = node1.syscall
-            if node2: node2 = node2.syscall
-            if skip_given_path(resource, node1, node2):
-                return True
-            if skip_parent_dir_race(resource, node1, node2): 
-                return True
-            return False
-
-        def find_races_resource_optimized(resource):
+        def find_races_resource(resource):
             pairs = list()
-            ievents = _filter_events(resource, in_syscall=True)
-            ievents_per_proc = _split_events_per_proc(ievents)
+            ievents_per_proc = \
+                _split_events_per_proc(resource, in_syscall=True)
             events_per_proc = \
                 dict_values_to_lists(ievents_per_proc)
-            vc_index = dict((proc, dict()) for proc in events_per_proc)
-            skipped_procs = dict()
+
             for proc1, proc2 in combinations(events_per_proc, 2):
-                #ignore resource with too many events
-                if RaceResource.resource_thres and \
-                    len(events_per_proc[proc1])*len(events_per_proc[proc2]) \
-                    > RaceResource.resource_thres:
-                    skipped_procs[proc1] = len(events_per_proc[proc1])
-                    skipped_procs[proc2] = len(events_per_proc[proc2])
-                    vc_index[proc1][proc2] = vc_index[proc2][proc1] = None
-                else:
-                    vc_index[proc1][proc2] = vc_index[proc2][proc1] = 0
 
-            if len(skipped_procs) > 0:
-                logging.info('resource %d too many events: %s' %
-                             (resource.id,
-                              ';'.join('%s=>%d' % (proc, skipped_procs[proc])
-                                       for proc in skipped_procs)))
+                # OPTIMIZE: two processes have happens-before
+                if events_per_proc[proc1][-1].syscall.vclock.before(
+                        events_per_proc[proc2][0].syscall.vclock) or \
+                   events_per_proc[proc2][-1].syscall.vclock.before(
+                        events_per_proc[proc1][0].syscall.vclock):
+                    continue
 
-            for node1 in ievents:
-                proc1 = node1.proc
-                for proc2 in events_per_proc:
-                    if proc1 == proc2 or vc_index[proc1][proc2] is None:
-                        continue
-                    index = vc_index[proc1][proc2]
-                    for node2 in events_per_proc[proc2][index:]:
-                        if node2.syscall.vclock.before(node1.syscall.vclock):
-                            index += 1
-                            continue
-                        if node1.serial < node2.serial or \
-                           node1.syscall.vclock.before(node2.syscall.vclock):
-                            break
-                        if node1.write_access == 0 and node2.write_access == 0:
-                            continue
-                        pairs.append((node2, node1))
-                    if index < len(events_per_proc[proc2]):
-                        vc_index[proc1][proc2] = index
-                    else:
-                        vc_index[proc1][proc2] = None
-
-            return pairs
-
-        def find_races_resource_original(resource):
-            pairs = list()
-            ievents = _filter_events(resource, in_syscall=True)
-            ievents_per_proc = _split_events_per_proc(ievents)
-            events_per_proc = \
-                dict_values_to_lists(ievents_per_proc)
-            for proc1, proc2 in combinations(events_per_proc, 2):
-                #ignore resource with too many events
-                if RaceResource.resource_thres and \
-                   len(events_per_proc[proc1])*len(events_per_proc[proc2]) \
-                   > RaceResource.resource_thres:
-                     logging.info('resource %d too many events: %s=>%d, %s=>%d' %
-                                 (resource.id, 
-                                  proc1, len(events_per_proc[proc1]),
-                                  proc2, len(events_per_proc[proc2])))
-                     continue
+                vc_index1 = vc_index2 = 0
                 for node1 in events_per_proc[proc1]:
-                    for node2 in events_per_proc[proc2]:
+
+                    # OPTIMIZE: proc2 nodes that happen BEFORE proc1.node1
+                    for node2 in events_per_proc[proc2][vc_index1:]:
+                        if not node2.syscall.vclock.before(node1.syscall.vclock):
+                            break
+                        vc_index1 += 1
+                    if vc_index1 >= len(events_per_proc[proc2]):
+                        break
+                    if vc_index2 < vc_index1:
+                        vc_index2 = vc_index1
+
+                    # OPTIMIZE: proc2 nodes that don't happen AFTER proc1.node1
+                    for node2 in events_per_proc[proc2][vc_index2:]:
                         if node1.syscall.vclock.before(node2.syscall.vclock):
                             break
-                        if node2.syscall.vclock.before(node1.syscall.vclock):
-                            continue
+                        vc_index2 += 1
+
+                    for node2 in events_per_proc[proc2][vc_index1:vc_index2]:
                         if node1.write_access == 0 and node2.write_access == 0:
+                            continue
+                        # SKIP: skip access to same dir but different paths
+                        if skip_parent_dir_race(resource,
+                                                node1.syscall,
+                                                node2.syscall):
+                            logging.debug('false positive due to path: %s=>%s' %
+                                          (node1, node2))
                             continue
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
@@ -323,34 +264,41 @@ class RaceResource(Race):
                         pairs.append((node1, node2))
             return pairs
 
-        find_races_resource = find_races_resource_optimized
-        skipped_resources = \
-                ifilter(lambda r_id: r_id not in graph.resources,
-                        graph.all_resources)
-        logging.debug('resources have no write access; skip: %s' %
-                      (','.join(str(graph.all_resources[r_id]) for r_id in \
-                                skipped_resources)))
+        ignore_path = []
+        if hasattr(graph.processes[1], 'fd'):
+            ignore_path += graph.processes[1].fd.values()
 
-        walltime = 0.0
-        count = 0
+        if RaceResource.ignore_path:
+            ignore_path += RaceResource.ignore_path
+        for path in ignore_path:
+            logging.debug('ignore this path: %s' % path)
+
         for resource in graph.resources.itervalues():
+            # ignore resources with no WRITE access
+            if not next(ifilter(lambda e: e.write_access > 0, resource.events), None):
+                logging.debug('resource %d: skip no write access' % resource.id)
+                continue
             # ignore some resources
             if resource.type in ignore_type:
+                logging.debug('resource %d: skip type ignored' % resource.id)
                 continue
 
-            stime = time.time()
+            # SKIP: given file path pattern
+            ismatch = False
+            if resource.type == scribe.SCRIBE_RES_TYPE_FILE:
+                for pattern in ignore_path:
+                    if fnmatch.fnmatch(resource.desc, pattern):
+                        ismatch = True
+                        break
+            if ismatch:
+                continue
+
             pairs = find_races_resource(resource)
-            etime = time.time()
-            walltime += etime - stime
-            count += len(pairs)
             total += len(pairs)
 
             for node1, node2 in pairs:
                 nodes.add((node1.syscall, node2.syscall))
                 logging.debug('\tadding %s -> %s to races' % (node1, node2))
-
-        logging.debug('algorithm %s: %d races detected in %0.6f sec' %
-                (find_races_resource.func_name, count, walltime))
 
         return [RaceResource(n1, n2) for n1, n2 in nodes]
 
@@ -381,6 +329,7 @@ class RaceSignal(Race):
         node = self.signal.handled
         if not node:
             return False
+
         crosscut = graph.crosscut([node])
 
         # bookmarks
@@ -679,8 +628,7 @@ class RaceToctou(Race):
         nodes = set()
 
         def find_races_resource(resource):
-            events = _filter_events(resource, in_syscall=True)
-            events_per_proc = _split_events_per_proc(events)
+            events_per_proc = _split_events_per_proc(resource, in_syscall=True)
 
             for proc in events_per_proc:
                 syscalls = dict()
@@ -745,37 +693,32 @@ def find_show_races(graph, args):
     total = 0
     count = 0
 
-    # step 0: controlled replay to get extra info on special syscalls
-    if not args.skip_predetect:
-        predetect_replay(graph, args, [NodeBookmarkPath()])
-
     # step 1: find resource races
-    RaceResource.resource_thres = args.resource_thres
-    RaceResource.ignore_type = args.ignore_type
+    RaceResource.max_races = args.max_races
     RaceResource.ignore_path = args.ignore_path
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
-    if len(race_list) > args.max_races:
-        logging.info('Too many races generated: the rest %d races will be ignored' % 
-                     (len(race_list) - args.max_races))
-        race_list._races = race_list._races[:args.max_races]
     total += len(race_list)
     count = output_races(race_list, args.path, 'RESOURCE', count)
     races = race_list
 
     # step 2: find exit-exit-wait races
-    if not args.no_exit_races:
+    if args.no_exit_races:
+        race_list = list()
+    else:
         race_list = RaceList(graph, RaceExitWait.find_races)
-        total += len(race_list)
-        count = output_races(race_list, args.path, 'EXIT-WAIT', count)
         races.extend(race_list)
+    count = output_races(race_list, args.path, 'EXIT-WAIT', count)
+    total += len(race_list)
 
     # step 3: find signal races
-    if not args.no_signal_races:
+    if args.no_signal_races:
+        race_list = list()
+    else:
         race_list = RaceList(graph, RaceSignal.find_races)
-        total += len(race_list)
-        count = output_races(race_list, args.path, 'SIGNAL', count)
         races.extend(race_list)
+    count = output_races(race_list, args.path, 'SIGNAL', count)
+    total += len(race_list)
 
     # step 4: statistics
     print('Generated %d logs for races out of %d candidates' % (count, total))
@@ -783,152 +726,11 @@ def find_show_races(graph, args):
 
     return races
 
-def find_show_toctou(graph, args):
-    total = 0
-    count = 0
-
-    # step 0: controlled replay to get extra info on special syscalls
-    if not args.skip_predetect:
-        predetect_replay(graph, args, [NodeBookmarkPath(), NodeBookmarkFile()])
-
-    # step 1: find toctou races
-    race_list = RaceList(graph, RaceToctou.find_races)
-    total += len(race_list)
-    count = output_races(race_list, args.path, 'TOCTOU', count)
-
-    # step 2: statistics
-    print('Generated %d logs for races of of %d candidates' % (count, total))
-    print('-' * 79)
-
-    return race_list
-
-#############################################################################
-
-class NodeBookmark:
-    def need_bookmark(self, event, before=False, after=False):
-        return False
-
-    def upon_bookmark(self, event, exe, before=False, after=False):
-        assert False
-
-    def debug(self, event):
-        pass
-
-    def __init__(self):
-        pass
-
-syscalls.declare_syscall_sets({
-        "ChangeRoot" : ["chroot"],
-        "ChangeDir"  : ["chdir", "fchdir"],
-        })
-
-class NodeBookmarkPath(NodeBookmark):
-    def need_bookmark(self, event, before=False, after=False):
-        assert (before and not after) or (after and not before)
-
-        return (before and event == event.proc.syscalls[0]) or \
-               (after and event.nr in set().union(SYS_ChangeRoot, SYS_ChangeDir))
-
-    def upon_bookmark(self, event, exe, before=False, after=False):
-        assert (before and not after) or (after and not before)
-
-        def get_real_pid(event, exe):
-            return exe.pids[event.proc.pid]
-
-        def get_proc_info(proc, pid, key, callback):
-            return callback('%s/%d/%s' % (proc, pid, key))
-
-        pid = get_real_pid(event, exe)
-        proc = exe.chroot + '/proc'
-
-        cwd = get_proc_info(proc, pid, 'cwd', os.readlink)
-        root = get_proc_info(proc, pid, 'root', os.readlink)
-        cwd = os.path.join('/', os.path.relpath(cwd, root))
-        root = os.path.join('/', os.path.relpath(root, exe.chroot))
-
-        path_info = dict()
-        path_info['cwd'] = os.path.normpath(cwd)
-        path_info['root'] = os.path.normpath(root)
-
-        event.path_info = path_info
-        event.proc.path_info = path_info
-
-    def debug(self, event):
-        if hasattr(event, 'path_info'):
-            logging.debug('    %s' % event)
-            for key, value in event.path_info.items():
-                logging.debug('        %s : %s' % (key, value))
-
-class NodeBookmarkFile(NodeBookmark):
-    def need_bookmark(self, event, before=False, after=False):
-        assert (before and not after) or (after and not before)
-
-        syscalls_node_file = set().union(
-            SYS_Check, SYS_FileCreate, SYS_LinkCreate, SYS_DirCreate,
-            SYS_FileRemove, SYS_LinkRemove, SYS_DirRemove, SYS_FileWrite,
-            SYS_FileRead, SYS_LinkWrite, SYS_LinkRead, SYS_DirWrite,
-            SYS_DirRead
-            )
-
-        def consider_path(path):
-            bad_prefix = ['/proc', '/dev', '/tmp/isolate']
-            for prefix in bad_prefix:
-                if path.startswith(prefix):
-                    return False
-            return True
-
-        if before:
-            if event.nr in syscalls_node_file:
-                syscall = syscalls.event_to_syscall(event)
-                path = syscalls.get_resource_path(syscall)
-                return consider_path(path)
-
-        return False
-
-    def upon_bookmark(self, event, exe, before=False, after=False):
-        assert (before and not after) or (after and not before)
-
-        syscall = syscalls.event_to_syscall(event)
-        if not syscall:
-            return
-
-        path = syscalls.get_resource_path(syscall)
-
-        assert path, 'Path expected for syscall %s ?' % syscall
-        assert before
-
-        if hasattr(event, 'path_info'):
-            file_info = event.path_info
-        else:
-            file_info = event.proc.path_info
-
-        def set_event_file_info(path, prefix):
-            file_info[prefix + 'path'] = os.path.normpath(path)
-            if os.path.exists(exe.chroot + path):
-                file_stat = os.stat(exe.chroot + path)
-                for attr in dir(file_stat):
-                    if attr.startswith('st_'):
-                        file_info[prefix + attr] = getattr(file_stat, attr)
-
-        path = os.path.join(file_info['cwd'], syscalls.get_resource_path(syscall))
-        set_event_file_info(os.path.normpath(path), '')
-
-        path = os.path.dirname(path)
-        set_event_file_info(os.path.normpath(path), 'dir_')
-
-        event.file_info = file_info
-
-    def debug(self, event):
-        if hasattr(event, 'file_info'):
-            logging.debug('    %s' % event)
-            for key, value in event.file_info.items():
-                logging.debug('        %s : %s' % (key, value))
-
-def predetect_replay(graph, args, queriers):
-
+def instrumented_replay(graph, args, queriers):
     bookmarks = list()
+    events = networkx.algorithms.dag.topological_sort(graph)
 
-    for node in networkx.algorithms.dag.topological_sort(graph):
+    for node in events:
         if not node.is_a(scribe.EventSyscallExtra):
             continue
 
@@ -955,27 +757,136 @@ def predetect_replay(graph, args, queriers):
                 querier.upon_bookmark(nl.node, exe,
                                       before=nl.before,
                                       after=nl.after)
-        bookmarks[id] = None
         return True
 
-    max_retry_time = 3
-    retry_time = 0
+    bookmark_cb = scribewrap.Callback(predetect_bookmark_cb, bookmarks=bookmarks)
 
-    while retry_time < max_retry_time:
-        bookmark_cb = scribewrap.Callback(predetect_bookmark_cb, bookmarks=bookmarks)
+    ret = scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb)
+    if not ret:
+        raise execute.ExecuteError(
+                'pre-detect replay failed: try with --skip-predetect', ret)
 
-        ret = scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb)
-        if ret:
-            break
-        else:
-            bookmarks = [b for b in bookmarks if b is not None]
-            save_modify_log(graph, out, bookmarks, None, None, None)
+    for node in events:
+        for querier in queriers:
+            querier.after_replay(graph, node)
 
-        retry_time += 1
+def find_show_toctou(graph, args):
+    total = 0
+    count = 0
 
-    for node in networkx.algorithms.dag.topological_sort(graph):
-        if hasattr(node, 'queriers'):
-            for querier in node.queriers:
-                querier.debug(node)
+    # step 1: find toctou races
+    race_list = RaceList(graph, RaceToctou.find_races)
+    total += len(race_list)
+    count = output_races(race_list, args.path, 'TOCTOU', count)
+
+    # step 2: statistics
+    print('Generated %d logs for races of of %d candidates' % (count, total))
+    print('-' * 79)
+
+    return race_list
+
+class PredetectBookmarks:
+    def need_bookmark(self, event, before=False, after=False):
+        return False
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        assert False
+
+    def after_replay(self, graph, event):
+        pass
+
+    def __init__(self):
+        pass
+
+syscalls.declare_syscall_sets({
+        "ChangePath" : ["chroot", "chdir", "fchdir"],
+        })
+
+class BookmarksForPaths(PredetectBookmarks):
+    def need_bookmark(self, event, before=False, after=False):
+        return (before and event == event.proc.syscalls[0]) or \
+               (after and event.nr in SYS_ChangePath)
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        pid = exe.pids[event.proc.pid]
+        proc = exe.chroot + '/proc'
+        cwd = os.readlink('%s/%d/cwd' % (proc, pid))
+        root = os.readlink('%s/%d/root' % (proc, pid))
+        event.proc.cwd = \
+            os.path.normpath('/' + os.path.relpath(cwd, root))
+        event.proc.root = \
+            os.path.normpath('/' + os.path.relpath(root, exe.chroot))
+
+    def after_replay(self, graph, event):
+        if event.is_a(scribe.EventSyscallExtra):
+            if hasattr(event, 'cwd'):
+                event.proc.cwd = event.cwd
+            else:
+                event.cwd = event.proc.cwd
+            if hasattr(event, 'root'):
+                event.proc.root = event.root
+            else:
+                event.root = event.proc.root
+            syscall = syscalls.event_to_syscall(event)
+            path = syscalls.get_resource_path(syscall)
+            if path is not None:
+                event.path = os.path.join(event.cwd, path)
+ 
+class BookmarksForFirstProc(PredetectBookmarks):
+    def need_bookmark(self, event, before=False, after=False):
+        return before and event.proc.pid == 1 and \
+               event == event.proc.syscalls[0]
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        event.proc.fd = dict()
+        pid = exe.pids[event.proc.pid]
+        proc = exe.chroot + '/proc'
+        for fd in os.listdir('%s/%d/fd' % (proc, pid)):
+            fd = int(fd)
+            path = os.readlink('%s/%d/fd/%d' % (proc, pid, fd))
+            if path.startswith('/'):
+                event.proc.fd[fd] = \
+                    os.path.normpath('/' + os.path.relpath(path, exe.chroot))
+            else:
+                event.proc.fd[fd] = path
+
+class BookmarksForStats(PredetectBookmarks):
+    def need_bookmark(self, event, before=False, after=False):
+        if before:
+            syscall = syscalls.event_to_syscall(event)
+            path = syscalls.get_resource_path(syscall)
+            if path is not None:
+                event.path = path
+                return True
+        return False
+
+    def upon_bookmark(self, event, exe, before=False, after=False):
+        def _query_event_file_stat(event, exe, path, keys=None):
+            if not hasattr(event, 'stat'):
+                event.stat = dict()
+
+            def set_event_stat(path):
+                path = os.path.normpath(path)
+                if path in event.stat:
+                    return
+                event.stat[path] = dict()
+                if os.path.exists(exe.chroot + path):
+                    file_stat = os.stat(exe.chroot + path)
+                    for attr in dir(file_stat):
+                        if attr.startswith('st_') and (keys and attr in keys):
+                            event.stat[path][attr] = getattr(file_stat, attr)
+
+            set_event_stat(path)
+            while path != '/':
+                path = os.path.dirname(path)
+                set_event_stat(path)
+
+        event.path = os.path.join(event.proc.cwd, event.path)
+        _query_event_file_stat(event, exe, event.path, self._keys)
+
+    def __init__(self, keys=None):
+        self._keys = keys
 
 
+BookmarksForResources = [BookmarksForPaths(), BookmarksForFirstProc()]
+BookmarksForToctou = [BookmarksForPaths(), BookmarksForStats()]

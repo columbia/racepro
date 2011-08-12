@@ -24,15 +24,9 @@ parser.add_argument('-j', '--jailed', dest='jailed',
 parser.add_argument('-n', '--netns', dest='netns',
                     action='store_true', default=False,
                     help='Use a separate network namespace in jail')
-parser.add_argument('-R', '--resource-thres', dest='resource_thres',
-                    metavar='THRES', type=int, default=1000,
-                    help='Resource threshold for detection')
 parser.add_argument('-c', '--max-races', dest='max_races',
-                    metavar='MAX', type=int, default=1000,
+                    metavar='MAX', type=int, default=100,
                     help='Limit results to MAX races')
-parser.add_argument('--ignore-type', dest='ignore_type',
-                    action='append', metavar='TYPE', 
-                    help='Ignore specific resource type')
 parser.add_argument('--ignore-path', dest='ignore_path',
                     action='append', metavar='REGEX',
                     help='Ignore specific path (regular expression)')
@@ -114,9 +108,8 @@ if args.config:
             print('%s = %s' % (k, v))
 
             if k == 'name': args.name = v
-            elif k == 'timeout': args.timeout = float(v)
-            elif k == 'resource-thres': args.resource_thres = float(v)
-            elif k == 'max-races': args.max_races = int(v)
+            elif k == 'timeout': args.timeout = v
+            elif k == 'max_races': args.max_races = v
             elif k == 'script-run': args.run = v
             elif k == 'script-pre': args.pre = v
             elif k == 'script-post': args.post = v

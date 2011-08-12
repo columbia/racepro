@@ -108,12 +108,26 @@ def _findraces(args, opts):
 
     events = eventswrap.load_events(args.logfile)
     graph = execgraph.ExecutionGraph(events)
+
+    if not args.skip_predetect:
+        if args.toctou:
+            bookmarks_list = racecore.BookmarksForToctou
+        else:
+            bookmarks_list = racecore.BookmarksForResources
+
+        t_start = datetime.datetime.now()
+        logging.info('  replaying execution for pre-detect')
+        racecore.instrumented_replay(graph, args, bookmarks_list)
+        t_end = datetime.datetime.now()
+
+        dt = t_end - t_start
+        logging.info('    time:  %.2f' %
+                     (dt.seconds + dt.microseconds / 1000000.0))
+
     if args.toctou:
         racecore.find_show_toctou(graph, args)
     else:
         racecore.find_show_races(graph, args)
-
-    del events
     return True
 
 def do_one_test(args, t_name, t_exec):
@@ -243,9 +257,7 @@ def do_one_test(args, t_name, t_exec):
 
 def uninitialized(args):
     if 'timeout' not in args: args.timeout = 0
-    if 'resource_thres' not in args: args.resource_thres = 1000
-    if 'max_races' not in args: args.max_races = 1000
-    if 'ignore_type' not in args: args.ignore_type = None
+    if 'max_races' not in args: args.max_races = 100
     if 'ignore_path' not in args: args.ignore_path = None
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False

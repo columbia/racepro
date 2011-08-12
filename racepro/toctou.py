@@ -40,9 +40,9 @@ queriers  = list()
 class Pattern:
     def check(self, event1, event2):
         """Check if the event pair causes toctou racing"""
-
         s1 = syscalls.event_to_syscall(event1)
         s2 = syscalls.event_to_syscall(event2)
+
         if not (s1 and s1):
             return False
 
@@ -55,9 +55,9 @@ class Pattern:
 
     def generate(self, event1, event2):
         """Generate string to run in the attacker"""
-
         s1 = syscalls.event_to_syscall(event1)
         s2 = syscalls.event_to_syscall(event2)
+
         if not (s1 and s1):
             return False
 
@@ -113,25 +113,32 @@ class Attacker:
 
 ################################################################################
 
+def _get_stat_value(event, path, key):
+    if hasattr(event, 'stat') and path in event.stat and \
+            key in event.stat[path]:
+        return event.stat[path][key]
+    else:
+        return None
+
 def perm_checker(s1, s2):
-    path1 = syscalls.get_resource_path(s1)
-    path2 = syscalls.get_resource_path(s2)
-    if path1 != path2 or not consider_path(path2):
+    path1 = s1.node.path
+    path2 = s2.node.path
+    if path1 != path2:
         return False
-    if hasattr(s2.node, 'file_info') and 'dir_st_mode' in s2.node.file_info:
-        if not s2.node.file_info['dir_st_mode'] & stat.S_IWOTH:
+    mode = _get_stat_value(s2.node, os.path.dirname(path2), 'st_mode')
+    if mode and mode & stat.S_IWOTH:
             return False
     return None
 
 def file_checker(s1, s2):
-    if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
-        if s2.node.file_info['st_flags'] & stat.stat.S_IFDIR:
+    flags = _get_stat_value(s2.node, s2.node.path, 'st_flags')
+    if flags and flags & stat.stat.S_IFDIR:
             return False
     return None
 
 def dir_checker(s1, s2):
-    if hasattr(s2.node, 'file_info') and 'st_flags' in s2.node.file_info:
-        if not (s2.node.file_info['st_flags'] & stat.stat.S_IFDIR):
+    flags = _get_stat_value(s2.node, s2.node.path, 'st_flags')
+    if flags and not (flags & stat.stat.S_IFDIR):
             return False
     return None
 
@@ -150,6 +157,7 @@ def link_attack_generator(s1, s2):
         key = 'ino'
     else:
         assert False, 'The system call is not handled'
+
     return '%s %s' % (syscalls.get_resource_path(s2), key)
 
 def link_pre_attacker(param):
@@ -157,7 +165,7 @@ def link_pre_attacker(param):
 
     src, key = param
     tgt = os.path.join(tempfile.mkdtemp(dir='/tmp'), 'victiom')
-    
+
     f = open(tgt, 'w')
     if os.path.exists(src):
         f.write(open(src, 'r').read())
@@ -165,7 +173,7 @@ def link_pre_attacker(param):
         os.chown(tgt, os.stat(src).st_uid, os.stat(src).st_gid)
     f.close()
     param.append(tgt)
-        
+
     if key == 'mtime' or key == 'atime':
         os.utime(tgt, (0, 0))
     elif key == 'mode':
@@ -177,7 +185,6 @@ def link_pre_attacker(param):
 
 def link_attacker(param):
     assert len(param) == 3
-
     src, key, tgt = param
 
     # isn't it ironic to have a TOCTOU race here ourselves ?!
@@ -190,7 +197,7 @@ def link_tester(param):
     assert len(param) >= 3
 
     src, key, tgt = param[:3]
-        
+
     if key == 'atime':
         return os.stat(tgt).st_atime != 0
     if key == 'mtime':
