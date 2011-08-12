@@ -202,7 +202,7 @@ class RaceResource(Race):
                 if not node:
                     return False
                 if not hasattr(node, 'path'):
-                    syscall = syscalls.event_to_syscall(event)
+                    syscall = syscalls.event_to_syscall(node)
                     node.path = syscalls.get_resource_path(syscall)
                 if not node.path or not os.path.isabs(node.path):
                     return False
