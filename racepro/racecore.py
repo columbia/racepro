@@ -663,11 +663,6 @@ def find_show_races(graph, args):
     total = 0
     count = 0
 
-    # step 0: controlled replay to get extra info on special syscalls
-    if not args.skip_predetect:
-        predetect_replay(graph, args, [BookmarksForPaths(),
-                                       BookmarksForFirstProc()])
-
     # step 1: find resource races
     RaceResource.max_races = args.max_races
     RaceResource.ignore_path = args.ignore_path
@@ -701,8 +696,7 @@ def find_show_races(graph, args):
 
     return races
 
-def predetect_replay(graph, args, queriers):
-
+def instrumented_replay(graph, args, queriers):
     bookmarks = list()
     events = networkx.algorithms.dag.topological_sort(graph)
 
@@ -733,7 +727,6 @@ def predetect_replay(graph, args, queriers):
                 querier.upon_bookmark(nl.node, exe,
                                       before=nl.before,
                                       after=nl.after)
-
         return True
 
     bookmark_cb = scribewrap.Callback(predetect_bookmark_cb, bookmarks=bookmarks)
@@ -750,10 +743,6 @@ def predetect_replay(graph, args, queriers):
 def find_show_toctou(graph, args):
     total = 0
     count = 0
-
-    # step 0: controlled replay to get extra info on special syscalls
-    if not args.skip_predetect:
-        predetect_replay(graph, args, [BookmarksForPaths(), BookmarksForStats()])
 
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
@@ -867,3 +856,7 @@ class BookmarksForStats(PredetectBookmarks):
 
     def __init__(self, keys=None):
         self._keys = keys
+
+
+BookmarksForResources = [BookmarksForPaths(), BookmarksForFirstProc()]
+BookmarksForToctou = [BookmarksForPaths(), BookmarksForStats()]

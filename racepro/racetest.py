@@ -108,6 +108,22 @@ def _findraces(args, opts):
 
     events = eventswrap.load_events(args.logfile)
     graph = execgraph.ExecutionGraph(events)
+
+    if not args.skip_predetect:
+        if args.toctou:
+            bookmarks_list = racecore.BookmarksForToctou
+        else:
+            bookmarks_list = racecore.BookmarksForResources
+
+        t_start = datetime.datetime.now()
+        logging.info('  replaying execution for pre-detect')
+        racecore.instrumented_replay(graph, args, bookmarks_list)
+        t_end = datetime.datetime.now()
+
+        dt = t_end - t_start
+        logging.info('    time:  %.2f' %
+                     (dt.seconds + dt.microseconds / 1000000.0))
+
     if args.toctou:
         racecore.find_show_toctou(graph, args)
     else:
