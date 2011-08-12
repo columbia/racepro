@@ -230,8 +230,13 @@ class RaceResource(Race):
             return pairs
 
         for resource in graph.resources.itervalues():
+            # ignore resources with no WRITE access
+            if not next(ifilter(lambda e: e.write_access > 0, resource.events), None):
+                logging.debug('resource %d: skip no write access' % resource.id)
+                continue
             # ignore some resources
             if resource.type in ignore_type:
+                logging.debug('resource %d: skip type ignored' % resource.id)
                 continue
             # ignore resource with too many events (FIXME)
             if RaceResource.max_races and \
