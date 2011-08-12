@@ -73,7 +73,8 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
                              backtrace_len=50,
                              backtrace_num_last_events=backtrace)
 
-    context.add_init_loader(lambda argv, envp: exe.prepare(reload_proc=True))
+    context.add_init_loader(lambda argv, envp: exe.prepare(reload_proc=flags \
+        & scribe.SCRIBE_CUSTOM_INIT))
     pinit = scribe.Popen(context, cmd,
                          record=record, replay=replay, flags=flags,
                          stdin=_dev_null, stdout=subprocess.PIPE)
