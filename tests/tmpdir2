@@ -1,0 +1,6 @@
+#!/bin/bash
+
+(echo hello > /tmp/a;) &
+(echo world > /tmp/b;) &
+
+exit 0
