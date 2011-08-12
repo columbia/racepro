@@ -658,18 +658,18 @@ def find_show_races(graph, args):
         race_list = list()
     else:
         race_list = RaceList(graph, RaceExitWait.find_races)
-    total += len(race_list)
+        races.extend(race_list)
     count = output_races(race_list, args.path, 'EXIT-WAIT', count)
-    races.extend(race_list)
+    total += len(race_list)
 
     # step 3: find signal races
     if args.no_signal_races:
         race_list = list()
     else:
         race_list = RaceList(graph, RaceSignal.find_races)
-    total += len(race_list)
+        races.extend(race_list)
     count = output_races(race_list, args.path, 'SIGNAL', count)
-    races.extend(race_list)
+    total += len(race_list)
 
     # step 4: statistics
     print('Generated %d logs for races out of %d candidates' % (count, total))
