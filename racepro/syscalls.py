@@ -1,6 +1,7 @@
 import scribe
 import unistd
-
+import logging
+import os
 
 def int32(x):
     if x > 0xFFFFFFFF:
