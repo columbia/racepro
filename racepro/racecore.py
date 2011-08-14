@@ -720,18 +720,12 @@ def find_show_races(graph, args):
     else:
         race_list = RaceList(graph, RaceSignal.find_races)
         races.extend(race_list)
-    t_start = datetime.datetime.now()
     count = output_races(race_list, args.path, 'SIGNAL', count)
-    t_end = datetime.datetime.now()
-    dt_outputrace += t_end - t_start
     total += len(race_list)
 
     # step 4: statistics
     print('Generated %d logs for races out of %d candidates' % (count, total))
     print('-' * 79)
-
-    logging.info("total outputrace: %.2f" % \
-                 (dt_outputrace.seconds + dt_outputrace.microseconds / 1000000.0))
 
     return races
 
