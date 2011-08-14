@@ -3,7 +3,6 @@ import logging
 import struct
 import pdb
 import fnmatch
-import datetime
 
 from itertools import *
 
@@ -189,11 +188,8 @@ class RaceResource(Race):
         # for each resource, separate the events of that reosurce per
         # process, and find racing events.
 
-        nodes_original = set()
+        total = 0
         nodes = set()
-
-        dt_original = datetime.timedelta(0)
-        dt_detect = datetime.timedelta(0)
 
         ignore_type = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
 
@@ -217,86 +213,6 @@ class RaceResource(Race):
                 return True
 
         def find_races_resource(resource):
-            pairs = list()
-            ievents_per_proc = \
-                _split_events_per_proc(resource, in_syscall=True)
-            events_per_proc = \
-                dict_values_to_lists(ievents_per_proc)
-
-            for proc1, proc2 in combinations(events_per_proc, 2):
-
-                # OPTIMIZE: two processes have happens-before
-                if events_per_proc[proc1][-1].syscall.vclock.before(
-                        events_per_proc[proc2][0].syscall.vclock) or \
-                   events_per_proc[proc2][-1].syscall.vclock.before(
-                        events_per_proc[proc1][0].syscall.vclock):
-                    continue
-
-                vc_index1 = vc_index2 = 0
-                for node1 in events_per_proc[proc1]:
-                    for node2 in events_per_proc[proc2]:
-                        if node2.syscall.vclock.before(node1.syscall.vclock):
-                            continue
-                        if node1.syscall.vclock.before(node2.syscall.vclock):
-                            break
-                        if node1.write_access == 0 and node2.write_access == 0:
-                            continue
-                        # SKIP: skip access to same dir but different paths
-                        if skip_parent_dir_race(resource,
-                                                node1.syscall,
-                                                node2.syscall):
-                            logging.debug('false positive due to path: %s=>%s' %
-                                          (node1, node2))
-                            continue
-                        assert node1.serial != node2.serial, \
-                            'race %s vs. %s with same serial' % (node1, node2)
-                        if node1.serial < node2.serial:
-                            pairs.append((node2, node2))
-                        else:
-                            pairs.append((node1, node2))
-            return pairs
-
-        def find_races_resource_optimized(resource):
-            pairs = list()
-            ievents_per_proc = \
-                _split_events_per_proc(resource, in_syscall=True)
-            events_per_proc = \
-                dict_values_to_lists(ievents_per_proc)
-
-            for proc1, proc2 in combinations(events_per_proc, 2):
-
-                # OPTIMIZE: two processes have happens-before
-                if events_per_proc[proc1][-1].syscall.vclock.before(
-                        events_per_proc[proc2][0].syscall.vclock) or \
-                   events_per_proc[proc2][-1].syscall.vclock.before(
-                        events_per_proc[proc1][0].syscall.vclock):
-                    continue
-
-                vc_index1 = vc_index2 = 0
-                for node1 in events_per_proc[proc1]:
-                    for node2 in events_per_proc[proc2]:
-                        if node2.syscall.vclock.before(node1.syscall.vclock):
-                            continue
-                        if node1.syscall.vclock.before(node2.syscall.vclock):
-                            break
-                        if node1.write_access == 0 and node2.write_access == 0:
-                            continue
-                        # SKIP: skip access to same dir but different paths
-                        if skip_parent_dir_race(resource,
-                                                node1.syscall,
-                                                node2.syscall):
-                            logging.debug('false positive due to path: %s=>%s' %
-                                          (node1, node2))
-                            continue
-                        assert node1.serial != node2.serial, \
-                            'race %s vs. %s with same serial' % (node1, node2)
-                        if node1.serial < node2.serial:
-                            pairs.append((node2, node2))
-                        else:
-                            pairs.append((node1, node2))
-            return pairs
-
-        def find_races_resource_optimized(resource):
             pairs = list()
             ievents_per_proc = \
                 _split_events_per_proc(resource, in_syscall=True)
@@ -379,30 +295,12 @@ class RaceResource(Race):
             if ismatch:
                 continue
 
-            t_start_original = datetime.datetime.now()
-            pairs_original = find_races_resource(resource)
-            t_start = datetime.datetime.now()
-            pairs = find_races_resource_optimized(resource)
-            t_end = datetime.datetime.now()
-
-            dt_original += t_start - t_start_original
-            dt_detect += t_end - t_start
-
-            for node1, node2 in pairs_original:
-                nodes_original.add((node1.syscall, node2.syscall))
-                logging.debug('\t(original) adding %s -> %s racing on %s' % \
-                              (node1.syscall, node2.syscall, resource))
+            pairs = find_races_resource(resource)
+            total += len(pairs)
 
             for node1, node2 in pairs:
                 nodes.add((node1.syscall, node2.syscall))
-                logging.debug('\t(optimized) adding %s -> %s racing on %s' % \
-                              (node1.syscall, node2.syscall, resource))
-
-        logging.debug("original algorithm: %d found in %.2f sec " % (len(nodes_original),
-                      dt_original.seconds + dt_original.microseconds / 1000000.0))
-        logging.debug("optimized algorithm: %d found in %.2f sec " % (len(nodes),
-                      dt_detect.seconds + dt_detect.microseconds / 1000000.0))
-        logging.debug("    intersect: %d" % len(nodes.intersection(nodes_original)))
+                logging.debug('\tadding %s -> %s to races' % (node1, node2))
 
         return [RaceResource(n1, n2) for n1, n2 in nodes]
 
@@ -796,7 +694,6 @@ def output_races(race_list, path, desc, count):
 def find_show_races(graph, args):
     total = 0
     count = 0
-    dt_outputrace = datetime.timedelta(0)
 
     # step 1: find resource races
     RaceResource.max_races = args.max_races
@@ -804,21 +701,16 @@ def find_show_races(graph, args):
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
     total += len(race_list)
-    t_start = datetime.datetime.now()
     count = output_races(race_list, args.path, 'RESOURCE', count)
-    t_end = datetime.datetime.now() 
-    dt_outputrace += t_end - t_start
     races = race_list
+
     # step 2: find exit-exit-wait races
     if args.no_exit_races:
         race_list = list()
     else:
         race_list = RaceList(graph, RaceExitWait.find_races)
         races.extend(race_list)
-    t_start = datetime.datetime.now()
     count = output_races(race_list, args.path, 'EXIT-WAIT', count)
-    t_end = datetime.datetime.now()
-    dt_outputrace += t_end - t_start
     total += len(race_list)
 
     # step 3: find signal races
@@ -907,7 +799,6 @@ def instrumented_replay(graph, args, queriers):
 def find_show_toctou(graph, args):
     total = 0
     count = 0
-    dt_outputrace = datetime.timedelta(0)
 
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
