@@ -3,6 +3,7 @@ import logging
 import struct
 import pdb
 import fnmatch
+import datetime
 
 from itertools import *
 
@@ -188,8 +189,11 @@ class RaceResource(Race):
         # for each resource, separate the events of that reosurce per
         # process, and find racing events.
 
-        total = 0
+        nodes_original = set()
         nodes = set()
+
+        dt_original = datetime.timedelta(0)
+        dt_detect = datetime.timedelta(0)
 
         ignore_type = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
 
@@ -230,6 +234,47 @@ class RaceResource(Race):
 
                 vc_index1 = vc_index2 = 0
                 for node1 in events_per_proc[proc1]:
+                    for node2 in events_per_proc[proc2]:
+                        if node2.syscall.vclock.before(node1.syscall.vclock):
+                            continue
+                        if node1.syscall.vclock.before(node2.syscall.vclock):
+                            break
+                        if node1.write_access == 0 and node2.write_access == 0:
+                            continue
+                        # SKIP: skip access to same dir but different paths
+                        if skip_parent_dir_race(resource,
+                                                node1.syscall,
+                                                node2.syscall):
+                            logging.debug('false positive due to path: %s=>%s' %
+                                          (node1, node2))
+                            continue
+                        assert node1.serial != node2.serial, \
+                            'race %s vs. %s with same serial' % (node1, node2)
+                        if node1.serial < node2.serial:
+                            pairs.append((node2, node2))
+                        else:
+                            pairs.append((node1, node2))
+            return pairs
+
+        def find_races_resource_optimized(resource):
+            pairs = list()
+            ievents_per_proc = \
+                _split_events_per_proc(resource, in_syscall=True)
+            events_per_proc = \
+                dict_values_to_lists(ievents_per_proc)
+
+            for proc1, proc2 in combinations(events_per_proc, 2):
+
+                # OPTIMIZE: two processes have happens-before
+                if not events_per_proc[proc1] or not events_per_proc[proc2] or \
+                   events_per_proc[proc1][-1].syscall.vclock.before(
+                        events_per_proc[proc2][0].syscall.vclock) or \
+                   events_per_proc[proc2][-1].syscall.vclock.before(
+                        events_per_proc[proc1][0].syscall.vclock):
+                    continue
+
+                vc_index1 = vc_index2 = 0
+                for node1 in events_per_proc[proc1]:
 
                     # OPTIMIZE: proc2 nodes that happen BEFORE proc1.node1
                     for node2 in events_per_proc[proc2][vc_index1:]:
@@ -260,8 +305,9 @@ class RaceResource(Race):
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
                         if node1.serial < node2.serial:
-                            node1, node2 = node2, node1
-                        pairs.append((node1, node2))
+                            pairs.append((node2, node2))
+                        else:
+                            pairs.append((node1, node2))
             return pairs
 
         ignore_path = []
@@ -293,12 +339,30 @@ class RaceResource(Race):
             if ismatch:
                 continue
 
-            pairs = find_races_resource(resource)
-            total += len(pairs)
+            t_start_original = datetime.datetime.now()
+            pairs_original = find_races_resource(resource)
+            t_start = datetime.datetime.now()
+            pairs = find_races_resource_optimized(resource)
+            t_end = datetime.datetime.now()
+
+            dt_original += t_start - t_start_original
+            dt_detect += t_end - t_start
+
+            for node1, node2 in pairs_original:
+                nodes_original.add((node1.syscall, node2.syscall))
+                logging.debug('\t(original) adding %s -> %s racing on %s' % \
+                              (node1.syscall, node2.syscall, resource))
 
             for node1, node2 in pairs:
                 nodes.add((node1.syscall, node2.syscall))
-                logging.debug('\tadding %s -> %s to races' % (node1, node2))
+                logging.debug('\t(optimized) adding %s -> %s racing on %s' % \
+                              (node1.syscall, node2.syscall, resource))
+
+        logging.debug("original algorithm: %d found in %.2f sec " % (len(nodes_original),
+                      dt_original.seconds + dt_original.microseconds / 1000000.0))
+        logging.debug("optimized algorithm: %d found in %.2f sec " % (len(nodes),
+                      dt_detect.seconds + dt_detect.microseconds / 1000000.0))
+        logging.debug("    intersect: %d" % len(nodes.intersection(nodes_original)))
 
         return [RaceResource(n1, n2) for n1, n2 in nodes]
 
@@ -692,6 +756,7 @@ def output_races(race_list, path, desc, count):
 def find_show_races(graph, args):
     total = 0
     count = 0
+    dt_outputrace = datetime.timedelta(0)
 
     # step 1: find resource races
     RaceResource.max_races = args.max_races
@@ -699,16 +764,25 @@ def find_show_races(graph, args):
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
     total += len(race_list)
+    t_start = datetime.datetime.now()
     count = output_races(race_list, args.path, 'RESOURCE', count)
+    t_end = datetime.datetime.now() 
+    dt_outputrace += t_end - t_start
     races = race_list
-
     # step 2: find exit-exit-wait races
     if args.no_exit_races:
         race_list = list()
     else:
         race_list = RaceList(graph, RaceExitWait.find_races)
         races.extend(race_list)
+<<<<<<< HEAD
     count = output_races(race_list, args.path, 'EXIT-WAIT', count)
+=======
+    t_start = datetime.datetime.now()
+    count = output_races(race_list, args.path, 'EXIT-WAIT', count)
+    t_end = datetime.datetime.now()
+    dt_outputrace += t_end - t_start
+>>>>>>> chiache
     total += len(race_list)
 
     # step 3: find signal races
@@ -717,12 +791,18 @@ def find_show_races(graph, args):
     else:
         race_list = RaceList(graph, RaceSignal.find_races)
         races.extend(race_list)
+    t_start = datetime.datetime.now()
     count = output_races(race_list, args.path, 'SIGNAL', count)
+    t_end = datetime.datetime.now()
+    dt_outputrace += t_end - t_start
     total += len(race_list)
 
     # step 4: statistics
     print('Generated %d logs for races out of %d candidates' % (count, total))
     print('-' * 79)
+
+    logging.info("total outputrace: %.2f" % \
+                 (dt_outputrace.seconds + dt_outputrace.microseconds / 1000000.0))
 
     return races
 
@@ -730,22 +810,34 @@ def instrumented_replay(graph, args, queriers):
     bookmarks = list()
     events = networkx.algorithms.dag.topological_sort(graph)
 
+    cutoff_bookmark = None
+
     for node in events:
         if not node.is_a(scribe.EventSyscallExtra):
             continue
 
         node.queriers = list()
+        bookmark_before_node = bookmark_after_node = None
 
         for querier in queriers:
-            if querier.need_bookmark(node, before=True):
+            if querier.need_bookmark(node, graph, before=True):
                 node.queriers.append(querier)
-                bookmarks.append(dict({node.proc: NodeLoc(node, 'before')}))
-            if querier.need_bookmark(node, after=True):
+                bookmark_before_node = NodeLoc(node, 'before')
+            if querier.need_bookmark(node, graph, after=True):
                 node.queriers.append(querier)
-                bookmarks.append(dict({node.proc: NodeLoc(node, 'after')}))
+                bookmark_after_node = NodeLoc(node, 'after')
+
+        for bmark in [bookmark_before_node, bookmark_after_node]:
+            if bmark:
+                bookmarks.append(dict({node.proc: bmark}))
+                cutoff_bookmark = bmark
+
+    cutoff = None
+    if cutoff_bookmark:
+        cutoff = dict({cutoff_bookmark.node.proc: cutoff_bookmark})
 
     out = args.path + '.pre.log'
-    save_modify_log(graph, out, bookmarks, None, None, None)
+    save_modify_log(graph, out, bookmarks, None, cutoff, None)
 
     def predetect_bookmark_cb(**kargs):
         bookmarks = kargs['bookmarks']
@@ -753,7 +845,9 @@ def instrumented_replay(graph, args, queriers):
         id = kargs['id']
 
         for nl in bookmarks[id].values():
+            logging.debug('reach bookmark %s' % nl)
             for querier in nl.node.queriers:
+                logging.debug('    querier: %s' % querier)
                 querier.upon_bookmark(nl.node, exe,
                                       before=nl.before,
                                       after=nl.after)
@@ -763,10 +857,14 @@ def instrumented_replay(graph, args, queriers):
 
     ret = scribewrap.scribe_replay(args, logfile=out, bookmark_cb=bookmark_cb)
     if not ret:
-        raise execute.ExecuteError(
-                'pre-detect replay failed: try with --skip-predetect', ret)
+        #raise execute.ExecuteError(
+        logging.debug('failure: %s (ret = %d)' %
+                ('pre-detect replay failed: try with --skip-predetect', ret))
 
     for node in events:
+        if not node.is_a(scribe.EventSyscallExtra):
+            continue
+
         for querier in queriers:
             querier.after_replay(graph, node)
 
@@ -786,7 +884,7 @@ def find_show_toctou(graph, args):
     return race_list
 
 class PredetectBookmarks:
-    def need_bookmark(self, event, before=False, after=False):
+    def need_bookmark(self, event, graph, before=False, after=False):
         return False
 
     def upon_bookmark(self, event, exe, before=False, after=False):
@@ -803,37 +901,41 @@ syscalls.declare_syscall_sets({
         })
 
 class BookmarksForPaths(PredetectBookmarks):
-    def need_bookmark(self, event, before=False, after=False):
-        return (before and event == event.proc.syscalls[0]) or \
-               (after and event.nr in SYS_ChangePath)
+    def need_bookmark(self, event, graph, before=False, after=False):
+        if after: return False
+
+        if not hasattr(event.proc, 'paths') or event.proc.paths is None:
+           event.paths = event.proc.paths = dict()
+           return True
+
+        event.paths = event.proc.paths
+
+        if event.nr in unistd.SYS_fork and event.ret > 0:
+            graph.processes[event.ret].paths = event.proc.paths
+            
+        if event.nr in SYS_ChangePath:
+            event.proc.paths = None
+
+        return False
 
     def upon_bookmark(self, event, exe, before=False, after=False):
         pid = exe.pids[event.proc.pid]
         proc = exe.chroot + '/proc'
         cwd = os.readlink('%s/%d/cwd' % (proc, pid))
         root = os.readlink('%s/%d/root' % (proc, pid))
-        event.proc.cwd = \
+        event.proc.paths['cwd'] = \
             os.path.normpath('/' + os.path.relpath(cwd, root))
-        event.proc.root = \
+        event.proc.paths['root'] = \
             os.path.normpath('/' + os.path.relpath(root, exe.chroot))
 
     def after_replay(self, graph, event):
-        if event.is_a(scribe.EventSyscallExtra):
-            if hasattr(event, 'cwd'):
-                event.proc.cwd = event.cwd
-            else:
-                event.cwd = event.proc.cwd
-            if hasattr(event, 'root'):
-                event.proc.root = event.root
-            else:
-                event.root = event.proc.root
-            syscall = syscalls.event_to_syscall(event)
-            path = syscalls.get_resource_path(syscall)
-            if path is not None:
-                event.path = os.path.join(event.cwd, path)
+        syscall = syscalls.event_to_syscall(event)
+        path = syscalls.get_resource_path(syscall)
+        if path and 'cwd' in event.paths:
+            event.path = os.path.join(event.paths['cwd'], path)
  
 class BookmarksForFirstProc(PredetectBookmarks):
-    def need_bookmark(self, event, before=False, after=False):
+    def need_bookmark(self, event, graph, before=False, after=False):
         return before and event.proc.pid == 1 and \
                event == event.proc.syscalls[0]
 
@@ -851,7 +953,7 @@ class BookmarksForFirstProc(PredetectBookmarks):
                 event.proc.fd[fd] = path
 
 class BookmarksForStats(PredetectBookmarks):
-    def need_bookmark(self, event, before=False, after=False):
+    def need_bookmark(self, event, graph, before=False, after=False):
         if before:
             syscall = syscalls.event_to_syscall(event)
             path = syscalls.get_resource_path(syscall)
@@ -881,7 +983,7 @@ class BookmarksForStats(PredetectBookmarks):
                 path = os.path.dirname(path)
                 set_event_stat(path)
 
-        event.path = os.path.join(event.proc.cwd, event.path)
+        event.path = os.path.join(event.proc.paths['cwd'], event.path)
         _query_event_file_stat(event, exe, event.path, self._keys)
 
     def __init__(self, keys=None):

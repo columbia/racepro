@@ -1,6 +1,7 @@
 import scribe
 import unistd
-
+import logging
+import os
 
 def int32(x):
     if x > 0xFFFFFFFF:
@@ -38,8 +39,11 @@ class Syscall(object):
                 e.data_type == scribe.SCRIBE_DATA_INPUT | \
                                scribe.SCRIBE_DATA_STRING:
                 for i, arg in enumerate(args):
-                    if int32(args[i]) == int32(e.user_ptr):
-                        args[i] = e.data
+                    try:
+                        if int32(args[i]) == int32(e.user_ptr):
+                            args[i] = e.data
+                    except OverflowError:
+                        logging.debug("Overflow on %s" % syscall)
 
         return args
 
@@ -425,10 +429,12 @@ def declare_syscall_sets(sets):
 
 def event_to_syscall(event):
     """Convert a syscall event to Syscall object"""
-    if event.nr in Syscalls:
-        return Syscalls[event.nr](event)
-    else:
-        return None
+    if not hasattr(event, 'sysobject'):
+        if event.nr in Syscalls:
+            event.sysobject = Syscalls[event.nr](event)
+        else:
+            event.sysobject = None
+    return event.sysobject
 
 
 def get_resource_path(s):
@@ -454,8 +460,8 @@ def get_resource_path(s):
         ]
 
     if s.belongs_to(syscalls_info_path):
-        return s.path
+        return os.path.normpath(s.path)
     elif s.belongs_to(syscalls_info_oldname):
-        return s.oldname
+        return os.path.normpath(s.oldname)
     elif s.belongs_to(syscalls_info_dir):
-        return s.dir
+        return os.path.normpaths(s.dir)
