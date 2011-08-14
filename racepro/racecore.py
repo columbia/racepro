@@ -218,28 +218,20 @@ class RaceResource(Race):
                 _split_events_per_proc(resource, in_syscall=True)
             events_per_proc = \
                 dict_values_to_lists(ievents_per_proc)
-            truncated_procs = list()
-            for proc in events_per_proc:
-                if RaceResource.max_accesses and \
-                   len(events_per_proc[proc]) > RaceResource.max_accesses:
-                    truncated_procs[proc.pid] = len(events_per_proc[proc])
-                    events_per_proc[proc] = \
-                        events_per_proc[proc][:RaceResource.max_accesses]
-            if truncated_procs:
-                logging.info('resource %d too many events: %s' %
-                             (resource.id,
-                              ';'.join('%s=>%d' % (pid, truncated_procs[pid])
-                                       for proc in truncated_procs)))
+
             for proc1, proc2 in combinations(events_per_proc, 2):
+
                 # OPTIMIZE: two processes have happens-before
                 if events_per_proc[proc1][-1].syscall.vclock.before(
                         events_per_proc[proc2][0].syscall.vclock) or \
                    events_per_proc[proc2][-1].syscall.vclock.before(
                         events_per_proc[proc1][0].syscall.vclock):
                     continue
+
                 vc_index1 = vc_index2 = 0
                 for node1 in events_per_proc[proc1]:
-                    # OPTIMIZE: any node of proc2 that happens BEFORE node1
+
+                    # OPTIMIZE: proc2 nodes that happen BEFORE proc1.node1
                     for node2 in events_per_proc[proc2][vc_index1:]:
                         if not node2.syscall.vclock.before(node1.syscall.vclock):
                             break
@@ -248,21 +240,22 @@ class RaceResource(Race):
                         break
                     if vc_index2 < vc_index1:
                         vc_index2 = vc_index1
-                    # OPTIMIZE: any node of proc2 that does not happen AFTTER
-                    # node1
+
+                    # OPTIMIZE: proc2 nodes that don't happen AFTER proc1.node1
                     for node2 in events_per_proc[proc2][vc_index2:]:
                         if node1.syscall.vclock.before(node2.syscall.vclock):
                             break
                         vc_index2 += 1
+
                     for node2 in events_per_proc[proc2][vc_index1:vc_index2]:
                         if node1.write_access == 0 and node2.write_access == 0:
                             continue
-                        # SKIP: skip the accesses to the same dir but
-                        # different paths
-                        if skip_parent_dir_race(resource, node1.syscall,
-                                node2.syscall):
-                            logging.debug('false positive: %s=>%s' % (node1,
-                                node2))
+                        # SKIP: skip access to same dir but different paths
+                        if skip_parent_dir_race(resource,
+                                                node1.syscall,
+                                                node2.syscall):
+                            logging.debug('false positive due to path: %s=>%s' %
+                                          (node1, node2))
                             continue
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
@@ -271,23 +264,23 @@ class RaceResource(Race):
                         pairs.append((node1, node2))
             return pairs
 
-        skipped_resources = \
-                ifilter(lambda r_id: r_id not in graph.resources,
-                        graph.all_resources)
-        logging.debug('resources have no write access; skip: %s' %
-                      (','.join(str(graph.all_resources[r_id]) for r_id in \
-                                skipped_resources)))
         ignore_path = []
         if hasattr(graph.processes[1], 'fd'):
             ignore_path += graph.processes[1].fd.values()
+
         if RaceResource.ignore_path:
             ignore_path += RaceResource.ignore_path
         for path in ignore_path:
             logging.debug('ignore this path: %s' % path)
 
         for resource in graph.resources.itervalues():
+            # ignore resources with no WRITE access
+            if not next(ifilter(lambda e: e.write_access > 0, resource.events), None):
+                logging.debug('resource %d: skip no write access' % resource.id)
+                continue
             # ignore some resources
             if resource.type in ignore_type:
+                logging.debug('resource %d: skip type ignored' % resource.id)
                 continue
 
             # SKIP: given file path pattern
@@ -700,13 +693,7 @@ def find_show_races(graph, args):
     total = 0
     count = 0
 
-    # step 0: controlled replay to get extra info on special syscalls
-    if not args.skip_predetect:
-        predetect_replay(graph, args, [BookmarksForPaths(),
-                                       BookmarksForFirstProc()])
-
     # step 1: find resource races
-    RaceResource.max_accesses = args.max_accesses
     RaceResource.max_races = args.max_races
     RaceResource.ignore_path = args.ignore_path
     race_list = RaceList(graph, RaceResource.find_races)
@@ -716,18 +703,22 @@ def find_show_races(graph, args):
     races = race_list
 
     # step 2: find exit-exit-wait races
-    if not args.no_exit_races:
+    if args.no_exit_races:
+        race_list = list()
+    else:
         race_list = RaceList(graph, RaceExitWait.find_races)
-        total += len(race_list)
-        count = output_races(race_list, args.path, 'EXIT-WAIT', count)
         races.extend(race_list)
+    count = output_races(race_list, args.path, 'EXIT-WAIT', count)
+    total += len(race_list)
 
     # step 3: find signal races
-    if not args.no_signal_races:
+    if args.no_signal_races:
+        race_list = list()
+    else:
         race_list = RaceList(graph, RaceSignal.find_races)
-        total += len(race_list)
-        count = output_races(race_list, args.path, 'SIGNAL', count)
         races.extend(race_list)
+    count = output_races(race_list, args.path, 'SIGNAL', count)
+    total += len(race_list)
 
     # step 4: statistics
     print('Generated %d logs for races out of %d candidates' % (count, total))
@@ -735,8 +726,7 @@ def find_show_races(graph, args):
 
     return races
 
-def predetect_replay(graph, args, queriers):
-
+def instrumented_replay(graph, args, queriers):
     bookmarks = list()
     events = networkx.algorithms.dag.topological_sort(graph)
 
@@ -767,7 +757,6 @@ def predetect_replay(graph, args, queriers):
                 querier.upon_bookmark(nl.node, exe,
                                       before=nl.before,
                                       after=nl.after)
-
         return True
 
     bookmark_cb = scribewrap.Callback(predetect_bookmark_cb, bookmarks=bookmarks)
@@ -784,10 +773,6 @@ def predetect_replay(graph, args, queriers):
 def find_show_toctou(graph, args):
     total = 0
     count = 0
-
-    # step 0: controlled replay to get extra info on special syscalls
-    if not args.skip_predetect:
-        predetect_replay(graph, args, [BookmarksForPaths(), BookmarksForStats()])
 
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
@@ -901,3 +886,7 @@ class BookmarksForStats(PredetectBookmarks):
 
     def __init__(self, keys=None):
         self._keys = keys
+
+
+BookmarksForResources = [BookmarksForPaths(), BookmarksForFirstProc()]
+BookmarksForToctou = [BookmarksForPaths(), BookmarksForStats()]
