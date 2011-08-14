@@ -266,6 +266,46 @@ class RaceResource(Race):
             for proc1, proc2 in combinations(events_per_proc, 2):
 
                 # OPTIMIZE: two processes have happens-before
+                if events_per_proc[proc1][-1].syscall.vclock.before(
+                        events_per_proc[proc2][0].syscall.vclock) or \
+                   events_per_proc[proc2][-1].syscall.vclock.before(
+                        events_per_proc[proc1][0].syscall.vclock):
+                    continue
+
+                vc_index1 = vc_index2 = 0
+                for node1 in events_per_proc[proc1]:
+                    for node2 in events_per_proc[proc2]:
+                        if node2.syscall.vclock.before(node1.syscall.vclock):
+                            continue
+                        if node1.syscall.vclock.before(node2.syscall.vclock):
+                            break
+                        if node1.write_access == 0 and node2.write_access == 0:
+                            continue
+                        # SKIP: skip access to same dir but different paths
+                        if skip_parent_dir_race(resource,
+                                                node1.syscall,
+                                                node2.syscall):
+                            logging.debug('false positive due to path: %s=>%s' %
+                                          (node1, node2))
+                            continue
+                        assert node1.serial != node2.serial, \
+                            'race %s vs. %s with same serial' % (node1, node2)
+                        if node1.serial < node2.serial:
+                            pairs.append((node2, node2))
+                        else:
+                            pairs.append((node1, node2))
+            return pairs
+
+        def find_races_resource_optimized(resource):
+            pairs = list()
+            ievents_per_proc = \
+                _split_events_per_proc(resource, in_syscall=True)
+            events_per_proc = \
+                dict_values_to_lists(ievents_per_proc)
+
+            for proc1, proc2 in combinations(events_per_proc, 2):
+
+                # OPTIMIZE: two processes have happens-before
                 if not events_per_proc[proc1] or not events_per_proc[proc2] or \
                    events_per_proc[proc1][-1].syscall.vclock.before(
                         events_per_proc[proc2][0].syscall.vclock) or \
@@ -775,14 +815,10 @@ def find_show_races(graph, args):
     else:
         race_list = RaceList(graph, RaceExitWait.find_races)
         races.extend(race_list)
-<<<<<<< HEAD
-    count = output_races(race_list, args.path, 'EXIT-WAIT', count)
-=======
     t_start = datetime.datetime.now()
     count = output_races(race_list, args.path, 'EXIT-WAIT', count)
     t_end = datetime.datetime.now()
     dt_outputrace += t_end - t_start
->>>>>>> chiache
     total += len(race_list)
 
     # step 3: find signal races
@@ -871,6 +907,7 @@ def instrumented_replay(graph, args, queriers):
 def find_show_toctou(graph, args):
     total = 0
     count = 0
+    dt_outputrace = datetime.timedelta(0)
 
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
