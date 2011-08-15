@@ -295,7 +295,7 @@ class RaceResource(Race):
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
                         if node1.serial < node2.serial:
-                            pairs.append((node2, node2))
+                            pairs.append((node2, node1))
                         else:
                             pairs.append((node1, node2))
             return pairs
