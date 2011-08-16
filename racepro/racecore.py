@@ -366,11 +366,11 @@ class RaceResource(Race):
                 logging.debug('\t(optimized) adding %s -> %s racing on %s' % \
                               (node1.syscall, node2.syscall, resource))
 
-        logging.debug("original algorithm: %d found in %.2f sec " % (len(nodes_original),
+        logging.info("original algorithm: %d found in %.2f sec " % (len(nodes_original),
                       dt_original.seconds + dt_original.microseconds / 1000000.0))
-        logging.debug("optimized algorithm: %d found in %.2f sec " % (len(nodes),
+        logging.info("optimized algorithm: %d found in %.2f sec " % (len(nodes),
                       dt_detect.seconds + dt_detect.microseconds / 1000000.0))
-        logging.debug("    intersect: %d" % len(nodes.intersection(nodes_original)))
+        logging.info("    intersect: %d" % len(nodes.intersection(nodes_original)))
 
         return [RaceResource(n1, n2) for n1, n2 in nodes]
 
@@ -806,6 +806,9 @@ def find_show_races(graph, args):
         races.extend(race_list)
     count = output_races(race_list, args.path, 'SIGNAL', count)
     total += len(race_list)
+
+    logging.info('total outputrace: %.2f' %
+                 (dt_outputrace.seconds + dt_outputrace.microseconds / 1000000.0))
 
     # step 4: statistics
     print('Generated %d logs for races out of %d candidates' % (count, total))
