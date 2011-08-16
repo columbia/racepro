@@ -25,7 +25,7 @@ parser.add_argument('-n', '--netns', dest='netns',
                     action='store_true', default=False,
                     help='Use a separate network namespace in jail')
 parser.add_argument('-c', '--max-races', dest='max_races',
-                    metavar='MAX', type=int, default=100,
+                    metavar='MAX', type=int, default=None,
                     help='Limit results to MAX races')
 parser.add_argument('--ignore-path', dest='ignore_path',
                     action='append', metavar='REGEX',
