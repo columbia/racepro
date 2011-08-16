@@ -14,7 +14,9 @@ import eventswrap
 import execgraph
 import execute
 import racecore
+import session
 import toctou
+from helpers import *
 
 ##############################################################################
 def replay_test_script(exe, args):
@@ -196,13 +198,17 @@ def do_one_test(args, t_name, t_exec):
 
         t_replay = datetime.datetime.now()
 
+        events = eventswrap.load_events(args.path + '.log')
+        out = args.path + '.ori.log'
+        save_session(out, session.Session(events).events)
+
         # If args.max_runtimes was enabled, then recording may have stopped
         # an "external" script; We expect replay to also stop similarly, so
         # we don't need to temporarilty turn off args.max_runtime.
         logging.info('  replaying original execution')
         max_runtime = args.max_runtime
         args.max_runtime = 0
-        if not scribewrap.scribe_replay(args):
+        if not scribewrap.scribe_replay(args, logfile=out):
             return True if args.keepgoing else False
         args.max_runtime = max_runtime
 
@@ -257,7 +263,7 @@ def do_one_test(args, t_name, t_exec):
 
 def uninitialized(args):
     if 'timeout' not in args: args.timeout = 0
-    if 'max_races' not in args: args.max_races = 100
+    if 'max_races' not in args: args.max_races = None
     if 'ignore_path' not in args: args.ignore_path = None
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False

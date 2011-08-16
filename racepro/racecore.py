@@ -208,10 +208,9 @@ class RaceResource(Race):
                 if not node.path or not os.path.isabs(node.path):
                     return False
 
-            if node1 and node2 and \
-               os.path.commonprefix([node1.path, node2.path]) not in \
-               [node1.path, node2.path]:
-                return True
+            path1 = os.path.normpath(node1.path) + '/'
+            path2 = os.path.normpath(node2.path) + '/'
+            return not (path1.startswith(path2) or path2.startswith(path1))
 
         def find_races_resource(resource):
             pairs = list()
@@ -219,9 +218,7 @@ class RaceResource(Race):
                 _split_events_per_proc(resource, in_syscall=True)
             events_per_proc = \
                 dict_values_to_lists(ievents_per_proc)
-
             for proc1, proc2 in combinations(events_per_proc, 2):
-
                 # OPTIMIZE: two processes have happens-before
                 if not events_per_proc[proc1] or not events_per_proc[proc2] or \
                    events_per_proc[proc1][-1].syscall.vclock.before(
@@ -701,6 +698,9 @@ def find_show_races(graph, args):
     RaceResource.ignore_path = args.ignore_path
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
+    if args.max_races and total + len(race_list) > args.max_races:
+        logging.info('too many races: %d' % len(race_list))
+        race_list._races = race_list._races[:args.max_races - total]
     total += len(race_list)
     count = output_races(race_list, args.path, 'RESOURCE', count)
     races = race_list
@@ -710,6 +710,9 @@ def find_show_races(graph, args):
         race_list = list()
     else:
         race_list = RaceList(graph, RaceExitWait.find_races)
+        if args.max_races and total + len(race_list) > args.max_races:
+            logging.info('too many races: %d' % len(race_list))
+            race_list._races = race_list._races[:args.max_races - total]
         races.extend(race_list)
     count = output_races(race_list, args.path, 'EXIT-WAIT', count)
     total += len(race_list)
@@ -719,6 +722,9 @@ def find_show_races(graph, args):
         race_list = list()
     else:
         race_list = RaceList(graph, RaceSignal.find_races)
+        if args.max_races and total + len(race_list) > args.max_races:
+            logging.info('too many races: %d' % len(race_list))
+            race_list._races = race_list._races[:args.max_races - total]
         races.extend(race_list)
     count = output_races(race_list, args.path, 'SIGNAL', count)
     total += len(race_list)
@@ -732,8 +738,6 @@ def find_show_races(graph, args):
 def instrumented_replay(graph, args, queriers):
     bookmarks = list()
     events = networkx.algorithms.dag.topological_sort(graph)
-
-    cutoff_bookmark = None
 
     for node in events:
         if not node.is_a(scribe.EventSyscallExtra):
@@ -753,14 +757,9 @@ def instrumented_replay(graph, args, queriers):
         for bmark in [bookmark_before_node, bookmark_after_node]:
             if bmark:
                 bookmarks.append(dict({node.proc: bmark}))
-                cutoff_bookmark = bmark
-
-    cutoff = None
-    if cutoff_bookmark:
-        cutoff = dict({cutoff_bookmark.node.proc: cutoff_bookmark})
 
     out = args.path + '.pre.log'
-    save_modify_log(graph, out, bookmarks, None, cutoff, None)
+    save_modify_log(graph, out, bookmarks, None, None, None)
 
     def predetect_bookmark_cb(**kargs):
         bookmarks = kargs['bookmarks']

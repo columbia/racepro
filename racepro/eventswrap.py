@@ -222,23 +222,36 @@ def condense_events(events):
     # seq: sequence number ignoring access type
     # write_access: non zero if the event is a write
 
+    events = list(events)
+
     serials = dict()
     for e in events:
         if e.is_a(scribe.EventResourceLockExtra):
             if e.id not in serials:
-                serials[e.id] = (0, 0, e.write_access)
-                serial = 0
+                serials[e.id] = dict()
+            if e.serial not in serials[e.id]:
+                serials[e.id][e.serial] = 1
             else:
-                (prev_serial, seq, prev_wr) = serials[e.id]
-                seq += 1
-                if e.write_access or prev_wr:
-                    serial = seq
-                else:
-                    serial = prev_serial
-                serials[e.id] = (serial, seq, e.write_access)
-            if e.serial != serial:
+                serials[e.id][e.serial] += 1
+
+    for id_serials in serials.values():
+        last_i = None
+        for i in sorted(id_serials.keys()):
+            if last_i == None:
+                last_i = i
+                last_serial = id_serials[i]
+                id_serials[i] = 0
+                continue
+            deficit = i - last_serial
+            last_serial += id_serials[i]
+            id_serials[i] = i - deficit
+            last_i = i
+
+    for e in events:
+        if e.is_a(scribe.EventResourceLockExtra):
+            if e.serial != serials[e.id][e.serial]:
                 ee = e.copy()
-                ee.serial = serial
+                ee.serial = serials[e.id][e.serial]
                 e = session.Event(ee)
         yield e
 
