@@ -91,6 +91,11 @@ def syscall_name(nr):
     else:
         return '???(nr=%d)' % nr
 
+def event_is_resource(event):
+    return \
+        event.is_a(scribe.EventResourceLockExtra) or \
+        event.is_a(scribe.EventResourceLockIntr)
+
 ##############################################################################
 # races of RESOURCES
 
@@ -120,11 +125,6 @@ class RaceResource(Race):
         """Rank race importance by calcaulating the average distance
         between accesses to resources in the corresponding nodes"""
 
-        def event_is_resource(event):
-            return \
-                event.is_a(scribe.EventResourceLockExtra) or \
-                event.is_a(scribe.EventResourceLockIntr)
-
         count = 0
 
         resources1 = ifilter(event_is_resource, self.node1.children)
@@ -147,6 +147,26 @@ class RaceResource(Race):
     def prepare(self, graph):
         node1 = self.node1
         node2 = self.node2
+
+        resources2 = ifilter(event_is_resource, node2.children)
+        dict_serial2 = dict([(e.id, e.serial) for e in resources2])
+
+        node3 = None
+        for node in node1.proc.syscalls:
+            if node == node1:
+                node3 = node1
+                break
+
+            resources = ifilter(event_is_resource, node.children)
+
+            for e in resources:
+                if e.id in dict_serial2:
+                    if e.serial > dict_serial2[e.id]:
+                        node3 = node
+                        break
+            if node3:
+                break
+
         crosscut = graph.crosscut([node1, node2])
 
         # bookmarks
@@ -169,7 +189,7 @@ class RaceResource(Race):
         actions = list([action])
 
         injects = dict()
-        injects[node1.proc] = dict({NodeLoc(node1, 'before') : actions})
+        injects[node1.proc] = dict({NodeLoc(node3, 'before') : actions})
 
         # cutoff
         cutoff = dict(bookmark2)
