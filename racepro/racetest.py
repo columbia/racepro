@@ -214,10 +214,6 @@ def do_one_test(args, t_name, t_exec):
             logging.info('    running post-run callback...')
             scribewrap._do_scribe_script(exe, args._post,  args.redirect)
 
-        if args._test:
-            logging.info('    running test callback...')
-            scribewrap._do_scribe_script(exe, args._test,  args.redirect)
-
         t_end = datetime.datetime.now()
 
         dt_isolate = (t_end - t_finish_run) + (t_start_run - t_start)
