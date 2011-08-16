@@ -187,6 +187,42 @@ def do_one_test(args, t_name, t_exec):
     else:
         args.redirect = None
 
+    with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
+                      scratch=args.scratch, persist=args.pdir) as exe:
+
+        t_start = datetime.datetime.now()
+
+        if args._pre:
+            logging.info('    running pre-run callback...')
+            scribewrap._do_scribe_script(exe, args._pre,  args.redirect)
+
+        t_start_nothing = datetime.datetime.now()
+
+        logging.info('    running /bin/true...')
+        scribewrap._do_scribe_script(exe, '/bin/true',  args.redirect)
+
+        t_start_run = datetime.datetime.now()
+
+        # FIXME: we might need to give a new pid namespace
+        logging.info('    running ...')
+        cmd = args._run if os.path.isabs(args._run) else './' + args._run
+        scribewrap._do_scribe_script(exe, cmd,  args.redirect)
+
+        t_finish_run = datetime.datetime.now()
+
+        if args._pre:
+            logging.info('    running post-run callback...')
+            scribewrap._do_scribe_script(exe, args._post,  args.redirect)
+
+        if args._test:
+            logging.info('    running test callback...')
+            scribewrap._do_scribe_script(exe, args._test,  args.redirect)
+
+        t_end = datetime.datetime.now()
+
+        dt_isolate = (t_end - t_finish_run) + (t_start_run - t_start)
+        dt_normal = (t_end - t_start_run) + (t_start_nothing - t_start)
+
     t_start = datetime.datetime.now()
 
     if not args.skip_record:
@@ -248,6 +284,10 @@ def do_one_test(args, t_name, t_exec):
     dt_findrace = t_findrace - t_record
     dt_testrace = t_stop - t_findrace
     dt_total = t_stop - t_start
+    logging.info('total isolate:     %.2f' %
+                 (dt_isolate.seconds + dt_isolate.microseconds / 1000000.0))
+    logging.info('total normal:     %.2f' %
+                 (dt_normal.seconds + dt_normal.microseconds / 1000000.0)) 
     logging.info('total time:     %.2f' %
                  (dt_total.seconds + dt_total.microseconds / 1000000.0))
     logging.info('total record:   %.2f' %
