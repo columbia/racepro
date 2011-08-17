@@ -51,18 +51,10 @@ class ExecuteError(Exception):
 #############################################################################
 
 class Execute:
-    def prepare(self, reload_proc=False):
+    def prepare(self):
         if self.chroot:
             os.chroot(self.chroot)
             os.chdir(os.getcwd())
-
-        if reload_proc:
-            # We might need to reload /proc since we are potentially executing
-            # prepare() in a different PID namespace than the caller of
-            # open().
-            sudo(['umount', '/proc'])
-            sudo(['mount', '-t', 'proc', 'proc', '/proc'])
-
 
     def execute(self, cmd, **kwargs):
         if self.chroot:
@@ -90,6 +82,13 @@ class Execute:
 #############################################################################
 
 class ExecuteJail(Execute):
+    def prepare(self):
+        # We need to reload /proc since we are potentially executing prepare()
+        # in a different PID namespace than the caller of open().
+        Execute.prepare(self)
+        sudo(['umount', '/proc'])
+        sudo(['mount', '-t', 'proc', 'proc', '/proc'])
+
     def execute(self, command, **kwargs):
         assert self.mounted
         return Execute.execute(self, command, **kwargs)
