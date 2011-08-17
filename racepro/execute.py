@@ -60,6 +60,7 @@ class Execute:
             # We might need to reload /proc since we are potentially executing
             # prepare() in a different PID namespace than the caller of
             # open().
+            sudo(['umount', '/proc'])
             sudo(['mount', '-t', 'proc', 'proc', '/proc'])
 
 
