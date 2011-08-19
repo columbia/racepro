@@ -737,14 +737,19 @@ def instrumented_replay(graph, args, queriers):
             continue
 
         node.queriers = list()
+        bookmark_before_node = bookmark_after_node = None
 
         for querier in queriers:
-            if querier.need_bookmark(node, before=True):
+            if querier.need_bookmark(node, graph, before=True):
                 node.queriers.append(querier)
-                bookmarks.append(dict({node.proc: NodeLoc(node, 'before')}))
-            if querier.need_bookmark(node, after=True):
+                bookmark_before_node = NodeLoc(node, 'before')
+            if querier.need_bookmark(node, graph, after=True):
                 node.queriers.append(querier)
-                bookmarks.append(dict({node.proc: NodeLoc(node, 'after')}))
+                bookmark_after_node = NodeLoc(node, 'after')
+
+        for bmark in [bookmark_before_node, bookmark_after_node]:
+            if bmark:
+                bookmarks.append(dict({node.proc: bmark}))
 
     out = args.path + '.pre.log'
     save_modify_log(graph, out, bookmarks, None, None, None)
@@ -755,7 +760,9 @@ def instrumented_replay(graph, args, queriers):
         id = kargs['id']
 
         for nl in bookmarks[id].values():
+            logging.debug('reach bookmark %s' % nl)
             for querier in nl.node.queriers:
+                logging.debug('    querier: %s' % querier)
                 querier.upon_bookmark(nl.node, exe,
                                       before=nl.before,
                                       after=nl.after)
@@ -769,6 +776,9 @@ def instrumented_replay(graph, args, queriers):
                 'pre-detect replay failed: try with --skip-predetect', ret)
 
     for node in events:
+        if not node.is_a(scribe.EventSyscallExtra):
+            continue
+
         for querier in queriers:
             querier.after_replay(graph, node)
 
@@ -788,7 +798,7 @@ def find_show_toctou(graph, args):
     return race_list
 
 class PredetectBookmarks:
-    def need_bookmark(self, event, before=False, after=False):
+    def need_bookmark(self, event, graph, before=False, after=False):
         return False
 
     def upon_bookmark(self, event, exe, before=False, after=False):
@@ -805,37 +815,41 @@ syscalls.declare_syscall_sets({
         })
 
 class BookmarksForPaths(PredetectBookmarks):
-    def need_bookmark(self, event, before=False, after=False):
-        return (before and event == event.proc.syscalls[0]) or \
-               (after and event.nr in SYS_ChangePath)
+    def need_bookmark(self, event, graph, before=False, after=False):
+        if after: return False
+
+        if not hasattr(event.proc, 'paths') or event.proc.paths is None:
+           event.paths = event.proc.paths = dict()
+           return True
+
+        event.paths = event.proc.paths
+
+        if event.nr in unistd.SYS_fork and event.ret > 0:
+            graph.processes[event.ret].paths = event.proc.paths
+            
+        if event.nr in SYS_ChangePath:
+            event.proc.paths = None
+
+        return False
 
     def upon_bookmark(self, event, exe, before=False, after=False):
         pid = exe.pids[event.proc.pid]
         proc = exe.chroot + '/proc'
         cwd = os.readlink('%s/%d/cwd' % (proc, pid))
         root = os.readlink('%s/%d/root' % (proc, pid))
-        event.proc.cwd = \
+        event.proc.paths['cwd'] = \
             os.path.normpath('/' + os.path.relpath(cwd, root))
-        event.proc.root = \
+        event.proc.paths['root'] = \
             os.path.normpath('/' + os.path.relpath(root, exe.chroot))
 
     def after_replay(self, graph, event):
-        if event.is_a(scribe.EventSyscallExtra):
-            if hasattr(event, 'cwd'):
-                event.proc.cwd = event.cwd
-            else:
-                event.cwd = event.proc.cwd
-            if hasattr(event, 'root'):
-                event.proc.root = event.root
-            else:
-                event.root = event.proc.root
-            syscall = syscalls.event_to_syscall(event)
-            path = syscalls.get_resource_path(syscall)
-            if path is not None:
-                event.path = os.path.join(event.cwd, path)
+        syscall = syscalls.event_to_syscall(event)
+        path = syscalls.get_resource_path(syscall)
+        if path and 'cwd' in event.paths:
+            event.path = os.path.join(event.paths['cwd'], path)
  
 class BookmarksForFirstProc(PredetectBookmarks):
-    def need_bookmark(self, event, before=False, after=False):
+    def need_bookmark(self, event, graph, before=False, after=False):
         return before and event.proc.pid == 1 and \
                event == event.proc.syscalls[0]
 
@@ -853,7 +867,7 @@ class BookmarksForFirstProc(PredetectBookmarks):
                 event.proc.fd[fd] = path
 
 class BookmarksForStats(PredetectBookmarks):
-    def need_bookmark(self, event, before=False, after=False):
+    def need_bookmark(self, event, graph, before=False, after=False):
         if before:
             syscall = syscalls.event_to_syscall(event)
             path = syscalls.get_resource_path(syscall)
@@ -883,7 +897,7 @@ class BookmarksForStats(PredetectBookmarks):
                 path = os.path.dirname(path)
                 set_event_stat(path)
 
-        event.path = os.path.join(event.proc.cwd, event.path)
+        event.path = os.path.join(event.proc.paths['cwd'], event.path)
         _query_event_file_stat(event, exe, event.path, self._keys)
 
     def __init__(self, keys=None):
