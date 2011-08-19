@@ -222,7 +222,8 @@ class RaceResource(Race):
             for proc1, proc2 in combinations(events_per_proc, 2):
 
                 # OPTIMIZE: two processes have happens-before
-                if events_per_proc[proc1][-1].syscall.vclock.before(
+                if not events_per_proc[proc1] or not events_per_proc[proc2] or \
+                   events_per_proc[proc1][-1].syscall.vclock.before(
                         events_per_proc[proc2][0].syscall.vclock) or \
                    events_per_proc[proc2][-1].syscall.vclock.before(
                         events_per_proc[proc1][0].syscall.vclock):
@@ -260,8 +261,9 @@ class RaceResource(Race):
                         assert node1.serial != node2.serial, \
                             'race %s vs. %s with same serial' % (node1, node2)
                         if node1.serial < node2.serial:
-                            node1, node2 = node2, node1
-                        pairs.append((node1, node2))
+                            pairs.append((node2, node1))
+                        else:
+                            pairs.append((node1, node2))
             return pairs
 
         ignore_path = []
