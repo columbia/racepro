@@ -187,6 +187,25 @@ def do_one_test(args, t_name, t_exec):
     else:
         args.redirect = None
 
+    with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
+                      scratch=args.scratch, persist=args.pdir) as exe:
+
+        if args._pre:
+            logging.info('    running pre-run callback...')
+            scribewrap._do_scribe_script(exe, args._pre,  args.redirect)
+
+        logging.info('    running /bin/true...')
+        scribewrap._do_scribe_script(exe, '/bin/true',  args.redirect)
+
+        # FIXME: we might need to give a new pid namespace
+        logging.info('    running ...')
+        cmd = args._run if os.path.isabs(args._run) else './' + args._run
+        scribewrap._do_scribe_script(exe, cmd,  args.redirect)
+
+        if args._pre:
+            logging.info('    running post-run callback...')
+            scribewrap._do_scribe_script(exe, args._post,  args.redirect)
+
     t_start = datetime.datetime.now()
 
     if not args.skip_record:
