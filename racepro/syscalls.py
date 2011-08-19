@@ -428,10 +428,12 @@ def declare_syscall_sets(sets):
 
 def event_to_syscall(event):
     """Convert a syscall event to Syscall object"""
-    if event.nr in Syscalls:
-        return Syscalls[event.nr](event)
-    else:
-        return None
+    if not hasattr(event, 'sysobject'):
+        if event.nr in Syscalls:
+            event.sysobject = Syscalls[event.nr](event)
+        else:
+            event.sysobject = None
+    return event.sysobject
 
 
 def get_resource_path(s):
