@@ -700,6 +700,9 @@ def find_show_races(graph, args):
     RaceResource.ignore_path = args.ignore_path
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
+    if args.max_races and total + len(race_list) > args.max_races:
+        logging.info('too many races: %d' % len(race_list))
+        race_list._races = race_list._races[:args.max_races - total]
     total += len(race_list)
     count = output_races(race_list, args.path, 'RESOURCE', count)
     races = race_list
@@ -709,6 +712,9 @@ def find_show_races(graph, args):
         race_list = list()
     else:
         race_list = RaceList(graph, RaceExitWait.find_races)
+        if args.max_races and total + len(race_list) > args.max_races:
+            logging.info('too many races: %d' % len(race_list))
+            race_list._races = race_list._races[:args.max_races - total]
         races.extend(race_list)
     count = output_races(race_list, args.path, 'EXIT-WAIT', count)
     total += len(race_list)
@@ -718,6 +724,9 @@ def find_show_races(graph, args):
         race_list = list()
     else:
         race_list = RaceList(graph, RaceSignal.find_races)
+        if args.max_races and total + len(race_list) > args.max_races:
+            logging.info('too many races: %d' % len(race_list))
+            race_list._races = race_list._races[:args.max_races - total]
         races.extend(race_list)
     count = output_races(race_list, args.path, 'SIGNAL', count)
     total += len(race_list)
