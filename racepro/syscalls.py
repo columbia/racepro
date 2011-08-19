@@ -38,8 +38,11 @@ class Syscall(object):
                 e.data_type == scribe.SCRIBE_DATA_INPUT | \
                                scribe.SCRIBE_DATA_STRING:
                 for i, arg in enumerate(args):
-                    if int32(args[i]) == int32(e.user_ptr):
-                        args[i] = e.data
+                    try:
+                        if int32(args[i]) == int32(e.user_ptr):
+                            args[i] = e.data
+                    except OverflowError:
+                        logging.debug("Overflow on %s" % syscall)
 
         return args
 
