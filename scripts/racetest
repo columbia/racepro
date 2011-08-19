@@ -109,7 +109,6 @@ if args.config:
 
             if k == 'name': args.name = v
             elif k == 'timeout': args.timeout = v
-            elif k == 'max_races': args.max_races = v
             elif k == 'script-run': args.run = v
             elif k == 'script-pre': args.pre = v
             elif k == 'script-post': args.post = v
@@ -129,6 +128,11 @@ if args.config:
             elif k == 'root': args.root = v
             elif k == 'scratch': args.scratch = v
             elif k == 'chroot': args.chroot = v
+
+            elif k == 'max-races': args.max_races = v
+            elif k == 'ignore-path': 
+                if not args.ignore_path: args.ignore_path = []
+                args.ignore_path.append(v)
 
             else:
                 print('Unknown key in racepro.conf: %s' % k)
