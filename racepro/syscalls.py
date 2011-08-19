@@ -1,6 +1,7 @@
 import scribe
 import unistd
-
+import logging
+import os
 
 def int32(x):
     if x > 0xFFFFFFFF:
@@ -458,9 +459,15 @@ def get_resource_path(s):
         SYS_mount,
         ]
 
+    path = None
     if s.belongs_to(syscalls_info_path):
-        return s.path
+        path = s.path
     elif s.belongs_to(syscalls_info_oldname):
-        return s.oldname
+        path = s.oldname
     elif s.belongs_to(syscalls_info_dir):
-        return s.dir
+        path = s.dir
+
+    if path and isinstance(path, str):
+        return os.path.normpath(path)
+
+    return None
