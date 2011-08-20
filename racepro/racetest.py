@@ -305,6 +305,7 @@ def uninitialized(args):
     if 'timeout' not in args: args.timeout = 0
     if 'max_races' not in args: args.max_races = None
     if 'ignore_path' not in args: args.ignore_path = None
+    if 'check_nr' not in args: args.check_nr = None
     if 'jailed' not in args: args.jailed = False
     if 'initproc' not in args: args.initproc = False
     if 'max_runtime' not in args: args.max_runtime = None

@@ -337,11 +337,19 @@ class RaceResource(Race):
             dt_detect += t_end - t_start
 
             for node1, node2 in pairs_original:
+                if RaceResource.check_nr is not None:
+                    if node1.syscall.nr not in RaceResource.check_nr and \
+                       node2.syscall.nr not in RaceResource.check_nr:
+                        continue
                 nodes_original.add((node1.syscall, node2.syscall))
                 logging.debug('\t(original) adding %s -> %s racing on %s' % \
                               (node1.syscall, node2.syscall, resource))
 
             for node1, node2 in pairs:
+                if RaceResource.check_nr is not None:
+                    if node1.syscall.nr not in RaceResource.check_nr and \
+                       node2.syscall.nr not in RaceResource.check_nr:
+                        continue
                 nodes.add((node1.syscall, node2.syscall))
                 logging.debug('\t(optimized) adding %s -> %s racing on %s' % \
                               (node1.syscall, node2.syscall, resource))
@@ -749,6 +757,15 @@ def find_show_races(graph, args):
     # step 1: find resource races
     RaceResource.max_races = args.max_races
     RaceResource.ignore_path = args.ignore_path
+    RaceResource.check_nr = None
+    if args.check_nr:
+        RaceResource.check_nr = []
+        for nr in args.check_nr:
+            if isinstance(nr, str):
+                if not hasattr(unistd, 'NR_%s' % nr): continue
+                nr = getattr(unistd, 'NR_%s' % nr)
+            RaceResource.check_nr.append(nr)
+            logging.info('checking syscalls: %d' % nr)
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
     if args.max_races and total + len(race_list) > args.max_races:
