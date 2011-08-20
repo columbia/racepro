@@ -459,9 +459,15 @@ def get_resource_path(s):
         SYS_mount,
         ]
 
+    path = None
     if s.belongs_to(syscalls_info_path):
-        return os.path.normpath(s.path)
+        path = s.path
     elif s.belongs_to(syscalls_info_oldname):
-        return os.path.normpath(s.oldname)
+        path = s.oldname
     elif s.belongs_to(syscalls_info_dir):
-        return os.path.normpaths(s.dir)
+        path = s.dir
+
+    if path and isinstance(path, str):
+        return os.path.normpath(path)
+
+    return None

@@ -45,3 +45,10 @@
 #
 # jail: scratch directory
 # scratch =     DIR
+#
+# -- following are for detection
+# the maximum number of generated races
+# max-races =   MAX
+#
+# path to ignore (mulitple lines)
+# ignore-path = PATH

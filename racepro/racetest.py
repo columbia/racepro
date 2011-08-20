@@ -187,6 +187,7 @@ def do_one_test(args, t_name, t_exec):
     else:
         args.redirect = None
 
+<<<<<<< HEAD
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
 
@@ -218,6 +219,42 @@ def do_one_test(args, t_name, t_exec):
 
         dt_isolate = (t_end - t_finish_run) + (t_start_run - t_start)
         dt_normal = (t_end - t_start_run) + (t_start_nothing - t_start)
+
+    if not args.skip_record or not args.skip_testrace:
+        logging.info('  normal run without scribe')
+        with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
+                          scratch=args.scratch, persist=args.pdir) as exe:
+
+            t_start = datetime.datetime.now()
+
+            if args._pre:
+                logging.info('    running pre-run callback...')
+                scribewrap._do_scribe_script(exe, args._pre,  args.redirect)
+
+            t_start_nothing = datetime.datetime.now()
+
+            logging.info('    running /bin/true...')
+            scribewrap._do_scribe_script(exe, '/bin/true',  args.redirect)
+
+            t_start_run = datetime.datetime.now()
+
+            # FIXME: we might need to give a new pid namespace
+            logging.info('    running ...')
+            cmd = args._run if os.path.isabs(args._run) else './' + args._run
+            scribewrap._do_scribe_script(exe, cmd,  args.redirect)
+
+            t_finish_run = datetime.datetime.now()
+
+            if args._pre:
+                logging.info('    running post-run callback...')
+                scribewrap._do_scribe_script(exe, args._post,  args.redirect)
+
+            t_end = datetime.datetime.now()
+
+            dt_isolate = (t_end - t_finish_run) + (t_start_run - t_start)
+            dt_normal = (t_end - t_start_run) + (t_start_nothing - t_start)
+    else:
+        dt_isolate = dt_normal = datetime.timedelta(0)
 
     t_start = datetime.datetime.now()
 
