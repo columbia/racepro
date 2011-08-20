@@ -114,13 +114,19 @@ def _do_scribe_wait(context, p, timeout=None, kill=False):
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0, 0)
 
-def _do_scribe_script(exe, script, redirect):
+def _do_scribe_script(exe, script, redirect, initproc = False, netns = False):
     if script:
         if os.path.isabs(script):
             cmd = script
         else:
             cmd = './' + script
-        ret = exe.execute(cmd.split(), notty=True,
+        if initproc or netns:
+            nscmd = ['nsexec']
+            if initproc: nscmd += ['-p']
+            if netns: nscmd += ['-n']
+        else:
+            nscmd = []
+        ret = exe.execute(nscmd + cmd.split(), notty=True,
                           stdin=_dev_null, stdout=redirect)
         if ret:
             raise execute.ExecuteError(script, ret)
@@ -253,14 +259,3 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
             exec_piped('cp -ax %s %s' % (exe.scratch, logdir))
 
         return success
-
-
-
-
-
-
-
-
-
-
-

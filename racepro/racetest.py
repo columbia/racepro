@@ -8,6 +8,7 @@ import datetime
 import itertools
 import traceback
 import pdb
+import time
 
 import scribewrap
 import eventswrap
@@ -206,19 +207,32 @@ def do_one_test(args, t_name, t_exec):
             t_start_run = datetime.datetime.now()
 
             # FIXME: we might need to give a new pid namespace
-            logging.info('    running ...')
-            cmd = args._run if os.path.isabs(args._run) else './' + args._run
-            scribewrap._do_scribe_script(exe, cmd,  args.redirect)
+            if not args.max_runtime or os.fork() == 0:
+                logging.info('    running ...')
+                cmd = args._run if os.path.isabs(args._run) else './' + args._run
+                scribewrap._do_scribe_script(exe, cmd,  args.redirect)
+                os._exit(0)
 
-            t_finish_run = datetime.datetime.now()
+            if args.max_runtime:
+                time.sleep(float(args.max_runtime))
 
-            if args._pre:
+            t_start_post = datetime.datetime.now()
+
+            if args._post:
                 logging.info('    running post-run callback...')
                 scribewrap._do_scribe_script(exe, args._post,  args.redirect)
 
+            t_finish_post = datetime.datetime.now()
+
+            if args.max_runtime:
+                t_finish_post = t_start_post
+                os.wait()
+
+            t_finish_run = datetime.datetime.now()
+
             t_end = datetime.datetime.now()
 
-            dt_isolate = (t_end - t_finish_run) + (t_start_run - t_start)
+            dt_isolate = (t_finish_post - t_start_post) + (t_start_run - t_start)
             dt_normal = (t_end - t_start_run) + (t_start_nothing - t_start)
     else:
         dt_isolate = dt_normal = datetime.timedelta(0)
