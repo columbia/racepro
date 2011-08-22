@@ -7,6 +7,7 @@ import subprocess
 import errno
 import time
 import pdb
+import datetime
 
 import execute
 import scribe
@@ -89,7 +90,7 @@ def _do_scribe_wait(context, p, timeout=None, kill=False):
     try:
         if not timeout:
             assert not kill
-            logging.info("context.wait() [1]")
+            logging.info("context.wait() [1]")            
             context.wait()
             return p.wait()
 
@@ -114,18 +115,20 @@ def _do_scribe_wait(context, p, timeout=None, kill=False):
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0, 0)
 
-def _do_scribe_script(exe, script, redirect, initproc = False, netns = False):
+def _do_scribe_script(exe, script, redirect, nsexec = False, 
+                      initproc = False, netns = False):
     if script:
-        if os.path.isabs(script):
-            cmd = script
-        else:
-            cmd = './' + script
-        if initproc or netns:
-            nscmd = ['nsexec']
-            if initproc: nscmd += ['-p']
-            if netns: nscmd += ['-n']
+        cmd = os.path.join(os.getcwd(), script)
+
+        if nsexec:
+            nscmd = ['nsexec', '-c', '-p']
+            if not initproc:
+                nscmd += ['-I']
+            if netns:
+                nscmd += ['-n']
         else:
             nscmd = []
+
         ret = exe.execute(nscmd + cmd.split(), notty=True,
                           stdin=_dev_null, stdout=redirect)
         if ret:
@@ -140,17 +143,74 @@ def def_post_script(exe, args):
 def def_test_script(exe, args):
     _do_scribe_script(exe, args._test, args.redirect)
 
+
+def do_no_scribe(args, pre_run=def_pre_script, post_run=def_post_script):
+
+    t_start = datetime.datetime.now()
+
+    with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
+                      scratch=args.scratch, persist=args.pdir) as exe:
+
+        t_isolate = datetime.datetime.now()
+
+        if pre_run:
+            logging.info('    running pre-run callback...')
+            pre_run(exe, args)
+
+        t_pre_run = datetime.datetime.now()
+
+        logging.info('    running ...')
+        if args.max_runtime:
+            if os.fork() == 0:
+                _do_scribe_script(exe, args._run, args.redirect, nsexec = True, 
+                                  initproc = args.initproc, netns = args.netns)
+                os._exit(0)
+            else: 
+                time.sleep(float(args.max_runtime))
+        else:
+            _do_scribe_script(exe, args._run, args.redirect, 
+                                             initproc = args.initproc, 
+                                             netns = args.netns)
+
+        t_run = datetime.datetime.now()
+
+        if args._post:
+            logging.info('    running post-run callback...')
+            post_run(exe, args)
+
+        t_post_run = datetime.datetime.now()
+
+        if args.max_runtime:
+            os.wait()
+
+    t_end = datetime.datetime.now()
+
+    args.t_isolate = t_isolate - t_start
+    args.t_pre_run = t_pre_run - t_isolate
+    args.t_run = t_run - t_pre_run
+    args.t_post_run = t_post_run - t_run
+    args.t_unisolate = t_end - t_post_run
+
+    return True
+
 def scribe_record(args, logfile=None,
                   pre_record=def_pre_script,
                   post_record=def_post_script):
     if not logfile:
         logfile = args.path + '.log'
+
+    t_start = datetime.datetime.now()
+
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
+
+        t_isolate = datetime.datetime.now()
 
         if pre_record:
             logging.info('    running pre-record callback...')
             pre_record(exe, args)
+
+        t_pre_record = datetime.datetime.now()
 
         logging.info('    recording ...')
         cmd = args._run if os.path.isabs(args._run) else './' + args._run
@@ -173,6 +233,7 @@ def scribe_record(args, logfile=None,
             try:
                 context, pinit = _do_scribe_exec(
                         cmd, file, exe, args.redirect, flags, record=True)
+
                 _do_scribe_wait(context, pinit, args.max_runtime,
                                 kill=not not args.max_runtime)
             except Exception as e:
@@ -182,11 +243,23 @@ def scribe_record(args, logfile=None,
                 logging.info('record completed')
                 success = True
 
+        t_record = datetime.datetime.now()
+
         if post_record:
             logging.info('    running post-record callback...')
             post_record(exe, args)
 
-        return success
+        t_post_record = datetime.datetime.now()
+
+    t_end = datetime.datetime.now()
+
+    args.t_isolate = t_isolate - t_start
+    args.t_pre_record = t_pre_record - t_isolate
+    args.t_record = t_record - t_pre_record
+    args.t_post_record = t_post_record - t_record
+    args.t_unisolate = t_end - t_post_record
+    
+    return success
 
 def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
                   pre_replay=def_pre_script,
@@ -194,14 +267,21 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
                   test_replay=None):
     if not logfile:
         logfile = args.path + '.log'
+
+    t_start = datetime.datetime.now()
+
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
                       scratch=args.scratch, persist=args.pdir) as exe:
         if bookmark_cb:
             bookmark_cb = Callback(bookmark_cb, exe=exe, logfile=logfile)
 
+        t_isolate = datetime.datetime.now()
+
         if pre_replay:
             logging.info('    running pre-replay callback...')
             pre_replay(exe, args)
+
+        t_pre_replay = datetime.datetime.now()
 
         logging.info('    replaying ...')
         with open(logfile, 'r') as file:
@@ -249,6 +329,8 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
         if args.max_runtime and success:
             _do_scribe_wait(context, pinit, 0.01, True)
 
+        t_replay = datetime.datetime.now()
+
         if post_replay:
             logging.info('    running post-replay callback...')
             post_replay(exe, args)
@@ -258,4 +340,14 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
             exec_piped('rm -rf %s' % logdir)
             exec_piped('cp -ax %s %s' % (exe.scratch, logdir))
 
-        return success
+        t_post_replay = datetime.datetime.now()
+
+    t_end = datetime.datetime.now()
+
+    args.t_isolate = t_isolate - t_start
+    args.t_pre_replay = t_pre_replay - t_isolate
+    args.t_replay = t_replay - t_pre_replay
+    args.t_post_replay = t_post_replay - t_replay
+    args.t_unisolate = t_end - t_post_replay
+
+    return success

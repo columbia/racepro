@@ -189,11 +189,8 @@ class RaceResource(Race):
         # for each resource, separate the events of that reosurce per
         # process, and find racing events.
 
-        nodes_original = set()
+        nodes_noopt = set()
         nodes = set()
-
-        dt_original = datetime.timedelta(0)
-        dt_detect = datetime.timedelta(0)
 
         ignore_type = [ scribe.SCRIBE_RES_TYPE_FUTEX ]
 
@@ -215,7 +212,7 @@ class RaceResource(Race):
             path2 = os.path.normpath(node2.path) + '/'
             return not (path1.startswith(path2) or path2.startswith(path1))
 
-        def find_races_resource(resource):
+        def find_races_resource_noopt(resource):
             pairs = list()
             ievents_per_proc = \
                 _split_events_per_proc(resource, in_syscall=True)
@@ -245,7 +242,7 @@ class RaceResource(Race):
                             pairs.append((node1, node2))
             return pairs
 
-        def find_races_resource_optimized(resource):
+        def find_races_resource(resource):
             pairs = list()
             ievents_per_proc = \
                 _split_events_per_proc(resource, in_syscall=True)
@@ -307,6 +304,9 @@ class RaceResource(Race):
         for path in ignore_path:
             logging.debug('ignore this path: %s' % path)
 
+        RaceResource.t_detect = datetime.timedelta(0)
+        RaceResource.t_detect_noopt = datetime.timedelta(0)
+
         for resource in graph.resources.itervalues():
             # ignore resources with no WRITE access
             if not next(ifilter(lambda e: e.write_access > 0, resource.events), None):
@@ -327,23 +327,16 @@ class RaceResource(Race):
             if ismatch:
                 continue
 
-            t_start_original = datetime.datetime.now()
-            pairs_original = find_races_resource(resource)
             t_start = datetime.datetime.now()
-            pairs = find_races_resource_optimized(resource)
-            t_end = datetime.datetime.now()
 
-            dt_original += t_start - t_start_original
-            dt_detect += t_end - t_start
+            pairs = find_races_resource(resource)
+            t_optimized = datetime.datetime.now()
 
-            for node1, node2 in pairs_original:
-                if RaceResource.check_nr is not None:
-                    if node1.syscall.nr not in RaceResource.check_nr and \
-                       node2.syscall.nr not in RaceResource.check_nr:
-                        continue
-                nodes_original.add((node1.syscall, node2.syscall))
-                logging.debug('\t(original) adding %s -> %s racing on %s' % \
-                              (node1.syscall, node2.syscall, resource))
+            #pairs_noopt = find_races_resource_noopt(resource)
+            #t_end = datetime.datetime.now()
+
+            RaceResource.t_detect += t_optimized - t_start
+            #RaceResource.t_detect_noopt += t_end - t_optimized
 
             for node1, node2 in pairs:
                 if RaceResource.check_nr is not None:
@@ -351,14 +344,21 @@ class RaceResource(Race):
                        node2.syscall.nr not in RaceResource.check_nr:
                         continue
                 nodes.add((node1.syscall, node2.syscall))
-                logging.debug('\t(optimized) adding %s -> %s racing on %s' % \
+                logging.debug('\tadding %s -> %s racing on %s' % \
                               (node1.syscall, node2.syscall, resource))
 
-        logging.info("original algorithm: %d found in %.2f sec " % (len(nodes_original),
-                      dt_original.seconds + dt_original.microseconds / 1000000.0))
-        logging.info("optimized algorithm: %d found in %.2f sec " % (len(nodes),
-                      dt_detect.seconds + dt_detect.microseconds / 1000000.0))
-        logging.info("    intersect: %d" % len(nodes.intersection(nodes_original)))
+            #for node1, node2 in pairs_noopt:
+            #    if RaceResource.check_nr is not None:
+            #        if node1.syscall.nr not in RaceResource.check_nr and \
+            #           node2.syscall.nr not in RaceResource.check_nr:
+            #            continue
+            #    nodes_noopt.add((node1.syscall, node2.syscall))
+
+        logging.info("algorithm: %d found in %.2f sec " % (len(nodes),
+                     RaceResource.t_detect.seconds + RaceResource.t_detect.microseconds / 1000000.0))
+        #logging.info("algorithm with no optimization: %d found in %.2f sec " % (len(nodes_noopt),
+        #             RaceResource.t_detect_noopt.seconds + RaceResource.t_detect_noopt.microseconds / 1000000.0))
+        #logging.info("    intersect: %d" % len(nodes.intersection(nodes_noopt)))
 
         return [RaceResource(n1, n2) for n1, n2 in nodes]
 
@@ -752,11 +752,11 @@ def output_races(race_list, path, desc, count):
 def find_show_races(graph, args):
     total = 0
     count = 0
-    dt_outputrace = datetime.timedelta(0)
 
     # step 1: find resource races
     RaceResource.max_races = args.max_races
     RaceResource.ignore_path = args.ignore_path
+
     RaceResource.check_nr = None
     if args.check_nr:
         RaceResource.check_nr = []
@@ -766,18 +766,27 @@ def find_show_races(graph, args):
                 nr = getattr(unistd, 'NR_%s' % nr)
             RaceResource.check_nr.append(nr)
             logging.info('checking syscalls: %d' % nr)
+
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
+    args.t_detect = RaceResource.t_detect
+    args.t_detect_noopt = RaceResource.t_detect_noopt
+
     if args.max_races and total + len(race_list) > args.max_races:
         logging.info('too many races: %d' % len(race_list))
         race_list._races = race_list._races[:args.max_races - total]
     total += len(race_list)
-    t_start = datetime.datetime.now()
+
+    t_detect = datetime.datetime.now()
     count = output_races(race_list, args.path, 'RESOURCE', count)
     t_end = datetime.datetime.now() 
-    dt_outputrace += t_end - t_start
+    args.t_outputrace = t_end - t_detect
+
     races = race_list
+
     # step 2: find exit-exit-wait races
+    t_start = datetime.datetime.now()
+
     if args.no_exit_races:
         race_list = list()
     else:
@@ -786,13 +795,19 @@ def find_show_races(graph, args):
             logging.info('too many races: %d' % len(race_list))
             race_list._races = race_list._races[:args.max_races - total]
         races.extend(race_list)
-    t_start = datetime.datetime.now()
+
+    t_detect = datetime.datetime.now()
     count = output_races(race_list, args.path, 'EXIT-WAIT', count)
     t_end = datetime.datetime.now()
-    dt_outputrace += t_end - t_start
+    args.t_detect += t_detect - t_start
+    args.t_detect_noopt += t_detect - t_start
+    args.t_outputrace += t_end - t_detect
+
     total += len(race_list)
 
     # step 3: find signal races
+    t_start = datetime.datetime.now()
+
     if args.no_signal_races:
         race_list = list()
     else:
@@ -801,11 +816,15 @@ def find_show_races(graph, args):
             logging.info('too many races: %d' % len(race_list))
             race_list._races = race_list._races[:args.max_races - total]
         races.extend(race_list)
-    count = output_races(race_list, args.path, 'SIGNAL', count)
-    total += len(race_list)
 
-    logging.info('total outputrace: %.2f' %
-                 (dt_outputrace.seconds + dt_outputrace.microseconds / 1000000.0))
+    t_detect = datetime.datetime.now()
+    count = output_races(race_list, args.path, 'SIGNAL', count)
+    t_end = datetime.datetime.now()
+    args.t_detect += t_detect - t_start
+    args.t_detect_noopt += t_detect - t_start
+    args.t_outputrace += t_end - t_detect
+
+    total += len(race_list)
 
     # step 4: statistics
     print('Generated %d logs for races out of %d candidates' % (count, total))
@@ -872,10 +891,19 @@ def find_show_toctou(graph, args):
     total = 0
     count = 0
 
+    t_start = datetime.datetime.now()
+
     # step 1: find toctou races
     race_list = RaceList(graph, RaceToctou.find_races)
     total += len(race_list)
+ 
+    t_detect = datetime.datetime.now()
     count = output_races(race_list, args.path, 'TOCTOU', count)
+    t_end = datetime.datetime.now()
+
+    args.t_detect = t_detect - t_start
+    args.t_detect_noopt = t_detect - t_start
+    args.t_outputrace = t_end - t_detect
 
     # step 2: statistics
     print('Generated %d logs for races of of %d candidates' % (count, total))

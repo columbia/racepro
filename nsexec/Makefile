@@ -13,6 +13,7 @@ CFLAGS += -g $(WARNS) -I$(KERNELSRC)
 PROGS = nsexec
 
 all: $(PROGS)
+	cp nsexec ../scripts
 
 nsexec: genstack.o clone_x86_32.o nsexec.o
 clone_x86_32.o: eclone.h

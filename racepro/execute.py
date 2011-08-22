@@ -85,9 +85,20 @@ class ExecuteJail(Execute):
     def prepare(self):
         # We need to reload /proc since we are potentially executing prepare()
         # in a different PID namespace than the caller of open().
+        sys = __import__('sys', globals(), locals(), [], -1)
+        datetime = __import__('datetime', globals(), locals(), [], -1)
+
+        t_start = datetime.datetime.now()
+
         Execute.prepare(self)
         sudo(['umount', '/proc'])
         sudo(['mount', '-t', 'proc', 'proc', '/proc'])
+
+        t_end = datetime.datetime.now()
+        t_prepare = t_end - t_start
+
+        print >> sys.stderr, 'prepare:        %.4f' % \
+                     (t_prepare.seconds + t_prepare.microseconds / 1000000.0) 
 
     def execute(self, command, **kwargs):
         assert self.mounted

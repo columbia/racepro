@@ -109,8 +109,12 @@ def _testraces(args):
 def _findraces(args, opts):
     args.logfile = args.path + '.log'
 
+    t_start = datetime.datetime.now()
+
     events = eventswrap.load_events(args.logfile)
     graph = execgraph.ExecutionGraph(events)
+
+    t_graph = datetime.datetime.now()
 
     if not args.skip_predetect:
         if args.toctou:
@@ -118,19 +122,19 @@ def _findraces(args, opts):
         else:
             bookmarks_list = racecore.BookmarksForResources
 
-        t_start = datetime.datetime.now()
         logging.info('  replaying execution for pre-detect')
         racecore.instrumented_replay(graph, args, bookmarks_list)
-        t_end = datetime.datetime.now()
 
-        dt = t_end - t_start
-        logging.info('    time:  %.2f' %
-                     (dt.seconds + dt.microseconds / 1000000.0))
+    t_instrumented = datetime.datetime.now()
+
+    args.t_graph = t_graph - t_start
+    args.t_instrumented = t_instrumented - t_graph
 
     if args.toctou:
         racecore.find_show_toctou(graph, args)
     else:
         racecore.find_show_races(graph, args)
+
     return True
 
 def do_one_test(args, t_name, t_exec):
@@ -188,56 +192,17 @@ def do_one_test(args, t_name, t_exec):
     else:
         args.redirect = None
 
+    t_start = datetime.datetime.now()
+
     if not args.skip_normal and not (args.skip_record and args.skip_testrace):
         logging.info('  normal run without scribe')
-        with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
-                          scratch=args.scratch, persist=args.pdir) as exe:
+        if not scribewrap.do_no_scribe(args):
+            return True if args.keepgoing else False
 
-            t_start = datetime.datetime.now()
-
-            if args._pre:
-                logging.info('    running pre-run callback...')
-                scribewrap._do_scribe_script(exe, args._pre,  args.redirect)
-
-            t_start_nothing = datetime.datetime.now()
-
-            logging.info('    running /bin/true...')
-            scribewrap._do_scribe_script(exe, '/bin/true',  args.redirect)
-
-            t_start_run = datetime.datetime.now()
-
-            # FIXME: we might need to give a new pid namespace
-            if not args.max_runtime or os.fork() == 0:
-                logging.info('    running ...')
-                cmd = args._run if os.path.isabs(args._run) else './' + args._run
-                scribewrap._do_scribe_script(exe, cmd,  args.redirect)
-                os._exit(0)
-
-            if args.max_runtime:
-                time.sleep(float(args.max_runtime))
-
-            t_start_post = datetime.datetime.now()
-
-            if args._post:
-                logging.info('    running post-run callback...')
-                scribewrap._do_scribe_script(exe, args._post,  args.redirect)
-
-            t_finish_post = datetime.datetime.now()
-
-            if args.max_runtime:
-                t_finish_post = t_start_post
-                os.wait()
-
-            t_finish_run = datetime.datetime.now()
-
-            t_end = datetime.datetime.now()
-
-            dt_isolate = (t_finish_post - t_start_post) + (t_start_run - t_start)
-            dt_normal = (t_end - t_start_run) + (t_start_nothing - t_start)
+        t_noscribe = args.t_run
+        t_noscribe_extra = args.t_isolate + args.t_pre_run + args.t_post_run
     else:
-        dt_isolate = dt_normal = datetime.timedelta(0)
-
-    t_start = datetime.datetime.now()
+        t_noscribe = t_noscribe_extra = datetime.timedelta(0)
 
     if not args.skip_record:
         logging.info('  recording original exceution (twice)')
@@ -246,11 +211,8 @@ def do_one_test(args, t_name, t_exec):
         if not args.jailed and not scribewrap.scribe_record(args):
             return True if args.keepgoing else False
 
-        t_replay = datetime.datetime.now()
-
-        events = eventswrap.load_events(args.path + '.log')
-        out = args.path + '.ori.log'
-        save_session(out, session.Session(events).events)
+        t_record = args.t_record
+        t_record_extra = args.t_isolate + args.t_pre_record + args.t_post_record
 
         # If args.max_runtimes was enabled, then recording may have stopped
         # an "external" script; We expect replay to also stop similarly, so
@@ -258,28 +220,39 @@ def do_one_test(args, t_name, t_exec):
         logging.info('  replaying original execution')
         max_runtime = args.max_runtime
         args.max_runtime = 0
-        if not scribewrap.scribe_replay(args, logfile=out):
+        if not scribewrap.scribe_replay(args):
             return True if args.keepgoing else False
         args.max_runtime = max_runtime
 
-    else:
-        t_replay = t_start
+        t_replay = args.t_replay
+        t_replay_extra = args.t_isolate + args.t_pre_replay + args.t_post_replay
 
-    t_record = datetime.datetime.now()
+    else:
+        t_record = t_record_extra = datetime.timedelta(0)
+        t_replay = t_replay_extra = datetime.timedelta(0)
 
     if not args.skip_findrace:
         logging.info('  generating the races')
         if not _findraces(args, opts):
             return True if args.keepgoing else False
 
-    t_findrace = datetime.datetime.now()
+        t_graph = args.t_graph
+        t_instrumented = args.t_instrumented
+        t_detect = args.t_detect
+        t_detect_noopt = args.t_detect_noopt
+        t_outputrace = args.t_outputrace
+    else:
+        t_graph = t_instrumented = t_detect = t_detect_noopt = \
+                  t_outputrace = datetime.timedelta(0)
+
+    t_findrace = t_graph + t_instrumented + t_detect + t_outputrace
+
+    t_start_testrace = datetime.datetime.now()
 
     if not args.skip_testrace:
         logging.info('  testing the races (auto)')
         if not _testraces(args):
             return True if args.keepgoing else False
-
-    t_stop = datetime.datetime.now()
 
     if args.race_list:
         logging.info('  testing the races (list)')
@@ -293,25 +266,38 @@ def do_one_test(args, t_name, t_exec):
                 if not _testlist(args, map(int, line.split(':'))):
                     return True if args.keepgoing else False
 
-    dt_replay = t_replay - t_start
-    dt_record = t_record - t_replay
-    dt_findrace = t_findrace - t_record
-    dt_testrace = t_stop - t_findrace
-    dt_total = t_stop - t_start
-    logging.info('total isolate:     %.2f' %
-                 (dt_isolate.seconds + dt_isolate.microseconds / 1000000.0))
-    logging.info('total normal:     %.2f' %
-                 (dt_normal.seconds + dt_normal.microseconds / 1000000.0)) 
-    logging.info('total time:     %.2f' %
-                 (dt_total.seconds + dt_total.microseconds / 1000000.0))
-    logging.info('total record:   %.2f' %
-                 (dt_record.seconds + dt_record.microseconds / 1000000.0))
-    logging.info('total replay:   %.2f' %
-                 (dt_replay.seconds + dt_replay.microseconds / 1000000.0))
-    logging.info('total findrace: %.2f' %
-                 (dt_findrace.seconds + dt_findrace.microseconds / 1000000.0))
-    logging.info('total testrace: %.2f' %
-                 (dt_testrace.seconds + dt_testrace.microseconds / 1000000.0))
+    t_stop_testrace = datetime.datetime.now()
+    t_testrace = t_stop_testrace - t_start_testrace
+
+    t_total = t_noscribe + t_noscribe_extra + t_record + t_record_extra + \
+              t_replay + t_replay_extra + t_findrace + t_testrace
+
+    logging.info('noscribe:        %.4f' %
+                 (t_noscribe.seconds + t_noscribe.microseconds / 1000000.0)) 
+    logging.info('noscribe extra:  %.4f' %
+                 (t_noscribe_extra.seconds + t_noscribe_extra.microseconds / 1000000.0))
+    logging.info('record:          %.4f' %
+                 (t_record.seconds + t_record.microseconds / 1000000.0))
+    logging.info('record extra:    %.4f' %
+                 (t_record_extra.seconds + t_record_extra.microseconds / 1000000.0))
+    logging.info('replay:          %.4f' %
+                 (t_replay.seconds + t_replay.microseconds / 1000000.0))
+    logging.info('replay extra:    %.4f' %
+                 (t_replay_extra.seconds + t_replay_extra.microseconds / 1000000.0))
+    logging.info('instrumented:    %.4f' %
+                 (t_instrumented.seconds + t_instrumented.microseconds / 1000000.0))
+    logging.info('detect:          %.4f' %
+                 (t_detect.seconds + t_detect.microseconds / 1000000.0))
+    logging.info('detect (no opt): %.4f' %
+                 (t_detect_noopt.seconds + t_detect_noopt.microseconds / 1000000.0))
+    logging.info('outputrace:      %.4f' %
+                 (t_outputrace.seconds + t_outputrace.microseconds / 1000000.0)) 
+    logging.info('findrace:        %.4f' %
+                 (t_findrace.seconds + t_findrace.microseconds / 1000000.0))
+    logging.info('testrace:        %.4f' %
+                 (t_testrace.seconds + t_testrace.microseconds / 1000000.0))
+    logging.info('total:           %.4f' %
+                 (t_total.seconds + t_total.microseconds / 1000000.0)) 
 
     return True
 
