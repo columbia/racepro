@@ -1,6 +1,7 @@
 from nose.tools import *
 from racepro.execgraph import *
 from racepro.unistd import *
+import struct
 
 def test_fork_wait_dep():
     def gen_test_fork_process_edge(nr_fork, nr_wait, nr_exit):
@@ -49,10 +50,38 @@ def test_fork_wait_dep():
 
     for nr_fork in [NR_fork, NR_clone, NR_vfork]:
         yield gen_test_fork_process_edge, nr_fork, NR_waitpid, NR_exit
-    for nr_wait in [NR_waitpid, NR_wait4, NR_waitid]:
+    for nr_wait in [NR_waitpid, NR_wait4]:
         yield gen_test_fork_process_edge, NR_fork, nr_wait, NR_exit
     for nr_exit in [NR_exit, NR_exit_group]:
         yield gen_test_fork_process_edge, NR_fork, NR_waitpid, nr_exit
+
+def test_fork_waitid():
+    def gen_test_fork_process_edge(nr_fork, nr_wait, nr_exit):
+        events = [
+                   scribe.EventPid(pid=1),                       # 0
+                   scribe.EventRegs(),                           # 1
+                   scribe.EventRegs(),                           # 2
+                   scribe.EventSyscallExtra(nr=nr_fork, ret=1000),  # 3
+                   scribe.EventSyscallEnd(),                     # 4
+                   scribe.EventSyscallExtra(nr=nr_wait, ret=0),  # 5
+                   scribe.EventDataExtra(data_type=scribe.SCRIBE_DATA_INTERNAL,
+                                         data=struct.pack('i', 1000 | scribe.SCRIBE_REAPED)), #6
+                   scribe.EventSyscallEnd(),                     # 7
+                   scribe.EventPid(pid=1000),                       # 8
+                   scribe.EventRegs()                            # 9
+                 ]
+
+        g = ExecutionGraph(events)
+        e = list(g.events)
+        p = g.processes
+
+        assert_equal(set(g.edges_labeled('fork')), set([
+            (e[3], p[1000].first_anchor)]))
+
+        assert_equal(set(g.edges_labeled('exit')), set([
+            (p[1000].last_anchor, e[5])]))
+
+    yield gen_test_fork_process_edge, NR_fork, NR_waitid, NR_exit
 
 def pipe_syscall(nr, pipe, ret, res_id, serial):
     return [
