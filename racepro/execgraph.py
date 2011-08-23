@@ -5,6 +5,7 @@ from collections import *
 import networkx
 import logging
 import sys
+import struct
 
 import scribe
 from racepro import unistd
@@ -98,8 +99,11 @@ class ExecutionGraph(networkx.DiGraph, Session):
                 type = None
                 if sys.nr in unistd.SYS_fork and sys.ret > 0:
                     type = 'fork'
-                elif sys.nr in unistd.SYS_wait and sys.ret > 0:
+                elif sys.nr in [unistd.NR_waitpid, unistd.NR_wait4] and sys.ret > 0:
                     type = 'wait'
+                elif sys.nr == unistd.NR_waitid and sys.ret == 0:
+                    if self._get_reaped_pid(sys) > 0:
+                        type = 'wait'
                 elif sys.nr in unistd.SYS_exit:
                     type = 'exit'
                 if type:
@@ -108,13 +112,28 @@ class ExecutionGraph(networkx.DiGraph, Session):
                 ancestor = sys
             self.add_edge(ancestor, proc.last_anchor)
 
+    def _get_reaped_pid(self, sys):
+        if sys.nr in [unistd.NR_waitpid, unistd.NR_wait4] and sys.ret > 0:
+            return sys.ret
+
+        if sys.nr == unistd.NR_waitid:
+            for e in sys.children:
+                if e.is_a(scribe.EventDataExtra) and \
+                        e.data_type == scribe.SCRIBE_DATA_INTERNAL:
+                    (pid,) = struct.unpack('i', e.data)
+                    if pid & scribe.SCRIBE_REAPED:
+                        return pid & ~scribe.SCRIBE_REAPED
+                    break
+        return 0
+
     def _dependency_ps(self):
         for node in self.nodes_typed('fork'):
             child = self.processes[node.ret]
             self.add_edge(node, child.first_anchor, label='fork')
 
         for node in self.nodes_typed('wait'):
-            child = self.processes[node.ret]
+            pid = self._get_reaped_pid(node)
+            child = self.processes[pid]
             self.add_edge(child.last_anchor, node, label='exit')
 
     def _dependency_fifo(self):
