@@ -85,7 +85,7 @@ def _do_scribe_exec(cmd, logfile, exe, stdout, flags,
 
     return (context, pinit)
 
-def _do_scribe_wait(context, p, timeout=None, kill=False):
+def _do_scribe_wait(context, p, timeout, kill, replay):
     logging.info("timeout: %s, kill: %s" % (timeout, kill))
     try:
         if not timeout:
@@ -94,12 +94,15 @@ def _do_scribe_wait(context, p, timeout=None, kill=False):
             context.wait()
             return p.wait()
 
+        if replay:
+            context.wait()
         time.sleep(float(timeout))
 
         r = p.poll()
         if r is not None:
             logging.info("context.wait() [2]")
-            context.wait()
+            if not replay:
+                context.wait()
             return p.wait()
 
         if kill:
@@ -108,7 +111,8 @@ def _do_scribe_wait(context, p, timeout=None, kill=False):
             except OSError:
                 pass
             logging.info("context.wait() [3]")
-            context.wait()
+            if not replay:
+                context.wait()
             return p.wait()
 
         return None
@@ -235,7 +239,7 @@ def scribe_record(args, logfile=None,
                         cmd, file, exe, args.redirect, flags, record=True)
 
                 _do_scribe_wait(context, pinit, args.max_runtime,
-                                kill=not not args.max_runtime)
+                                kill=not not args.max_runtime, replay=False)
             except Exception as e:
                 logging.error('failed recording: %s' % e)
                 success = False
@@ -292,7 +296,7 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
                         None, file, exe, args.redirect, 0, deadlock=1,
                         replay=True, bookmark_cb=bookmark_cb)
                 ret = _do_scribe_wait(context, pinit, args.max_runtime,
-                                      not not args.max_runtime)
+                                      not not args.max_runtime, replay=True)
             except scribe.DeadlockError as derr:
                 logging.info(str(derr))
                 if verbose:
@@ -327,7 +331,7 @@ def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
             print(verbose + 'BUG replayed but not tested')
 
         if args.max_runtime and success:
-            _do_scribe_wait(context, pinit, 0.01, True)
+            _do_scribe_wait(context, pinit, 0.01, True, True)
 
         t_replay = datetime.datetime.now()
 
