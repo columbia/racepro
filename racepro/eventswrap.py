@@ -90,6 +90,7 @@ def mutate_events(graph,
                 return True
         except KeyError:
             pass
+        return False
 
     def consider_event(nl):
         # pid bookmark ?
@@ -128,6 +129,10 @@ def mutate_events(graph,
         # ignore old bookmarks
         if event.is_a(scribe.EventBookmark):
             return
+
+        if event == proc.first_anchor:
+            for new_event in consider_event(NodeLoc(event, 'before')):
+                yield new_event
 
         # actions before a syscall
         if event.is_a(scribe.EventSyscallExtra):
