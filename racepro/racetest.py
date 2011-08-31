@@ -194,13 +194,22 @@ def do_one_test(args, t_name, t_exec):
 
     t_start = datetime.datetime.now()
 
+    if args._pre and not (args.skip_record and args.skip_testrace):
+        logging.info('  prepare pre-script')
+        if not scribewrap.prepare_pre_script(args):
+            return True if args.keepgoing else False
+
+        t_prepare = args.t_prepare
+    else:
+        t_prepare = datetime.timedelta(0)
+
     if not args.skip_normal and not (args.skip_record and args.skip_testrace):
         logging.info('  normal run without scribe')
         if not scribewrap.do_no_scribe(args):
             return True if args.keepgoing else False
 
         t_noscribe = args.t_run
-        t_noscribe_extra = args.t_isolate + args.t_pre_run + args.t_post_run
+        t_noscribe_extra = args.t_isolate + args.t_post_run
     else:
         t_noscribe = t_noscribe_extra = datetime.timedelta(0)
 
@@ -212,7 +221,7 @@ def do_one_test(args, t_name, t_exec):
             return True if args.keepgoing else False
 
         t_record = args.t_record
-        t_record_extra = args.t_isolate + args.t_pre_record + args.t_post_record
+        t_record_extra = args.t_isolate + args.t_post_record
 
         # If args.max_runtimes was enabled, then recording may have stopped
         # an "external" script; We expect replay to also stop similarly, so
@@ -225,7 +234,7 @@ def do_one_test(args, t_name, t_exec):
         args.max_runtime = max_runtime
 
         t_replay = args.t_replay
-        t_replay_extra = args.t_isolate + args.t_pre_replay + args.t_post_replay
+        t_replay_extra = args.t_isolate + args.t_post_replay
 
     else:
         t_record = t_record_extra = datetime.timedelta(0)
@@ -272,6 +281,8 @@ def do_one_test(args, t_name, t_exec):
     t_total = t_noscribe + t_noscribe_extra + t_record + t_record_extra + \
               t_replay + t_replay_extra + t_findrace + t_testrace
 
+    logging.info('prepare:        %.4f' %
+                 (t_prepare.seconds + t_prepare.microseconds / 1000000.0)) 
     logging.info('noscribe:        %.4f' %
                  (t_noscribe.seconds + t_noscribe.microseconds / 1000000.0)) 
     logging.info('noscribe extra:  %.4f' %
