@@ -332,11 +332,7 @@ class RaceResource(Race):
             pairs = find_races_resource(resource)
             t_optimized = datetime.datetime.now()
 
-            #pairs_noopt = find_races_resource_noopt(resource)
-            #t_end = datetime.datetime.now()
-
             RaceResource.t_detect += t_optimized - t_start
-            #RaceResource.t_detect_noopt += t_end - t_optimized
 
             for node1, node2 in pairs:
                 if RaceResource.check_nr is not None:
@@ -347,18 +343,9 @@ class RaceResource(Race):
                 logging.debug('\tadding %s -> %s racing on %s' % \
                               (node1.syscall, node2.syscall, resource))
 
-            #for node1, node2 in pairs_noopt:
-            #    if RaceResource.check_nr is not None:
-            #        if node1.syscall.nr not in RaceResource.check_nr and \
-            #           node2.syscall.nr not in RaceResource.check_nr:
-            #            continue
-            #    nodes_noopt.add((node1.syscall, node2.syscall))
-
         logging.info("algorithm: %d found in %.2f sec " % (len(nodes),
-                     RaceResource.t_detect.seconds + RaceResource.t_detect.microseconds / 1000000.0))
-        #logging.info("algorithm with no optimization: %d found in %.2f sec " % (len(nodes_noopt),
-        #             RaceResource.t_detect_noopt.seconds + RaceResource.t_detect_noopt.microseconds / 1000000.0))
-        #logging.info("    intersect: %d" % len(nodes.intersection(nodes_noopt)))
+                     RaceResource.t_detect.seconds + \
+                     RaceResource.t_detect.microseconds / 1000000.0))
 
         return [RaceResource(n1, n2) for n1, n2 in nodes]
 
@@ -387,7 +374,7 @@ class RaceSignal(Race):
 
     def prepare(self, graph):
         node = self.signal.handled
-        if not node:
+        if not node or not node.is_a(scribe.EventSyscallExtra):
             return False
 
         crosscut = graph.crosscut([node])
@@ -594,8 +581,9 @@ class RaceExitWait(Race):
 
         # create mapping:  pid --> reaper
         for node in graph.nodes_typed('wait'):
-            child = graph.processes[node.ret]
-            reaper_wait_of[child] = node
+            if node.ret > 0:
+                child = graph.processes[node.ret]
+                reaper_wait_of[child] = node
 
         # collect exit calls per reaper
         for node in graph.nodes_typed('exit'):

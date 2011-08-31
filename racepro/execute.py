@@ -97,9 +97,6 @@ class ExecuteJail(Execute):
         t_end = datetime.datetime.now()
         t_prepare = t_end - t_start
 
-        print >> sys.stderr, 'prepare:        %.4f' % \
-                     (t_prepare.seconds + t_prepare.microseconds / 1000000.0) 
-
     def execute(self, command, **kwargs):
         assert self.mounted
         return Execute.execute(self, command, **kwargs)
