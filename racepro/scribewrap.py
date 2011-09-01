@@ -151,12 +151,12 @@ def def_test_script(exe, args):
 def prepare_pre_script(args, pre_run=def_pre_script):
     t_start = datetime.datetime.now()
 
+    if args.scratch:
+        args.pre_scratch = args.scratch
+        args.scratch = None
+
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
-                      scratch=args.scratch, persist=args.pdir) as exe:
-
-        args.chroot = exe.chroot
-        args.scratch = exe.scratch
-
+                      scratch=args.pre_scratch, persist=args.pdir) as exe:
         t_isolate = datetime.datetime.now()
 
         if pre_run:
@@ -165,9 +165,10 @@ def prepare_pre_script(args, pre_run=def_pre_script):
 
         t_pre_run = datetime.datetime.now()
 
-        rundir = args.path + '.run'
-        exec_piped('rm -rf %s' % rundir)
-        exec_piped('cp -ax %s %s' % (exe.scratch, rundir))
+        if not args.pre_scratch:
+            args.pre_scratch = args.path + '.scratch'
+            exec_piped('rm -rf %s' % args.pre_scratch)
+            exec_piped('cp -ax %s %s' % (exe.scratch, args.pre_scratch))
 
     t_end = datetime.datetime.now()
 
@@ -178,20 +179,11 @@ def prepare_pre_script(args, pre_run=def_pre_script):
     return True
 
 def do_no_scribe(args, post_run=def_post_script):
-    rundir = args.path + '.run'
-
-    if os.path.exists(rundir):
-        assert args.scratch
-        assert args.chroot
-
-        exec_piped('rm -rf %s' % args.scratch)
-        exec_piped('cp -ax %s %s' % (rundir, args.scratch))
-        exec_piped('mkdir -p %s' % args.chroot)
-
     t_start = datetime.datetime.now()
 
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
-                      scratch=args.scratch, persist=args.pdir) as exe:
+                      scratch=args.scratch, pre_scratch=args.pre_scratch,
+                      persist=args.pdir) as exe:
 
         t_isolate = datetime.datetime.now()
 
@@ -229,23 +221,14 @@ def do_no_scribe(args, post_run=def_post_script):
     return True
 
 def scribe_record(args, logfile=None, post_record=def_post_script):
-    rundir = args.path + '.run'
-
-    if os.path.exists(rundir):
-        assert args.scratch
-        assert args.chroot
-
-        exec_piped('rm -rf %s' % args.scratch)
-        exec_piped('cp -ax %s %s' % (rundir, args.scratch))
-        exec_piped('mkdir -p %s' % args.chroot)
-
     if not logfile:
         logfile = args.path + '.log'
 
     t_start = datetime.datetime.now()
 
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
-                      scratch=args.scratch, persist=args.pdir) as exe:
+                      scratch=args.scratch, pre_scratch=args.pre_scratch,
+                      persist=args.pdir) as exe:
 
         t_isolate = datetime.datetime.now()
 
@@ -299,23 +282,14 @@ def scribe_record(args, logfile=None, post_record=def_post_script):
 
 def scribe_replay(args, logfile=None, verbose='', bookmark_cb=None,
                   post_replay=def_post_script, test_replay=None):
-    rundir = args.path + '.run'
-
-    if os.path.exists(rundir):
-        assert args.scratch
-        assert args.chroot
-
-        exec_piped('rm -rf %s' % args.scratch)
-        exec_piped('cp -ax %s %s' % (rundir, args.scratch))
-        exec_piped('mkdir -p %s' % args.chroot)
-
     if not logfile:
         logfile = args.path + '.log'
 
     t_start = datetime.datetime.now()
 
     with execute.open(jailed=args.jailed, chroot=args.chroot, root=args.root,
-                      scratch=args.scratch, persist=args.pdir) as exe:
+                      scratch=args.scratch, pre_scratch=args.pre_scratch,
+                      persist=args.pdir) as exe:
         if bookmark_cb:
             bookmark_cb = Callback(bookmark_cb, exe=exe, logfile=logfile)
 

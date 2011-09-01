@@ -305,7 +305,6 @@ class RaceResource(Race):
             logging.debug('ignore this path: %s' % path)
 
         RaceResource.t_detect = datetime.timedelta(0)
-        RaceResource.t_detect_noopt = datetime.timedelta(0)
 
         for resource in graph.resources.itervalues():
             # ignore resources with no WRITE access
@@ -758,7 +757,6 @@ def find_show_races(graph, args):
     race_list = RaceList(graph, RaceResource.find_races)
     race_list._races.sort(reverse=True, key=lambda race: race.rank)
     args.t_detect = RaceResource.t_detect
-    args.t_detect_noopt = RaceResource.t_detect_noopt
 
     if args.max_races and total + len(race_list) > args.max_races:
         logging.info('too many races: %d' % len(race_list))
@@ -788,7 +786,6 @@ def find_show_races(graph, args):
     count = output_races(race_list, args.path, 'EXIT-WAIT', count)
     t_end = datetime.datetime.now()
     args.t_detect += t_detect - t_start
-    args.t_detect_noopt += t_detect - t_start
     args.t_outputrace += t_end - t_detect
 
     total += len(race_list)
@@ -809,7 +806,6 @@ def find_show_races(graph, args):
     count = output_races(race_list, args.path, 'SIGNAL', count)
     t_end = datetime.datetime.now()
     args.t_detect += t_detect - t_start
-    args.t_detect_noopt += t_detect - t_start
     args.t_outputrace += t_end - t_detect
 
     total += len(race_list)

@@ -138,6 +138,18 @@ class ExecuteJail(Execute):
             os.chmod(self.chroot, 0777)
             self._rmdirs.append(self.chroot)
 
+        if self.pre_scratch:
+            scratch2 = tempfile.mkdtemp(dir=isolate_dir)
+            os.chmod(scratch2, 0777)
+            self._rmdirs.append(scratch2)
+
+            mount_dirs = '%s=rw:%s=ro' % \
+                (os.path.abspath(scratch2), os.path.abspath(self.pre_scratch))
+            mount_point = os.path.abspath(self.scratch)
+
+            sudo(['unionfs-fuse', '-o', 'cow,allow_other,use_ino,suid,' + \
+                  'dev,nonempty,max_files=32768', mount_dirs, mount_point])
+
         # mark our scratch area as jailed ..
         sudo(['touch', os.path.join(self.scratch, '.JAILED')])
 
@@ -163,6 +175,9 @@ class ExecuteJail(Execute):
 
         sudo('fusermount -z -u'.split() + [self.chroot])
 
+        if self.pre_scratch:
+            sudo('fusermount -z -u'.split() + [self.scratch])
+
         for d in self._rmdirs:
             sudo(['rm', '-rf', d])
 
@@ -175,11 +190,13 @@ class ExecuteJail(Execute):
         self.open()
         return self
 
-    def __init__(self, chroot='', root='/', scratch=None, persist=None):
+    def __init__(self, chroot='', root='/', scratch=None, pre_scratch=None, 
+                 persist=None):
         Execute.__init__(self, chroot)
 
         self.root = root
         self.scratch = scratch
+        self.pre_scratch = pre_scratch
         self.persist = persist
 
         self._rmdirs = list()

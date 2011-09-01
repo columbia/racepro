@@ -194,7 +194,9 @@ def do_one_test(args, t_name, t_exec):
 
     t_start = datetime.datetime.now()
 
-    if args._pre and not (args.skip_record and args.skip_testrace):
+    if args._pre and not (args.skip_record and args.skip_testrace and \
+            args.race_list and args.race_file and \
+            (args.skip_findrace or args.skip_predetect)):
         logging.info('  prepare pre-script')
         if not scribewrap.prepare_pre_script(args):
             return True if args.keepgoing else False
@@ -203,7 +205,7 @@ def do_one_test(args, t_name, t_exec):
     else:
         t_prepare = datetime.timedelta(0)
 
-    if not args.skip_normal and not (args.skip_record and args.skip_testrace):
+    if not args.skip_normal:
         logging.info('  normal run without scribe')
         if not scribewrap.do_no_scribe(args):
             return True if args.keepgoing else False
@@ -248,11 +250,10 @@ def do_one_test(args, t_name, t_exec):
         t_graph = args.t_graph
         t_instrumented = args.t_instrumented
         t_detect = args.t_detect
-        t_detect_noopt = args.t_detect_noopt
         t_outputrace = args.t_outputrace
     else:
-        t_graph = t_instrumented = t_detect = t_detect_noopt = \
-                  t_outputrace = datetime.timedelta(0)
+        t_graph = t_instrumented = t_detect = t_outputrace = \
+                datetime.timedelta(0)
 
     t_findrace = t_graph + t_instrumented + t_detect + t_outputrace
 
@@ -299,8 +300,6 @@ def do_one_test(args, t_name, t_exec):
                  (t_instrumented.seconds + t_instrumented.microseconds / 1000000.0))
     logging.info('detect:          %.4f' %
                  (t_detect.seconds + t_detect.microseconds / 1000000.0))
-    logging.info('detect (no opt): %.4f' %
-                 (t_detect_noopt.seconds + t_detect_noopt.microseconds / 1000000.0))
     logging.info('outputrace:      %.4f' %
                  (t_outputrace.seconds + t_outputrace.microseconds / 1000000.0)) 
     logging.info('findrace:        %.4f' %
@@ -328,6 +327,7 @@ def uninitialized(args):
     if 'root' not in args: args.root = None
     if 'scratch' not in args: args.scratch = None
     if 'chroot' not in args: args.chroot = None
+    if 'pre_scratch' not in args: args.pre_scratch = None
     if 'race_file' not in args: args.race_file = None
     if 'race_list' not in args: args.race_list = None
     if 'skip_normal' not in args: args.skip_normal = None
