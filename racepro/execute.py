@@ -2,6 +2,7 @@ import os
 import tempfile
 import subprocess
 import errno
+import logging
 
 def _popen(cmd, stdin=None, stdout=None, stderr=None, notty=False):
     if notty:
@@ -147,6 +148,8 @@ class ExecuteJail(Execute):
                 (os.path.abspath(scratch2), os.path.abspath(self.pre_scratch))
             mount_point = os.path.abspath(self.scratch)
 
+            logging.debug("    mounting on %s (%s)" % (mount_point, mount_dirs))
+
             sudo(['unionfs-fuse', '-o', 'cow,allow_other,use_ino,suid,' + \
                   'dev,nonempty,max_files=32768', mount_dirs, mount_point])
 
@@ -156,6 +159,8 @@ class ExecuteJail(Execute):
         mount_dirs = '%s=rw:%s=ro' % \
             (os.path.abspath(self.scratch), os.path.abspath(self.root))
         mount_point = os.path.abspath(self.chroot)
+
+        logging.debug("    mounting on %s (%s)" % (mount_point, mount_dirs))
 
         sudo(['unionfs-fuse', '-o', 'cow,allow_other,use_ino,suid,' + \
                   'dev,nonempty,max_files=32768', mount_dirs, mount_point])

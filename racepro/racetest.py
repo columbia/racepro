@@ -205,7 +205,7 @@ def do_one_test(args, t_name, t_exec):
     else:
         t_prepare = datetime.timedelta(0)
 
-    if not args.skip_normal:
+    if not args.skip_normal and not args.skip_record:
         logging.info('  normal run without scribe')
         if not scribewrap.do_no_scribe(args):
             return True if args.keepgoing else False
