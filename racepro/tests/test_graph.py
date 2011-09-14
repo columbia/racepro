@@ -1,6 +1,7 @@
 from nose.tools import *
 from racepro.execgraph import *
 from racepro.unistd import *
+from racepro.vectorclock import *
 import struct
 
 def test_fork_wait_dep():

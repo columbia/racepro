@@ -1,16 +1,16 @@
-from vectorclock import *
-from session import *
-from itertools import *
-from collections import *
+import vectorclock
+import session
+import itertools
+import collections
 import networkx
 import struct
 
 import scribe
 from racepro import unistd
 
-class Node(Event):
+class Node(session.Event):
     def __init__(self, graph, scribe_event):
-        Event.__init__(self, scribe_event)
+        session.Event.__init__(self, scribe_event)
         self.graph = graph
         self.vclock = None
 
@@ -19,7 +19,7 @@ class Node(Event):
 
     def __repr__(self):
         if self.proc is None:
-            return Event.__repr__(self)
+            return session.Event.__repr__(self)
         try:
             return "%d:%d %s" % (self.proc.pid, self.syscall_index+1, str(self._scribe_event))
         except:
@@ -63,10 +63,10 @@ class NodeLoc:
     def __repr__(self):
         return repr(self.node) + ('a' if self.after else 'b')
 
-class ExecutionGraph(networkx.DiGraph, Session):
+class ExecutionGraph(networkx.DiGraph, session.Session):
     def __init__(self, events):
         networkx.DiGraph.__init__(self)
-        Session.__init__(self, (Node(self, e) for e in events))
+        session.Session.__init__(self, (Node(self, e) for e in events))
 
         self._build_graph()
         self._dependency_ps()
@@ -138,7 +138,7 @@ class ExecutionGraph(networkx.DiGraph, Session):
         for fifo in self.fifos:
             buf = 0
             write_left = 0  # data "left" in the first write
-            writes = deque()
+            writes = collections.deque()
 
             write_iter = iter(fifo.writes)
 
@@ -186,14 +186,14 @@ class ExecutionGraph(networkx.DiGraph, Session):
     def _compute_vclocks(self):
         for node in networkx.algorithms.dag.topological_sort(self):
             vc = reduce(lambda vc, node: vc.merge(node.vclock),
-                        self.predecessors_iter(node), VectorClock())
+                        self.predecessors_iter(node), vectorclock.VectorClock())
             node.vclock = vc.tick(node.proc)
 
     def crosscut(self, cut):
         if len(cut) == 0:
             raise ValueError('Give me some nodes')
         cut = map(lambda n: n if isinstance(n, NodeLoc) else NodeLoc(n, 'before'), cut)
-        vc = reduce(lambda vc, nl: vc.merge(nl.vclock), cut, VectorClock())
+        vc = reduce(lambda vc, nl: vc.merge(nl.vclock), cut, vectorclock.VectorClock())
 
         def get_clock_node(proc):
             clock = vc[proc]
