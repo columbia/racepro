@@ -3,8 +3,6 @@ from session import *
 from itertools import *
 from collections import *
 import networkx
-import logging
-import sys
 import struct
 
 import scribe

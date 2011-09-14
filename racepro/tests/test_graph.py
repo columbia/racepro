@@ -132,14 +132,14 @@ def test_signal_dep():
                scribe.EventFence(),                         # 4
                scribe.EventSigSendCookie(cookie=1),         # 5
                scribe.EventSyscallEnd(),                    # 6
-               scribe.EventSyscallExtra(),                  # 7
+               scribe.EventSigRecvCookie(cookie=2),         # 7
                scribe.EventFence(),                         # 8
-               scribe.EventSigRecvCookie(cookie=2),         # 9
+               scribe.EventSyscallExtra(),                  # 9
                scribe.EventSyscallEnd(),                    # 10
                scribe.EventPid(pid=2),                      # 11
-               scribe.EventSyscallExtra(),                  # 12
-               scribe.EventFence(),                         # 13
-               scribe.EventSigRecvCookie(cookie=1),         # 14
+               scribe.EventSigRecvCookie(cookie=1),         # 12
+               scribe.EventSyscallExtra(),                  # 13
+               scribe.EventFence(),                         # 14
                scribe.EventSyscallEnd(),                    # 15
                scribe.EventFence(),                         # 16
                scribe.EventSyscallExtra(),                  # 17
@@ -153,8 +153,8 @@ def test_signal_dep():
     e = list(g.events)
 
     assert_equal(set(g.edges_labeled('signal')), set([
-        (e[3],  e[12]),
-        (e[17], e[7])]))
+        (e[3],  e[13]),
+        (e[17], e[9])]))
 
 def test_vclocks():
     events = [
