@@ -1,0 +1,33 @@
+class Mutator:
+    def process_events(self, events):
+      for e in events:
+          yield self.on_event(e)
+
+    def on_event(self, event):
+        raise NotImplementedError()
+
+    def __or__(self, mutator):
+        return Pipe(self, mutator)
+
+    def __ror__(self, other):
+        return Cat(other) | self
+
+    def __iter__(self):
+        return self.process_events(None)
+
+class Pipe(Mutator):
+    def __init__(self, lmutator, rmutator):
+        self.lmutator = lmutator
+        self.rmutator = rmutator
+
+    def process_events(self, events):
+        events = self.lmutator.process_events(events)
+        events = self.rmutator.process_events(events)
+        return events
+
+class Cat(Mutator):
+    def __init__(self, events):
+        self.events = events
+
+    def process_events(self, _):
+        return self.events
