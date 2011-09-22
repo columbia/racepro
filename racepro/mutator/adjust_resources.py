@@ -6,7 +6,7 @@ class AdjustResources(Mutator):
     """ Rewrite all serial numbers of resources.
         Sadly this is a two pass mechanism.
     """
-    def process_events(self, events):
+    def process_events(self, events, options):
         events = list(events)
 
         serials = dict()

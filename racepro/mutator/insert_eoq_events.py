@@ -3,7 +3,7 @@ from racepro import session
 import scribe
 
 class InsertEoqEvents(Mutator):
-    def process_events(self, events):
+    def process_events(self, events, options):
         proc_eoq = dict()
 
         for e in events:

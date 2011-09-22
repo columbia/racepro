@@ -1,7 +1,7 @@
 from racepro.execgraph import ExecutionGraph
 
 class Mutator:
-    def process_events(self, events):
+    def process_events(self, events, options={}):
       for e in events:
           yield self.on_event(e)
 
@@ -18,21 +18,21 @@ class Mutator:
         return Cat(other) | self
 
     def __iter__(self):
-        return self.process_events(None)
+        return self.process_events(None, {})
 
 class Pipe(Mutator):
     def __init__(self, lmutator, rmutator):
         self.lmutator = lmutator
         self.rmutator = rmutator
 
-    def process_events(self, events):
-        events = self.lmutator.process_events(events)
-        events = self.rmutator.process_events(events)
+    def process_events(self, events, options):
+        events = self.lmutator.process_events(events, options)
+        events = self.rmutator.process_events(events, options)
         return events
 
 class Cat(Mutator):
     def __init__(self, events):
         self.events = events
 
-    def process_events(self, _):
+    def process_events(self, *args):
         return self.events
