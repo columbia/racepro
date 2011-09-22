@@ -1,3 +1,5 @@
+from racepro.execgraph import ExecutionGraph
+
 class Mutator:
     def process_events(self, events):
       for e in events:
@@ -10,6 +12,9 @@ class Mutator:
         return Pipe(self, mutator)
 
     def __ror__(self, other):
+        if isinstance(other, ExecutionGraph):
+            from cat_graph import CatGraph
+            return CatGraph(other) | self
         return Cat(other) | self
 
     def __iter__(self):
