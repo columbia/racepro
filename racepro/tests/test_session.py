@@ -68,6 +68,10 @@ def test_event_doesnt_belong_to_proc_by_default():
     e = Event(scribe.EventRegs())
     assert_equal(e.proc, None)
 
+def test_event_can_belong_to_a_proc_on_creation():
+    e = Event(scribe.EventRegs(), "proc")
+    assert_equal(e.proc, "proc")
+
 def test_add_proc_events_sets_event_proc():
     proc = Process(pid=1)
     e = Event(scribe.EventRegs())

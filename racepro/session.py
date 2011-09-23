@@ -4,9 +4,9 @@ import itertools
 import re
 
 class Event(object):
-    def __init__(self, scribe_event):
+    def __init__(self, scribe_event, proc=None):
         self._scribe_event = scribe_event
-        self.proc = None
+        self.proc = proc
         self.owners = dict()
 
     def __repr__(self):
