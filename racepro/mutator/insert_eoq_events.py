@@ -4,7 +4,7 @@ import scribe
 import operator
 
 class InsertEoqEvents(Mutator):
-    def process_events(self, events, options):
+    def process_events(self, events):
         proc_eoq = dict()
 
         for e in events:

@@ -6,7 +6,7 @@ class CatGraph(Mutator):
     def __init__(self, graph):
         self.graph = graph
 
-    def process_events(self, *args):
+    def process_events(self, _):
         def node_and_after(node):
             proc = node.proc
             if node == proc.first_anchor:

@@ -3,7 +3,7 @@ from racepro import session
 import scribe
 
 class InsertPidEvents(Mutator):
-    def process_events(self, events, options):
+    def process_events(self, events):
         current = None
         for e in events:
             if e.is_a(scribe.EventPid):

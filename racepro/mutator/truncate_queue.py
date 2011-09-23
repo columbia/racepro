@@ -3,11 +3,9 @@ from nodeloc_matcher import NodeLocMatcher
 
 class TruncateQueue(Mutator):
     def __init__(self, where):
-        if not isinstance(where, list):
-            where = [where]
-        self.matcher = NodeLocMatcher(dict((w, True) for w in where))
+        self.matcher = NodeLocMatcher(where)
 
-    def process_events(self, events, options):
+    def process_events(self, events):
         truncate_procs = set()
 
         def may_set_truncate(event, before):
