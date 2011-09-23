@@ -173,6 +173,47 @@ def test_truncate_queue():
 
     assert_equal(list(out), [e[1], e[4], e[6], e[7]])
 
+
+def test_truncate_queue_graph():
+    events = [
+               scribe.EventInit(),                            # 0
+               scribe.EventPid(pid=1),                        # 1
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=2),  # 2
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=2),  # 3
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0),  # 4
+               scribe.EventPid(pid=2),                        # 5
+               scribe.EventSyscallExtra(nr=NR_read,  ret=0),  # 6
+               scribe.EventFence(),                           # 7
+               scribe.EventSyscallEnd(),                      # 8
+               scribe.EventFence(),                           # 9
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0),  # 10
+             ]
+
+    # p1: p1f e2                     e3 e4 p1l
+    #          \                    /
+    # p2:      p2f e6 e7 e8 e9 e10 p2l
+
+    g = ExecutionGraph(events)
+    e = list(g.events)
+    p = g.processes
+
+    out = g | TruncateQueue([ NodeLoc(e[2], 'after') ])
+
+    should_be = [
+                  e[0],
+                  p[1].first_anchor,
+                  e[2],
+                  p[2].first_anchor,
+                  e[6],
+                  e[7],
+                  e[8],
+                  e[9],
+                  e[10],
+                  p[2].last_anchor,
+               ]
+
+    assert_equal(list(out), should_be)
+
 def test_truncate_queue_atom():
     events = [
                scribe.EventPid(pid=1),   # 0
