@@ -19,6 +19,12 @@ class Nop(Mutator):
         for event in events:
             yield event
 
+class RemoveEventPid(Mutator):
+    def process_events(self, events, options={}):
+        for event in events:
+            if not event.is_a(scribe.EventPid):
+                yield event
+
 def test_base_class():
     out = ToStr().process_events([1,2,3])
     assert_equal(list(out), ['1','2','3'])
@@ -141,3 +147,51 @@ def test_insert():
                               NodeLoc(99, 'before'): -1 })
 
     assert_equal(list(out), [1,2,3,5,10,20])
+
+def test_truncate_queue():
+    events = [
+               scribe.EventPid(pid=1),   # 0
+               scribe.EventFence(),      # 1
+               scribe.EventFence(),      # 2
+               scribe.EventPid(pid=2),   # 3
+               scribe.EventFence(),      # 4
+               scribe.EventPid(pid=3),   # 5
+               scribe.EventFence(),      # 6
+               scribe.EventFence(),      # 7
+               scribe.EventPid(pid=1),   # 8
+               scribe.EventFence(),      # 9
+               scribe.EventFence(),      # 10
+               scribe.EventPid(pid=2),   # 11
+               scribe.EventFence(),      # 12
+             ]
+    s = Session(events)
+    e = list(s.events)
+    out = e | TruncateQueue([ NodeLoc(e[1], 'after'),
+                              NodeLoc(e[2], 'after'),
+                              NodeLoc(e[12], 'before') ])
+    out |= RemoveEventPid()
+
+    should_be = [
+                  e[1],
+                  e[4],
+                  e[6],
+                  e[7],
+               ]
+
+    assert_equal(list(out), should_be)
+
+def test_truncate_queue_atom():
+    events = [
+               scribe.EventPid(pid=1),   # 0
+               scribe.EventFence(),      # 1
+               scribe.EventFence(),      # 2
+               scribe.EventPid(pid=2),   # 3
+               scribe.EventFence(),      # 4
+             ]
+
+    s = Session(events)
+    e = list(s.events)
+    out = e | TruncateQueue( NodeLoc(e[1], 'after') )
+    out |= RemoveEventPid()
+
+    assert_equal(list(out), [e[1],e[4]])
