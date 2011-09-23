@@ -131,5 +131,13 @@ def test_cat_graph():
 
     assert_equal(list(out), should_be)
 
-    out = g | Nop() # Alias for piping a graph
+    out = g | Nop() # Piping a graph directly should work too
     assert_equal(list(out), should_be)
+
+def test_insert():
+    out = [1,5,10] | Insert({ NodeLoc(1, 'after'): 2,
+                              NodeLoc(5, 'before'): 3,
+                              NodeLoc(10, 'after'): 20,
+                              NodeLoc(99, 'before'): -1 })
+
+    assert_equal(list(out), [1,2,3,5,10,20])
