@@ -303,3 +303,51 @@ def test_bookmark_npr():
     assert_equal(list(out), should_be)
 
 # XXX bookmark valid_bookmark() is not tested
+
+def test_relax():
+    events = [
+               scribe.EventPid(pid=1),          # 0
+               scribe.EventFence(),             # 1
+               scribe.EventFence(),             # 2
+               scribe.EventDataExtra(),         # 3
+               scribe.EventResourceLockExtra(), # 4
+               scribe.EventDataExtra(),         # 5
+               scribe.EventPid(pid=2),          # 6
+               scribe.EventFence(),             # 7
+               scribe.EventResourceLock(),      # 8
+               scribe.EventResourceLockExtra(), # 9
+               scribe.EventResourceUnlock(),    # 10
+               scribe.EventResourceLockIntr(),  # 11
+               scribe.EventData(),              # 12
+               scribe.EventFence(),             # 13
+             ]
+
+    s = Session(events)
+    e = list(s.events)
+
+    out = e | Relax({NodeLoc(e[4], 'before'): scribe.SCRIBE_PS_ENABLE_DATA,
+                     NodeLoc(e[7], 'after'): scribe.SCRIBE_PS_ENABLE_DATA |
+                                             scribe.SCRIBE_PS_ENABLE_RESOURCE})
+    out |= InsertPidEvents() | ToRaw()
+
+    should_be = [
+               scribe.EventPid(pid=1),
+               scribe.EventFence(),
+               scribe.EventFence(),
+               scribe.EventDataExtra(),
+               scribe.EventInjectAction(
+                   action = scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                   arg1 = 0,
+                   arg2 = scribe.SCRIBE_PS_ENABLE_DATA),
+               scribe.EventResourceLockExtra(),
+               scribe.EventPid(pid=2),
+               scribe.EventFence(),
+               scribe.EventInjectAction(
+                   action = scribe.SCRIBE_INJECT_ACTION_PSFLAGS,
+                   arg1 = 0,
+                   arg2 = scribe.SCRIBE_PS_ENABLE_DATA |
+                          scribe.SCRIBE_PS_ENABLE_RESOURCE),
+               scribe.EventFence(),
+                ]
+
+    assert_equal(list(out), should_be)
