@@ -1,6 +1,7 @@
 from mutator import Mutator
 from racepro import session
 import scribe
+import operator
 
 class InsertEoqEvents(Mutator):
     def process_events(self, events, options):
@@ -16,7 +17,5 @@ class InsertEoqEvents(Mutator):
                  if not has_eoq)
 
         # Sorting make the test pass, it's actually not necessary
-        for proc in sorted(procs):
-            e = session.Event(scribe.EventQueueEof())
-            e.proc = proc
-            yield e
+        for proc in sorted(procs, key=operator.attrgetter('pid')):
+            yield session.Event(scribe.EventQueueEof(), proc)
