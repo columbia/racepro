@@ -5,16 +5,19 @@ from racepro.unistd import *
 from racepro.execgraph import *
 
 class ToStr(Mutator):
-    def on_event(self, event):
-        return str(event)
+    def process_events(self, events, options={}):
+        for event in events:
+            yield str(event)
 
 class ToRaw(Mutator):
-    def on_event(self, event):
-        return event._scribe_event
+    def process_events(self, events, options={}):
+        for event in events:
+            yield event._scribe_event
 
 class Nop(Mutator):
-    def on_event(self, event):
-        return event
+    def process_events(self, events, options={}):
+        for event in events:
+            yield event
 
 def test_base_class():
     out = ToStr().process_events([1,2,3])
@@ -130,18 +133,3 @@ def test_cat_graph():
 
     out = g | Nop() # Alias for piping a graph
     assert_equal(list(out), should_be)
-
-def test_nodeloc_mux():
-    out = [1, 2, 3] | NodeLocDemux()
-    should_be = [
-                  NodeLoc(1, 'before'),
-                  NodeLoc(1, 'after'),
-                  NodeLoc(2, 'before'),
-                  NodeLoc(2, 'after'),
-                  NodeLoc(3, 'before'),
-                  NodeLoc(3, 'after')
-                ]
-    assert_equal(list(out), should_be)
-
-    out_remuxed = out | NodeLocMux()
-    assert_equal(list(out_remuxed), [1, 2, 3])

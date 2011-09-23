@@ -4,7 +4,8 @@ class Replace(Mutator):
     def __init__(self, replacements):
         self.replacements = replacements
 
-    def on_event(self, event):
-        if self.replacements.has_key(event):
-            return self.replacements[event]
-        return event
+    def process_events(self, events, options={}):
+        for event in events:
+            if self.replacements.has_key(event):
+                event = self.replacements[event]
+            yield event

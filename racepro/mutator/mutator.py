@@ -2,10 +2,6 @@ from racepro.execgraph import ExecutionGraph
 
 class Mutator:
     def process_events(self, events, options={}):
-      for e in events:
-          yield self.on_event(e)
-
-    def on_event(self, event):
         raise NotImplementedError()
 
     def __or__(self, mutator):
