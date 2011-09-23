@@ -9,11 +9,6 @@ class ToStr(Mutator):
         for event in events:
             yield str(event)
 
-class ToRaw(Mutator):
-    def process_events(self, events):
-        for event in events:
-            yield event._scribe_event
-
 class Nop(Mutator):
     def process_events(self, events):
         for event in events:
@@ -53,7 +48,7 @@ def test_insert_pid_events():
                scribe.EventPid(pid=3),
                scribe.EventFence(),
              ]
-    out = Session(events).events | InsertPidEvents() | ToRaw()
+    out = Session(events).events | InsertPidEvents() | ToRawEvents()
     should_be = [
                scribe.EventPid(pid=1),
                scribe.EventFence(),
@@ -77,7 +72,7 @@ def test_insert_eoq_events():
                scribe.EventFence(),
              ]
     out = Session(events).events | InsertEoqEvents() | \
-                                   InsertPidEvents() | ToRaw()
+                                   InsertPidEvents() | ToRawEvents()
     should_be = [
                scribe.EventPid(pid=1),
                scribe.EventFence(),
@@ -251,7 +246,7 @@ def test_bookmark_ids():
     out = e | Bookmark([NodeLoc(e[1], 'after')]) \
             | Bookmark([NodeLoc(e[4], 'before')]) \
             | InsertPidEvents() \
-            | ToRaw()
+            | ToRawEvents()
 
     should_be = [
                scribe.EventPid(pid=1),
@@ -286,7 +281,7 @@ def test_bookmark_npr():
     out = e | Bookmark([NodeLoc(e[1], 'after'),
                         NodeLoc(e[4], 'before')]) \
             | InsertPidEvents() \
-            | ToRaw()
+            | ToRawEvents()
 
     should_be = [
                scribe.EventPid(pid=1),
@@ -328,7 +323,7 @@ def test_relax():
     out = e | Relax({NodeLoc(e[4], 'before'): scribe.SCRIBE_PS_ENABLE_DATA,
                      NodeLoc(e[7], 'after'): scribe.SCRIBE_PS_ENABLE_DATA |
                                              scribe.SCRIBE_PS_ENABLE_RESOURCE})
-    out |= InsertPidEvents() | ToRaw()
+    out |= InsertPidEvents() | ToRawEvents()
 
     should_be = [
                scribe.EventPid(pid=1),
@@ -351,3 +346,25 @@ def test_relax():
                 ]
 
     assert_equal(list(out), should_be)
+
+def test_to_raw_events():
+    events = [
+               scribe.EventInit(),                            # 0
+               scribe.EventPid(pid=1),                        # 1
+               scribe.EventSyscallExtra(nr=NR_fork,  ret=2),  # 2
+               scribe.EventPid(pid=2),                        # 3
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0),  # 4
+               scribe.EventPid(pid=1),                        # 5
+               scribe.EventSyscallExtra(nr=NR_wait4, ret=2),  # 6
+               scribe.EventSyscallExtra(nr=NR_exit,  ret=0),  # 7
+             ]
+
+    # p1: p1f e2         e6 e7 p1l
+    #          \        /
+    # p2:      p2f e4 p2l
+
+    g = ExecutionGraph(events)
+
+    out = g | InsertPidEvents() | ToRawEvents()
+
+    assert_equal(list(out), events)
