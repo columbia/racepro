@@ -23,26 +23,18 @@ class Bookmark(Mutator):
         env['next_bookmark_id'] = self.bookmark_id + 1
 
     def process_events(self, events):
-        def get_bookmark(event, before):
-            if self.matcher.match(event, before):
+        for event in events:
+            match = self.matcher.match(event)
+            if match is not None:
                 bmark_event = scribe.EventBookmark()
-                if before:
+                if match == 'before':
                     bmark_event.type = scribe.SCRIBE_BOOKMARK_PRE_SYSCALL
                 else:
                     bmark_event.type = scribe.SCRIBE_BOOKMARK_POST_SYSCALL
                 bmark_event.id = self.bookmark_id
                 bmark_event.npr = self.num_procs
-                return Event(bmark_event, event.proc)
-
-        for event in events:
-            bmark_event = get_bookmark(event, before=True)
-            if bmark_event is not None:
-                yield bmark_event
+                yield Event(bmark_event, event.proc)
 
             if not (event.is_a(scribe.EventBookmark) and
                     self.bookmark_id == 0):
                 yield event
-
-            bmark_event = get_bookmark(event, before=False)
-            if bmark_event is not None:
-                yield bmark_event

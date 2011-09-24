@@ -3,6 +3,7 @@ from racepro.mutator import *
 from racepro.session import *
 from racepro.unistd import *
 from racepro.execgraph import *
+from racepro.mutator.nodeloc_matcher import *
 
 class ToStr(Mutator):
     def process_events(self, events):
@@ -135,13 +136,36 @@ def test_cat_graph():
     out = g | Nop() # Piping a graph directly should work too
     assert_equal(list(out), should_be)
 
-def test_insert():
-    out = [1,5,10] | Insert({ NodeLoc(1, 'after'): 2,
-                              NodeLoc(5, 'before'): 3,
-                              NodeLoc(10, 'after'): 20,
-                              NodeLoc(99, 'before'): -1 })
+def test_nodeloc_matcher():
+    events = [
+               scribe.EventPid(pid=1),     # 0
+               scribe.EventFence(),        # 1
+               scribe.EventSyscallExtra(), # 2
+               scribe.EventFence(),        # 3
+               scribe.EventSyscallEnd(),   # 4
+               scribe.EventSyscallExtra(), # 5
+               scribe.EventSyscallEnd(),   # 6
+               scribe.EventFence(),        # 7
+             ]
+    g = ExecutionGraph(events)
+    e = list(g.events)
+    p = g.processes
 
-    assert_equal(list(out), [1,2,3,5,10,20])
+    def match(nl1, e2):
+        return NodeLocMatcher(NodeLoc(nl1[0], nl1[1])).match(e2)
+
+    assert_equal(match((e[1], 'after'),  e[2]), 'after')
+    assert_equal(match((e[1], 'before'), e[1]), 'before')
+
+    assert_equal(match((e[2], 'before'), e[2]), 'before')
+    assert_equal(match((e[2], 'after'),  e[3]), None)
+    assert_equal(match((e[2], 'after'),  e[5]), 'after')
+
+
+    assert_equal(match((p[1].first_anchor, 'after'), e[1]), 'after')
+    assert_equal(match((e[7],              'after'), p[1].last_anchor), 'after')
+    assert_equal(match((p[1].last_anchor,  'after'), p[1].last_anchor), 'after')
+
 
 def test_truncate_queue():
     events = [
@@ -159,14 +183,15 @@ def test_truncate_queue():
                scribe.EventPid(pid=2),   # 11
                scribe.EventFence(),      # 12
              ]
-    s = Session(events)
-    e = list(s.events)
+    g = ExecutionGraph(events)
+    e = list(g.events)
     out = e | TruncateQueue([ NodeLoc(e[1], 'after'),
                               NodeLoc(e[2], 'after'),
-                              NodeLoc(e[12], 'before') ])
-    out |= RemoveEventPid()
+                              NodeLoc(e[12], 'before') ]) \
+            | RemoveEventPid() \
+            | ToRawEvents()
 
-    assert_equal(list(out), [e[1], e[4], e[6], e[7]])
+    assert_equal(list(out), list([e[1], e[4], e[6], e[7]] | ToRawEvents()))
 
 
 def test_truncate_queue_graph():
@@ -218,12 +243,13 @@ def test_truncate_queue_atom():
                scribe.EventFence(),      # 4
              ]
 
-    s = Session(events)
-    e = list(s.events)
-    out = e | TruncateQueue( NodeLoc(e[1], 'after') )
-    out |= RemoveEventPid()
+    g = ExecutionGraph(events)
+    e = list(g.events)
+    out = e | TruncateQueue( NodeLoc(e[1], 'after') ) \
+            | RemoveEventPid() \
+            | ToRawEvents()
 
-    assert_equal(list(out), [e[1], e[4]])
+    assert_equal(list(out), list([e[1], e[4]] | ToRawEvents()))
 
 def test_bookmark_ids():
     events = [
@@ -297,6 +323,48 @@ def test_bookmark_npr():
 
     assert_equal(list(out), should_be)
 
+def test_bookmark_same_location():
+    events = [
+               scribe.EventPid(pid=1),   # 0
+               scribe.EventFence(),      # 1
+               scribe.EventFence(),      # 2
+               scribe.EventPid(pid=2),   # 3
+               scribe.EventFence(),      # 4
+             ]
+
+    s = Session(events)
+    e = list(s.events)
+    p = s.processes
+
+    p[1].first_anchor = p[1].last_anchor = None
+    p[2].first_anchor = p[2].last_anchor = None
+
+    out = e | Bookmark([NodeLoc(e[1], 'after')]) \
+            | Bookmark([NodeLoc(e[1], 'after')]) \
+            | Bookmark([NodeLoc(e[2], 'before')]) \
+            | Bookmark([NodeLoc(e[2], 'before')]) \
+            | InsertPidEvents() \
+            | ToRawEvents()
+
+    should_be = [
+               scribe.EventPid(pid=1),
+               scribe.EventFence(),
+               scribe.EventBookmark(id=0, npr=1,
+                      type=scribe.SCRIBE_BOOKMARK_POST_SYSCALL),
+               scribe.EventBookmark(id=1, npr=1,
+                      type=scribe.SCRIBE_BOOKMARK_POST_SYSCALL),
+               scribe.EventBookmark(id=2, npr=1,
+                      type=scribe.SCRIBE_BOOKMARK_PRE_SYSCALL),
+               scribe.EventBookmark(id=3, npr=1,
+                      type=scribe.SCRIBE_BOOKMARK_PRE_SYSCALL),
+               scribe.EventFence(),
+               scribe.EventPid(pid=2),
+               scribe.EventFence(),
+                ]
+
+    assert_equal(list(out), should_be)
+
+
 # XXX bookmark valid_bookmark() is not tested
 
 def test_relax():
@@ -319,6 +387,10 @@ def test_relax():
 
     s = Session(events)
     e = list(s.events)
+    p = s.processes
+
+    p[1].first_anchor = p[1].last_anchor = None
+    p[2].first_anchor = p[2].last_anchor = None
 
     out = e | Relax({NodeLoc(e[4], 'before'): scribe.SCRIBE_PS_ENABLE_DATA,
                      NodeLoc(e[7], 'after'): scribe.SCRIBE_PS_ENABLE_DATA |
@@ -368,3 +440,27 @@ def test_to_raw_events():
     out = g | InsertPidEvents() | ToRawEvents()
 
     assert_equal(list(out), events)
+
+def test_bookmark_and_truncate():
+    events = [
+               scribe.EventPid(pid=1),   # 0
+               scribe.EventFence(),      # 1
+               scribe.EventFence(),      # 2
+             ]
+
+    g = ExecutionGraph(events)
+    e = list(g.events)
+    p = g.processes
+
+    out = e | Bookmark([NodeLoc(p[1].first_anchor, 'after')]) \
+            | TruncateQueue([NodeLoc(p[1].first_anchor, 'after')]) \
+            | InsertPidEvents() \
+            | ToRawEvents()
+
+    should_be = [
+               scribe.EventPid(pid=1),
+               scribe.EventBookmark(id=0, npr=1,
+                      type=scribe.SCRIBE_BOOKMARK_POST_SYSCALL),
+                ]
+
+    assert_equal(list(out), should_be)

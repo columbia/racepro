@@ -24,14 +24,11 @@ class TruncateQueue(Mutator):
                 stop_processing[0] = True
 
         for event in events:
-            if self.matcher.match(event, before=True):
+            if self.matcher.match(event) is not None:
                 truncate_queue(event.proc)
 
             if event.proc not in truncate_procs:
                 yield event
-
-            if self.matcher.match(event, before=False):
-                truncate_queue(event.proc)
 
             if self.last_anchors is not None and event in self.last_anchors:
                 truncate_queue(event.proc)

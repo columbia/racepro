@@ -15,9 +15,14 @@ relax_map = {
 }
 
 def should_skip_event(event, relaxed_flags):
+    try:
+        native_type = event.native_type
+    except:
+        return False
+
     for flag in relax_map.keys():
         if relaxed_flags & flag and \
-                event.native_type in relax_map[flag]:
+                native_type in relax_map[flag]:
             return True
 
     return False
@@ -29,35 +34,22 @@ class Relax(Mutator):
     def process_events(self, events):
         relaxed_procs = dict()
 
-        def get_inject(event, before):
-            flags = self.matcher.match(event, before)
-            if flags is None:
-                return None
-
-            proc = event.proc
-            old_flags = relaxed_procs.get(proc, 0)
-            if old_flags == flags:
-                return None
-
-            relaxed_procs[proc] = old_flags | flags
-
-            inject_event = scribe.EventInjectAction()
-            inject_event.action = scribe.SCRIBE_INJECT_ACTION_PSFLAGS
-            inject_event.arg1 = 0
-            inject_event.arg2 = flags
-            return Event(inject_event, proc)
-
         for event in events:
-            inject_event = get_inject(event, before=True)
-            if inject_event is not None:
-                yield inject_event
+            flags = self.matcher.match(event)
+            if flags is not None:
+                proc = event.proc
+                old_flags = relaxed_procs.get(proc, 0)
+                if old_flags != flags:
+                    relaxed_procs[proc] = old_flags | flags
+
+                    inject_event = scribe.EventInjectAction()
+                    inject_event.action = scribe.SCRIBE_INJECT_ACTION_PSFLAGS
+                    inject_event.arg1 = 0
+                    inject_event.arg2 = flags
+                    yield Event(inject_event, proc)
 
             relaxed_flags = relaxed_procs.get(event.proc, 0)
             skip = relaxed_flags != 0 and \
-                  should_skip_event(event, relaxed_flags)
+                       should_skip_event(event, relaxed_flags)
             if not skip:
                 yield event
-
-            bmark_event = get_inject(event, before=False)
-            if bmark_event is not None:
-                yield bmark_event

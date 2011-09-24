@@ -6,7 +6,6 @@ from adjust_resources import AdjustResources
 from insert_pid_events import InsertPidEvents
 from insert_eoq_events import InsertEoqEvents
 from cat_graph import CatGraph
-from insert import Insert
 from truncate_queue import TruncateQueue
 from bookmark import Bookmark
 from relax import Relax
