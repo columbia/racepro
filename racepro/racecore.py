@@ -451,7 +451,7 @@ class RaceExitWait(Race):
                            scribe.SCRIBE_PS_ENABLE_RET_CHECK)
 
         injects = dict()
-        injects[exit1.proc] = dict({NodeLoc(exit1.proc, 'before') : [action1]})
+        injects[exit1.proc] = dict({NodeLoc(exit1, 'before') : [action1]})
         injects[wait.proc] = dict({NodeLoc(wait, 'before') : [action2]})
 
         # cutoff
