@@ -37,5 +37,5 @@ class AdjustResources(Mutator):
                 if e.serial != serials[e.id][e.serial]:
                     ee = e.copy()
                     ee.serial = serials[e.id][e.serial]
-                    e = session.Event(ee)
+                    e = session.Event(ee, e.proc)
             yield e
